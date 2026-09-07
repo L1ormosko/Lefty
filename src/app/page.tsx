@@ -1,0 +1,38 @@
+import { Suspense } from "react";
+import type { Metadata } from "next";
+import { Discover } from "@/components/map/Discover";
+import { citiesWithInventory, queryMapAssets } from "@/server/assets";
+import { mapQuerySchema } from "@/lib/validation";
+import { t } from "@/lib/labels";
+
+export const metadata: Metadata = {
+  title: "VELTO — מפת שטחי פרסום חוץ בישראל",
+  description: t("app.tagline"),
+};
+
+export const dynamic = "force-dynamic";
+
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const raw = await searchParams;
+  const flat = Object.fromEntries(
+    Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])
+  );
+  const parsed = mapQuerySchema.safeParse(flat);
+  const query = parsed.success ? parsed.data : mapQuerySchema.parse({});
+
+  // First paint is server-rendered: the map has inventory before any client fetch.
+  const [assets, cities] = await Promise.all([queryMapAssets(query), citiesWithInventory()]);
+
+  return (
+    <main className="flex-1 flex flex-col min-h-0">
+      <h1 className="sr-only">{t("map.title")}</h1>
+      <Suspense fallback={<div className="p-8 text-ink-500">{t("common.loading")}</div>}>
+        <Discover initialAssets={assets} cities={cities} />
+      </Suspense>
+    </main>
+  );
+}

@@ -56,6 +56,7 @@ const he: Dict = {
   "map.backToBeerSheva": "חזרה לבאר שבע",
   "map.inventoryNote": "מוצגים רק שטחים שקיימים במאגר VELTO.",
   "map.list": "רשימה",
+  "map.tilesUnavailable": "רקע המפה אינו נטען כרגע. הסימונים והחיפוש פעילים.",
 
   "filter.city": "עיר",
   "filter.allCities": "כל הערים",
