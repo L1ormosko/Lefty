@@ -3,6 +3,7 @@ import { citiesWithInventory } from "@/server/assets";
 import { t } from "@/lib/labels";
 import { Card, LinkButton, Num } from "@/components/ui";
 import { AvailabilityBadge, VerificationBadge } from "@/components/badges";
+import { SiteFooter } from "@/components/SiteFooter";
 
 export const metadata: Metadata = {
   title: "VELTO — שטחי פרסום חוץ בישראל",
@@ -42,7 +43,8 @@ export default async function LandingPage() {
   const cities = await citiesWithInventory();
 
   return (
-    <main className="flex-1">
+    <>
+      <main className="flex-1">
       {/* Hero */}
       <section className="border-b border-ink-200 bg-white">
         <div className="mx-auto max-w-4xl px-4 py-16 sm:py-24 text-center">
@@ -123,6 +125,8 @@ export default async function LandingPage() {
           </a>
         </p>
       </section>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

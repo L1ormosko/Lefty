@@ -122,6 +122,50 @@ export async function login(email: string, password: string, ipKey = "unknown"):
   };
 }
 
+const RESET_TOKEN_TTL_MINUTES = 30;
+
+/**
+ * Start a password reset. Always looks the same to the caller whether or not
+ * the email exists (same enumeration-safety principle as login) - the
+ * decision of whether an email actually goes out happens one layer up.
+ * Returns the raw token when a user was found, so the caller can email it;
+ * returns null when there was nothing to do (unknown email, or rate-limited).
+ */
+export async function createPasswordResetToken(email: string, ipKey = "unknown"): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  const limited = rateLimit(`reset:ip:${ipKey}`, 10, 60 * 60_000);
+  const limitedAcct = rateLimit(`reset:acct:${normalized}`, 5, 60 * 60_000);
+  if (!limited.ok || !limitedAcct.ok) return null;
+
+  const user = await prisma.user.findUnique({ where: { email: normalized }, select: { id: true, isActive: true } });
+  if (!user || !user.isActive) return null;
+
+  const token = randomBytes(32).toString("base64url");
+  await prisma.passwordResetToken.create({
+    data: {
+      tokenHash: hashToken(token),
+      userId: user.id,
+      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60_000),
+    },
+  });
+  return token;
+}
+
+/** Complete a password reset. Consumes the token and kills every existing session. */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const record = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!record || record.usedAt || record.expiresAt < new Date()) {
+    throw new ValidationError("auth.resetTokenInvalid");
+  }
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: record.userId }, data: { passwordHash: await hashPassword(newPassword) } }),
+    prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    // A password reset is a credential change: every existing session dies,
+    // the same principle as rotating on password change (see DECISIONS.md).
+    prisma.session.deleteMany({ where: { userId: record.userId } }),
+  ]);
+}
+
 /** Constant-time string compare, used where a secret is compared outside bcrypt. */
 export function safeEqual(a: string, b: string): boolean {
   const ba = Buffer.from(a);

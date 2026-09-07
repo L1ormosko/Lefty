@@ -13,7 +13,16 @@ export default async function MyRequests() {
   const inquiries = await prisma.inquiry.findMany({
     where: { advertiserId: user.id },
     orderBy: { createdAt: "desc" },
-    include: { asset: { select: { id: true, title: true, city: true } } },
+    include: {
+      asset: {
+        select: {
+          id: true,
+          title: true,
+          city: true,
+          company: { select: { name: true, contactEmail: true, contactPhone: true } },
+        },
+      },
+    },
   });
   const pending = inquiries.filter((i) => i.status === "PENDING").length;
 

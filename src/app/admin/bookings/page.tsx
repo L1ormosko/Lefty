@@ -15,7 +15,7 @@ export default async function AdminBookings() {
     take: 100,
     include: {
       asset: { select: { id: true, title: true } },
-      advertiser: { select: { name: true, email: true } },
+      advertiser: { select: { name: true, email: true, phone: true } },
     },
   });
 

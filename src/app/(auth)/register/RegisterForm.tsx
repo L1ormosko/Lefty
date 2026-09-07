@@ -47,6 +47,16 @@ export function RegisterForm({ defaultRole }: { defaultRole: "ADVERTISER" | "MED
         <Field label={t("auth.companyName")} htmlFor="companyName" hint={t("common.optional")} error={state?.fields?.companyName}>
           <input id="companyName" name="companyName" autoComplete="organization" className={inputClass} />
         </Field>
+        {role === "MEDIA_OWNER" && (
+          <Field
+            label={t("auth.businessId")}
+            htmlFor="businessId"
+            hint={t("common.optional")}
+            error={state?.fields?.businessId}
+          >
+            <input id="businessId" name="businessId" dir="ltr" className={inputClass} />
+          </Field>
+        )}
         <Field label={t("auth.email")} htmlFor="email" required error={state?.fields?.email}>
           <input id="email" name="email" type="email" dir="ltr" required autoComplete="email" className={inputClass} />
         </Field>
@@ -71,6 +81,25 @@ export function RegisterForm({ defaultRole }: { defaultRole: "ADVERTISER" | "MED
             className={inputClass}
           />
         </Field>
+
+        <label className="flex items-start gap-2 text-sm text-ink-700">
+          <input type="checkbox" name="acceptedTerms" required className="mt-0.5 size-4 rounded border-ink-300" />
+          <span>
+            {t("legal.acceptPrefix")}
+            <Link href="/takanon" className="text-brand-600 hover:underline">
+              {t("legal.terms")}
+            </Link>{" "}
+            {t("legal.acceptAnd")}
+            <Link href="/privacy" className="text-brand-600 hover:underline">
+              {t("legal.privacy")}
+            </Link>
+          </span>
+        </label>
+        {state?.fields?.acceptedTerms && (
+          <p role="alert" className="text-xs text-bad-700">
+            {t(state.fields.acceptedTerms)}
+          </p>
+        )}
 
         <Button type="submit" size="lg" className="w-full" disabled={pending}>
           {pending ? t("common.loading") : t("auth.register")}

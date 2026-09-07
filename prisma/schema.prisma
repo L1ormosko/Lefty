@@ -89,28 +89,48 @@ enum NotificationType {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  phone        String?
-  role         Role     @default(ADVERTISER)
-  isActive     Boolean  @default(true)
-  companyId    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  name            String
+  phone           String?
+  role            Role      @default(ADVERTISER)
+  isActive        Boolean   @default(true)
+  companyId       String?
+  /// When the user accepted the Terms of Service / Privacy Policy at registration.
+  /// Required going forward; null only for accounts created before this field existed.
+  termsAcceptedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  company        Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  sessions       Session[]
-  assets         MediaAsset[]   @relation("AssetOwner")
-  verifiedAssets MediaAsset[]   @relation("AssetVerifier")
-  inquiries      Inquiry[]
-  bookings       Booking[]
-  savedAssets    SavedAsset[]
-  notifications  Notification[]
+  company             Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  sessions            Session[]
+  assets              MediaAsset[]         @relation("AssetOwner")
+  verifiedAssets      MediaAsset[]         @relation("AssetVerifier")
+  inquiries           Inquiry[]
+  bookings            Booking[]
+  savedAssets         SavedAsset[]
+  notifications       Notification[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([role])
   @@index([companyId])
+}
+
+/// One-time, short-lived token for the "forgot password" flow. Only the hash
+/// is stored, the same way session tokens work - see server/auth.ts.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Session {
@@ -134,6 +154,9 @@ model Company {
   contactEmail String
   contactPhone String?
   website      String?
+  /// Israeli business registration number (ח.פ / עוסק מורשה). Optional -
+  /// nothing in the product requires it yet, but manual invoicing does.
+  businessId   String?
   isDemo       Boolean     @default(false)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt

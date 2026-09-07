@@ -25,7 +25,12 @@ export function InquiryRow({
     contactName?: string;
     contactEmail?: string;
     contactPhone?: string | null;
-    asset: { id: string; title: string; city?: string };
+    asset: {
+      id: string;
+      title: string;
+      city?: string;
+      company?: { name: string; contactEmail: string; contactPhone: string | null } | null;
+    };
   };
   perspective: "advertiser" | "owner";
   children?: React.ReactNode;
@@ -101,6 +106,25 @@ export function InquiryRow({
         </div>
       )}
 
+      {perspective === "advertiser" && inquiry.status === "RESPONDED" && inquiry.asset.company && (
+        <div className="mt-3 border-s-2 border-ok-500 ps-3">
+          <p className="text-xs text-ink-500">{t("booking.contactOwner")}</p>
+          <p className="text-sm text-ink-800">{inquiry.asset.company.name}</p>
+          <a
+            href={`mailto:${inquiry.asset.company.contactEmail}`}
+            dir="ltr"
+            className="block text-sm text-brand-600 hover:underline w-fit"
+          >
+            {inquiry.asset.company.contactEmail}
+          </a>
+          {inquiry.asset.company.contactPhone && (
+            <a href={`tel:${inquiry.asset.company.contactPhone}`} className="block text-sm text-brand-600 hover:underline w-fit">
+              <Num>{inquiry.asset.company.contactPhone}</Num>
+            </a>
+          )}
+        </div>
+      )}
+
       {children && <div className="mt-3 pt-3 border-t border-ink-100">{children}</div>}
     </Card>
   );
@@ -117,11 +141,16 @@ export function BookingRow({
     priceEstimate: number | null;
     status: string;
     ownerNote: string | null;
-    asset: { id: string; title: string };
-    advertiser?: { name: string; email: string };
+    asset: {
+      id: string;
+      title: string;
+      company?: { name: string; contactEmail: string; contactPhone: string | null } | null;
+    };
+    advertiser?: { name: string; email: string; phone?: string | null };
   };
   children?: React.ReactNode;
 }) {
+  const showOwnerContact = booking.status === "APPROVED" && booking.asset.company;
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-start gap-2">
@@ -150,11 +179,47 @@ export function BookingRow({
         {booking.advertiser && (
           <div>
             <dt className="text-ink-500 text-xs">{t("role.ADVERTISER")}</dt>
-            <dd className="text-ink-900">{booking.advertiser.name}</dd>
+            <dd className="text-ink-900">
+              {booking.advertiser.name}
+              {booking.advertiser.phone && (
+                <>
+                  {" · "}
+                  <Num>{booking.advertiser.phone}</Num>
+                </>
+              )}
+            </dd>
           </div>
         )}
       </dl>
       {booking.ownerNote && <p className="mt-2 text-sm text-ink-700">{booking.ownerNote}</p>}
+
+      {booking.advertiser?.email && (
+        <p className="mt-1 text-sm">
+          <a href={`mailto:${booking.advertiser.email}`} dir="ltr" className="text-brand-600 hover:underline">
+            {booking.advertiser.email}
+          </a>
+        </p>
+      )}
+
+      {showOwnerContact && booking.asset.company && (
+        <div className="mt-3 border-s-2 border-ok-500 ps-3">
+          <p className="text-xs text-ink-500">{t("booking.contactOwner")}</p>
+          <p className="text-sm text-ink-800">{booking.asset.company.name}</p>
+          <a
+            href={`mailto:${booking.asset.company.contactEmail}`}
+            dir="ltr"
+            className="block text-sm text-brand-600 hover:underline w-fit"
+          >
+            {booking.asset.company.contactEmail}
+          </a>
+          {booking.asset.company.contactPhone && (
+            <a href={`tel:${booking.asset.company.contactPhone}`} className="block text-sm text-brand-600 hover:underline w-fit">
+              <Num>{booking.asset.company.contactPhone}</Num>
+            </a>
+          )}
+        </div>
+      )}
+
       {children && <div className="mt-3 pt-3 border-t border-ink-100">{children}</div>}
     </Card>
   );

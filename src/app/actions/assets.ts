@@ -200,10 +200,13 @@ export async function publishAssetAction(_prev: AssetActionState, formData: Form
   try {
     const user = await requireRole("MEDIA_OWNER");
     const asset = await loadOwnedAsset(String(formData.get("assetId")), user);
+    const imageCount = await prisma.mediaAssetImage.count({ where: { assetId: asset.id } });
 
     const missing: string[] = [];
     if (!asset.title) missing.push(t("wizard.basic"));
     if (!asset.address || !asset.city) missing.push(t("wizard.location"));
+    // A billboard nobody can see a photo of is not a credible public listing.
+    if (imageCount === 0) missing.push(t("wizard.images"));
     if (missing.length) {
       throw new ValidationError(`חסרים פרטים לפני פרסום: ${missing.join(", ")}`);
     }

@@ -20,11 +20,22 @@ export const registerSchema = z.object({
   phone: phoneSchema.optional().or(z.literal("")),
   role: z.enum(["ADVERTISER", "MEDIA_OWNER"]),
   companyName: z.string().trim().min(2).max(160).optional().or(z.literal("")),
+  businessId: z.string().trim().max(20).optional().or(z.literal("")),
+  acceptedTerms: z.literal("on", { message: "legal.acceptRequired" }),
 });
 
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, "common.required"),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: passwordSchema,
 });
 
 export const assetBasicSchema = z.object({

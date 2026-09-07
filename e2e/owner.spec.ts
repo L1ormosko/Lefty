@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import sharp from "sharp";
 import { DEV_PASSWORD, login } from "./helpers";
 
 /** Media owner journey: login → create asset → publish → see it on the map. */
@@ -39,8 +40,18 @@ test("a media owner can publish an asset through the wizard", async ({ page }) =
   await page.getByRole("button", { name: "הוספת חלון" }).click();
   await page.getByRole("button", { name: "המשך" }).click();
 
-  // Step 6: images (optional) → review → publish.
+  // Step 6: images. Publishing now requires at least one photo.
+  const imageBuffer = await sharp({
+    create: { width: 300, height: 200, channels: 3, background: { r: 120, g: 140, b: 200 } },
+  })
+    .jpeg()
+    .toBuffer();
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({ name: "billboard.jpg", mimeType: "image/jpeg", buffer: imageBuffer });
+  await expect(page.getByRole("button", { name: "מחיקה" })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "המשך" }).click();
+
   await page.getByRole("button", { name: "פרסום השטח" }).click();
   await expect(page.getByText("השטח פורסם וממתין לאימות VELTO.")).toBeVisible();
 

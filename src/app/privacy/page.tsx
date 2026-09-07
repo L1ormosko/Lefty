@@ -1,0 +1,131 @@
+import type { Metadata } from "next";
+import { LegalLayout, LegalSection } from "@/components/legal/LegalLayout";
+import { t } from "@/lib/labels";
+
+export const metadata: Metadata = { title: "מדיניות פרטיות" };
+
+const LAST_UPDATED = "07/09/2026";
+
+const DATA_ROWS: [string, string, string][] = [
+  ["שם, דוא״ל, סיסמה (מוצפנת), טלפון, תפקיד", "הרשמה לאתר", "יצירת חשבון, התחברות, זיהוי בפניות"],
+  ["שם חברה, סוג, פרטי קשר, אתר", "פרופיל חברה (אופציונלי)", "הצגת פרטי החברה בעמודי הנכסים שלה"],
+  ["תמונות ופרטי נכס (מיקום, מידות, מחיר)", "פרסום נכס", "הצגת הנכס במפה ובחיפוש"],
+  [
+    "שם, דוא״ל, טלפון, קמפיין, תאריכים, תקציב, הודעה",
+    "פנייה או בקשת הזמנה",
+    "העברת הפנייה לבעל הנכס ליצירת קשר",
+  ],
+  ["נכסים שמורים, התראות", "שימוש שוטף באתר", "רשימת מועדפים, עדכוני סטטוס"],
+];
+
+export default function PrivacyPage() {
+  return (
+    <LegalLayout title="מדיניות פרטיות" lastUpdated={LAST_UPDATED}>
+      <p>
+        מדיניות זו מסבירה אילו נתונים אישיים אוספת VELTO, מדוע, כיצד הם מאוחסנים ומאובטחים,
+        ומהן זכויותיכם.
+      </p>
+
+      <LegalSection heading="אילו נתונים נאספים ולמה">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-ink-300 text-start">
+                <th className="py-2 pe-3 font-medium text-ink-700">סוג מידע</th>
+                <th className="py-2 pe-3 font-medium text-ink-700">מקור</th>
+                <th className="py-2 font-medium text-ink-700">מטרה</th>
+              </tr>
+            </thead>
+            <tbody>
+              {DATA_ROWS.map((row) => (
+                <tr key={row[0]} className="border-b border-ink-100 align-top">
+                  <td className="py-2 pe-3">{row[0]}</td>
+                  <td className="py-2 pe-3 text-ink-600">{row[1]}</td>
+                  <td className="py-2 text-ink-600">{row[2]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-sm text-ink-600">
+          VELTO אינה אוספת פרטי כרטיס אשראי או אמצעי תשלום - המערכת אינה מעבדת תשלומים כלל
+          בשלב הנוכחי.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="מי רואה מה">
+        <ul className="list-disc pr-5 space-y-1">
+          <li>
+            פרטי חברה (שם, אתר, טלפון או דוא&quot;ל של החברה) המשויכים לנכס עשויים להופיע
+            בפומבי בעמוד הנכס.
+          </li>
+          <li>
+            פרטי משתמש אישיים (שם פרטי, טלפון וכתובת דוא&quot;ל אישית) אינם מוצגים לציבור.
+            הם נמסרים לבעל נכס ספציפי רק כאשר משתמש שולח פנייה או בקשת הזמנה לגבי הנכס שלו,
+            לצורך יצירת קשר ישיר.
+          </li>
+          <li>
+            צוות מנהלי המערכת של VELTO יכול לצפות בנתוני הפלטפורמה לצורך מודרציה, אימות
+            נכסים וטיפול בתקלות ותלונות.
+          </li>
+        </ul>
+      </LegalSection>
+
+      <LegalSection heading="אבטחת מידע">
+        <ul className="list-disc pr-5 space-y-1">
+          <li>
+            סיסמאות אינן נשמרות כטקסט גלוי - הן מוצפנות (hash) בשיטת bcrypt לפני האחסון, כך
+            שגם לצוות VELTO אין גישה לסיסמה עצמה.
+          </li>
+          <li>
+            ההתחברות מתבצעת באמצעות טוקן אקראי; במסד הנתונים נשמר רק גיבוב (hash) של הטוקן,
+            לא הטוקן עצמו, בעוגייה מסוג HttpOnly שאינה נגישה לקוד באתר.
+          </li>
+          <li>יציאה מהחשבון מוחקת את רשומת ההתחברות ממסד הנתונים.</li>
+          <li>תמונות שמועלות עוברות עיבוד מחדש בשרת לפני האחסון.</li>
+          <li>כל הנתונים מאוחסנים במסד נתונים PostgreSQL מנוהל.</li>
+        </ul>
+      </LegalSection>
+
+      <LegalSection heading="צדדים שלישיים">
+        <p>
+          המפה האינטראקטיבית באתר נטענת מספק אריחי מפה חיצוני; כמקובל בכל שימוש במפות
+          דיגיטליות, בקשות אלו חושפות את כתובת ה-IP של המכשיר לספק המפה. VELTO אינה משתפת
+          עם ספק זה נתונים אישיים נוספים. נכון להיום אין באתר כלי אנליטיקס או מעקב פרסומי.
+          ככל שייווסף ספק דוא&quot;ל לשליחת התראות, מדיניות זו תעודכן בהתאם.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="שמירת מידע ומחיקה">
+        <p>
+          המידע נשמר כל עוד החשבון פעיל. משתמש רשאי לבקש בכל עת השבתת חשבונו ומחיקה או
+          אנונימיזציה של נתוניו האישיים, בכפוף לצורך לשמור רשומות מסוימות למטרות תיעוד
+          סביר. מנהל מערכת רשאי אף הוא להשבית חשבון, פעולה המבטלת מיידית את כל ההתחברויות
+          הפעילות שלו.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="זכויותיכם על פי חוק הגנת הפרטיות, התשמ״א-1981">
+        <p>בהתאם לחוק הישראלי, כל משתמש זכאי:</p>
+        <ul className="list-disc pr-5 space-y-1">
+          <li>לעיין במידע האישי שנשמר עליו במערכת.</li>
+          <li>לבקש תיקון של מידע שגוי או לא מעודכן.</li>
+          <li>לבקש מחיקה של המידע האישי שלו, בכפוף למגבלות חוקיות ותפעוליות סבירות.</li>
+        </ul>
+      </LegalSection>
+
+      <LegalSection heading="עוגיות (Cookies)">
+        <p>
+          האתר משתמש בעוגייה טכנית אחת בלבד - עוגיית התחברות הנחוצה לזיהוי המשתמש בין דפים.
+          אין באתר עוגיות שיווק, פרסום ממוקד או מעקב אחר גלישה מחוץ לאתר.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading={t("legal.contact")}>
+        <p dir="ltr" className="text-end">
+          {t("legal.supportEmail")}
+        </p>
+      </LegalSection>
+    </LegalLayout>
+  );
+}

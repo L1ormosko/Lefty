@@ -3,13 +3,16 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { prisma } from "@/server/db";
-import { createSession, destroySession, hashPassword, login } from "@/server/auth";
-import { loginSchema, registerSchema, fieldErrors } from "@/lib/validation";
+import { createPasswordResetToken, createSession, destroySession, hashPassword, login, resetPassword } from "@/server/auth";
+import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema, fieldErrors } from "@/lib/validation";
 import { toUserMessage } from "@/server/errors";
 import { t } from "@/lib/labels";
 import { rateLimit } from "@/server/rate-limit";
+import { sendEmail } from "@/server/email";
 
-export type FormState = { error?: string; fields?: Record<string, string> } | undefined;
+export type FormState =
+  | { error?: string; fields?: Record<string, string>; success?: string }
+  | undefined;
 
 async function clientKey(): Promise<string> {
   const h = await headers();
@@ -39,7 +42,7 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
 export async function registerAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = registerSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fields: fieldErrors(parsed.error) };
-  const { name, email, password, phone, role, companyName } = parsed.data;
+  const { name, email, password, phone, role, companyName, businessId } = parsed.data;
 
   const limited = rateLimit(`register:${await clientKey()}`, 10, 60 * 60_000);
   if (!limited.ok) return { error: t("auth.tooManyAttempts") };
@@ -56,6 +59,7 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
             type: role === "MEDIA_OWNER" ? "MEDIA_OWNER" : "ADVERTISER",
             contactEmail: email,
             contactPhone: phone || null,
+            businessId: businessId || null,
           },
         })
       : null;
@@ -68,6 +72,8 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
         phone: phone || null,
         role,
         companyId: company?.id ?? null,
+        // The registration form requires the checkbox, so this is always "now".
+        termsAcceptedAt: new Date(),
       },
     });
     await createSession(user.id);
@@ -81,4 +87,33 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
 export async function logoutAction(): Promise<void> {
   await destroySession();
   redirect("/");
+}
+
+export async function forgotPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const parsed = forgotPasswordSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fields: fieldErrors(parsed.error) };
+
+  const token = await createPasswordResetToken(parsed.data.email, await clientKey());
+  if (token) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+    await sendEmail({
+      to: parsed.data.email,
+      subject: t("auth.resetPasswordTitle"),
+      text: `${appUrl}/reset-password?token=${token}`,
+    });
+  }
+  // Same response whether or not the email exists - no account enumeration.
+  return { success: t("auth.forgotPasswordSent") };
+}
+
+export async function resetPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const parsed = resetPasswordSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fields: fieldErrors(parsed.error) };
+
+  try {
+    await resetPassword(parsed.data.token, parsed.data.password);
+  } catch (err) {
+    return { error: t(toUserMessage(err)) };
+  }
+  return { success: t("auth.resetPasswordSuccess") };
 }

@@ -14,7 +14,15 @@ export default async function MyBookings() {
   const bookings = await prisma.booking.findMany({
     where: { advertiserId: user.id },
     orderBy: { createdAt: "desc" },
-    include: { asset: { select: { id: true, title: true } } },
+    include: {
+      asset: {
+        select: {
+          id: true,
+          title: true,
+          company: { select: { name: true, contactEmail: true, contactPhone: true } },
+        },
+      },
+    },
   });
 
   return (

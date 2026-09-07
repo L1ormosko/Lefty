@@ -31,6 +31,14 @@ Playwright. One application, one database.
   open-bookings pipeline estimate.
 - **Media owner overview** — same pipeline-estimate figure scoped to the
   owner's own assets, and a per-asset booking count alongside inquiries/images.
+- **Legal** — `/takanon` (platform rules), `/terms` (user agreement), `/privacy`
+  (privacy policy), all real content, cross-linked, with a site footer
+  (legal links + support contact) on every page except the map shell.
+- **Account recovery** — full forgot/reset-password flow: a rate-limited,
+  enumeration-safe request step and a token-gated reset that invalidates
+  every existing session on success.
+- **Registration consent** — accepting the terms/privacy is a required
+  checkbox, timestamped on the user record (`termsAcceptedAt`).
 
 ## Guarantees worth knowing
 - Overlapping approved bookings are impossible: a partial GiST exclusion
@@ -38,10 +46,16 @@ Playwright. One application, one database.
 - Every mutation passes an ownership loader before any write.
 - Unknown data renders as "לא צוין"; nothing invents prices, audiences or
   verification. Seed rows carry `isDemo` and are labelled in the UI.
+- A public asset page and an approved booking both surface real contact
+  info between the two parties (company-level, never a personal phone/email
+  outside a direct inquiry) — the "who do I actually talk to" gap a launch
+  audit found is closed.
+- An asset cannot be published without at least one photo.
 
 ## Tests
-54 Vitest tests (unit + integration) and 18 Playwright journeys (added a
-landing-page smoke test) across desktop and mobile viewports. All green.
+59 Vitest tests (unit + integration) and 26 Playwright journeys (landing,
+legal/account flows, and the original three journeys) across desktop and
+mobile viewports. All green.
 
 ## Final UX pass
 A value-proposition headline sits above the map (the map still owns the screen),
@@ -55,10 +69,14 @@ advertiser has to be able to tell a space they have seen from one they have not.
   commercial provider via `NEXT_PUBLIC_MAP_STYLE_URL`. (In the build sandbox,
   tile hosts are blocked by network policy, so screenshots show markers over an
   empty basemap — the app handles that with a visible notice.)
-- Notifications are in-app only; `notify()` is the single hook for email.
+- Email delivery code exists (`server/email.ts`, Resend via `fetch`) and is
+  wired into every notification and password reset, but no-ops with a
+  console warning until `RESEND_API_KEY`/`EMAIL_FROM` are set - see TODO.md.
 - The rate limiter is in-process, which is correct for one instance only.
 - Uploads go to local disk; swapping to object storage touches one route.
 - English strings exist as a scaffold, not a translation.
+- The three legal documents are an honest first draft grounded in the actual
+  schema and flows - they are not a substitute for a lawyer's review.
 
 ## Costs
 See `COSTS.md`: a monthly infrastructure estimate, an order-of-magnitude

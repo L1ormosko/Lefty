@@ -20,6 +20,7 @@ export async function register(page: Page, role: "ADVERTISER" | "MEDIA_OWNER", e
   await page.locator("#name").fill("בודק אוטומטי");
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(DEV_PASSWORD);
+  await page.locator('input[name="acceptedTerms"]').check();
   await page.getByRole("button", { name: "יצירת חשבון" }).click();
   await page.waitForURL(/\/(dashboard|owner)/);
 }

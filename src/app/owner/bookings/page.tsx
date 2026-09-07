@@ -16,7 +16,7 @@ export default async function OwnerBookings() {
     orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     include: {
       asset: { select: { id: true, title: true } },
-      advertiser: { select: { name: true, email: true } },
+      advertiser: { select: { name: true, email: true, phone: true } },
     },
   });
   const pending = bookings.filter((b) => b.status === "REQUESTED").length;

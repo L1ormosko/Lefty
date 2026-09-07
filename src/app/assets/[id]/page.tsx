@@ -248,20 +248,39 @@ export default async function AssetPage({ params }: Params) {
             )}
           </Card>
 
-          {/* Owner - company-level contact only */}
+          {/* Owner - company-level contact only, never a personal phone/email */}
           <Card className="p-5">
             <h2 className="font-semibold text-ink-900 mb-2">{t("asset.owner")}</h2>
             <p className="text-sm text-ink-800">{asset.company?.name ?? t("common.notProvided")}</p>
-            {asset.company?.website && (
-              <a
-                href={asset.company.website}
-                rel="noopener noreferrer nofollow"
-                target="_blank"
-                className="text-sm text-brand-600 hover:underline"
-              >
-                {asset.company.website}
-              </a>
-            )}
+            <div className="mt-1 space-y-1">
+              {asset.company?.contactEmail && (
+                <a
+                  href={`mailto:${asset.company.contactEmail}`}
+                  dir="ltr"
+                  className="block text-sm text-brand-600 hover:underline w-fit"
+                >
+                  {asset.company.contactEmail}
+                </a>
+              )}
+              {asset.company?.contactPhone && (
+                <a
+                  href={`tel:${asset.company.contactPhone}`}
+                  className="block text-sm text-brand-600 hover:underline w-fit"
+                >
+                  <Num>{asset.company.contactPhone}</Num>
+                </a>
+              )}
+              {asset.company?.website && (
+                <a
+                  href={asset.company.website}
+                  rel="noopener noreferrer nofollow"
+                  target="_blank"
+                  className="block text-sm text-brand-600 hover:underline w-fit"
+                >
+                  {asset.company.website}
+                </a>
+              )}
+            </div>
           </Card>
         </div>
 

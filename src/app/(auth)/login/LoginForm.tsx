@@ -41,6 +41,11 @@ export function LoginForm({ next }: { next?: string }) {
           {pending ? t("common.loading") : t("auth.login")}
         </Button>
       </form>
+      <p className="mt-3 text-sm">
+        <Link href="/forgot-password" className="text-brand-600 hover:underline">
+          {t("nav.forgotPassword")}
+        </Link>
+      </p>
       <p className="mt-4 text-sm text-ink-600">
         {t("auth.noAccount")}{" "}
         <Link href="/register" className="text-brand-600 hover:underline">
