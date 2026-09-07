@@ -14,6 +14,8 @@ type Dict = Record<string, string>;
 const he: Dict = {
   "app.name": "VELTO",
   "app.tagline": "שטחי פרסום חוץ בישראל — חיפוש, השוואה ובקשת זמינות",
+  "home.headline": "מצאו שטחי פרסום חוץ בישראל, והזמינו ישירות מבעלי השטח",
+  "home.sub": "חיפוש על המפה, בדיקת זמינות בתאריכים שלכם, ובקשת מחיר — בלי סבב טלפונים.",
   "nav.explore": "מפה",
   "nav.dashboard": "אזור אישי",
   "nav.admin": "ניהול",
@@ -103,7 +105,8 @@ const he: Dict = {
   "asset.requestAvailability": "בדיקת זמינות ומחיר",
   "asset.requestQuote": "בקשת הצעת מחיר",
   "asset.requestBooking": "בקשת הזמנה",
-  "asset.noImages": "לא הועלו תמונות לשטח זה.",
+  "asset.noImages": "אין תמונה",
+  "asset.noImagesLong": "בעל השטח טרם העלה תמונות.",
   "asset.backToMap": "חזרה למפה",
 
   "verify.PENDING": "ממתין לאימות",
@@ -222,6 +225,7 @@ const he: Dict = {
   "wizard.review": "סקירה ופרסום",
   "wizard.publish": "פרסום השטח",
   "wizard.saveDraft": "שמירה כטיוטה",
+  "wizard.saveAndContinue": "שמירה והמשך",
   "wizard.draftSaved": "הטיוטה נשמרה.",
   "wizard.pickOnMap": "לחצו על המפה כדי לסמן את מיקום השטח.",
   "wizard.published": "השטח פורסם וממתין לאימות VELTO.",

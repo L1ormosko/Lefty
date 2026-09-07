@@ -151,3 +151,29 @@ export function StatTile({ label, value, href }: { label: string; value: number 
     <div className="bg-white rounded-lg border border-ink-200 p-4 shadow-card">{body}</div>
   );
 }
+
+/**
+ * Placeholder for an asset with no photograph. We never substitute a stock
+ * image: the advertiser must be able to tell the difference between a space
+ * they have seen and one they have not.
+ */
+export function ImagePlaceholder({ label, className }: { label: string; className?: string }) {
+  return (
+    <div
+      className={cx(
+        "flex flex-col items-center justify-center gap-1 bg-ink-100 text-ink-400 select-none",
+        className
+      )}
+      role="img"
+      aria-label={label}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-6" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="14" rx="2" />
+        <path d="m6 15 3.5-4 2.5 3 2-2.5L18 15" />
+        <circle cx="9" cy="9" r="1.2" />
+        <path d="M12 18v3M8 21h8" />
+      </svg>
+      <span className="text-[11px]">{label}</span>
+    </div>
+  );
+}

@@ -134,7 +134,7 @@ export function Discover({ initialAssets, cities }: Props) {
   return (
     // The map shell owns the viewport below the 56px header, so the map canvas
     // has a real height instead of collapsing in a flex chain.
-    <div className="flex flex-col lg:flex-row h-[calc(100dvh_-_3.5rem)] min-h-0">
+    <div className="flex flex-col lg:flex-row h-[calc(100dvh_-_6.5rem)] lg:h-[calc(100dvh_-_7rem)] min-h-0">
       {/* Desktop filter rail */}
       <aside className="hidden lg:flex w-[320px] shrink-0 border-e border-ink-200 bg-white flex-col">
         <div className="p-4 border-b border-ink-200">
@@ -212,7 +212,7 @@ export function Discover({ initialAssets, cities }: Props) {
             <div className="flex gap-2">
             <input
               aria-label={t("map.searchPlaceholder")}
-              className={cx(inputClass, "shadow-card bg-white/95 backdrop-blur")}
+              className={cx(inputClass, "min-w-0 flex-1 shadow-card bg-white/95 backdrop-blur")}
               placeholder={t("map.searchPlaceholder")}
               value={search}
               onChange={(e) => {
@@ -222,7 +222,7 @@ export function Discover({ initialAssets, cities }: Props) {
             />
             <Button
               variant="secondary"
-              className="shrink-0 shadow-card"
+              className="shrink-0 whitespace-nowrap shadow-card"
               onClick={() => setFiltersOpen(true)}
               aria-haspopup="dialog"
             >

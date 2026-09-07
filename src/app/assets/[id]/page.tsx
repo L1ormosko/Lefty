@@ -8,7 +8,7 @@ import { t } from "@/lib/labels";
 import { CURRENCY } from "@/lib/constants";
 import { formatRange, todayUtc } from "@/lib/dates";
 import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
-import { Card, Num } from "@/components/ui";
+import { Card, ImagePlaceholder, Num } from "@/components/ui";
 import { AssetMiniMap } from "@/components/map/AssetMiniMap";
 import { RequestPanel } from "@/components/request/RequestPanel";
 import { SaveAssetButton } from "@/components/SaveAssetButton";
@@ -78,14 +78,12 @@ export default async function AssetPage({ params }: Params) {
         <div className="space-y-6 min-w-0">
           {/* Hero */}
           <Card className="overflow-hidden">
-            <div className="aspect-[16/9] bg-ink-100 flex items-center justify-center">
-              {primary ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={primary.url} alt={asset.title} className="size-full object-cover" />
-              ) : (
-                <p className="text-sm text-ink-400">{t("asset.noImages")}</p>
-              )}
-            </div>
+            {primary ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={primary.url} alt={asset.title} className="aspect-[16/9] w-full object-cover" />
+            ) : (
+              <ImagePlaceholder label={t("asset.noImagesLong")} className="aspect-[16/9] w-full" />
+            )}
             <div className="p-5">
               <div className="flex flex-wrap items-start gap-3">
                 <h1 className="text-xl sm:text-2xl font-semibold text-ink-900 flex-1 min-w-0">{asset.title}</h1>

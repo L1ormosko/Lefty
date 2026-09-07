@@ -6,7 +6,7 @@ import { CURRENCY } from "@/lib/constants";
 import { t } from "@/lib/labels";
 import { formatDate } from "@/lib/dates";
 import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
-import { Num, cx } from "@/components/ui";
+import { ImagePlaceholder, Num, cx } from "@/components/ui";
 
 export function AssetCard({
   asset,
@@ -37,12 +37,12 @@ export function AssetCard({
         className="w-full text-start flex gap-3 p-3"
         aria-pressed={selected}
       >
-        <div className="size-20 shrink-0 rounded bg-ink-100 overflow-hidden flex items-center justify-center">
+        <div className="size-20 shrink-0 rounded overflow-hidden">
           {asset.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={asset.imageUrl} alt="" loading="lazy" className="size-full object-cover" />
           ) : (
-            <span className="text-[10px] text-ink-400 text-center px-1">{t("asset.noImages")}</span>
+            <ImagePlaceholder label={t("asset.noImages")} className="size-full" />
           )}
         </div>
         <div className="min-w-0 flex-1">

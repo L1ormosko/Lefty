@@ -168,7 +168,7 @@ function BasicStep({
       <Field label="תיאור" htmlFor="description" hint={t("common.optional")}>
         <textarea id="description" name="description" rows={4} defaultValue={asset?.description ?? ""} className={textareaClass} />
       </Field>
-      <StepFooter pending={pending} label={assetId ? t("common.next") : t("wizard.saveDraft")} />
+      <StepFooter pending={pending} label={assetId ? t("common.next") : t("wizard.saveAndContinue")} />
     </form>
   );
 }

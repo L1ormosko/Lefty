@@ -34,6 +34,13 @@ Playwright. One application, one database.
 54 Vitest tests (unit + integration) and 14 Playwright journeys across desktop
 and mobile viewports. All green.
 
+## Final UX pass
+A value-proposition headline sits above the map (the map still owns the screen),
+the mobile search row no longer squeezes the filter button, the wizard's first
+button reads as progress, and assets without a photograph show a neutral
+placeholder. We do not substitute stock photography for a missing image: an
+advertiser has to be able to tell a space they have seen from one they have not.
+
 ## Known limitations
 - The default map style uses keyless OpenStreetMap tiles; production needs a
   commercial provider via `NEXT_PUBLIC_MAP_STYLE_URL`. (In the build sandbox,
