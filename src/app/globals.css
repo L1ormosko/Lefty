@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Heebo", "Segoe UI", "Arial Hebrew", Arial, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-ink-50 text-ink-900 antialiased;
+}
+
+/* Numbers, prices, dates and coordinates stay LTR inside Hebrew text. */
+.num {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
+
+/* Visible focus for keyboard users on every interactive element. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid theme("colors.brand.600");
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.skip-link {
+  @apply absolute z-50 -translate-y-20 bg-white px-4 py-2 shadow-panel focus:translate-y-0;
+  inset-inline-start: 1rem;
+  inset-block-start: 0.5rem;
+  transition: transform 0.15s;
+}
+
+/* MapLibre chrome: keep it out of the way of the RTL UI. */
+.maplibregl-ctrl-attrib {
+  direction: ltr;
+  font-size: 10px;
+}
+.maplibregl-popup-content {
+  padding: 0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(25, 29, 38, 0.18);
+  overflow: hidden;
+}
+.maplibregl-popup-close-button {
+  inset-inline-end: 0;
+  font-size: 18px;
+  padding: 2px 8px;
+}

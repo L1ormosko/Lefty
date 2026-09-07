@@ -1,0 +1,308 @@
+// VELTO - outdoor advertising marketplace
+// Single Postgres database, single Next.js application.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADVERTISER
+  MEDIA_OWNER
+  ADMIN
+}
+
+enum CompanyType {
+  ADVERTISER
+  MEDIA_OWNER
+}
+
+enum AssetType {
+  BILLBOARD
+  DIGITAL_BILLBOARD
+  WALL
+  TOTEM
+  BUS_STOP
+  STREET_FURNITURE
+  BANNER
+  OTHER
+}
+
+enum Illumination {
+  NONE
+  FRONTLIT
+  BACKLIT
+  UNKNOWN
+}
+
+enum AssetStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum PermitStatus {
+  UNKNOWN
+  PERMITTED
+  NOT_PERMITTED
+}
+
+enum InquiryStatus {
+  PENDING
+  RESPONDED
+  CLOSED
+}
+
+enum InquiryIntent {
+  AVAILABILITY
+  QUOTE
+  BOOKING
+}
+
+enum BookingStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum NotificationType {
+  INQUIRY_CREATED
+  INQUIRY_RESPONDED
+  BOOKING_REQUESTED
+  BOOKING_APPROVED
+  BOOKING_REJECTED
+  BOOKING_CANCELLED
+  ASSET_VERIFIED
+  ASSET_REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         Role     @default(ADVERTISER)
+  isActive     Boolean  @default(true)
+  companyId    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company        Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  sessions       Session[]
+  assets         MediaAsset[]   @relation("AssetOwner")
+  verifiedAssets MediaAsset[]   @relation("AssetVerifier")
+  inquiries      Inquiry[]
+  bookings       Booking[]
+  savedAssets    SavedAsset[]
+  notifications  Notification[]
+
+  @@index([role])
+  @@index([companyId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Company {
+  id           String      @id @default(cuid())
+  name         String
+  type         CompanyType
+  contactEmail String
+  contactPhone String?
+  website      String?
+  isDemo       Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  users  User[]
+  assets MediaAsset[]
+}
+
+model MediaAsset {
+  id          String  @id @default(cuid())
+  ownerId     String
+  companyId   String?
+  title       String
+  description String?
+
+  assetType AssetType
+  address   String
+  city      String
+  region    String?
+  latitude  Float
+  longitude Float
+
+  // Physical specification. Null means "not provided" - never guess.
+  widthCm      Int?
+  heightCm     Int?
+  orientation  String?
+  sides        Int          @default(1)
+  illumination Illumination @default(UNKNOWN)
+  isDigital    Boolean      @default(false)
+
+  status             AssetStatus        @default(DRAFT)
+  verificationStatus VerificationStatus @default(PENDING)
+  permitStatus       PermitStatus       @default(UNKNOWN)
+  verifiedAt         DateTime?
+  verifiedById       String?
+  reviewNote         String?
+
+  // Commercial. Null means the owner did not publish a price.
+  priceWeekly          Int?
+  priceMonthly         Int?
+  minimumBookingDays   Int     @default(7)
+  productionIncluded   Boolean @default(false)
+  installationIncluded Boolean @default(false)
+  removalIncluded      Boolean @default(false)
+  instantBookable      Boolean @default(false)
+
+  isDemo    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner      User                 @relation("AssetOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  verifiedBy User?                @relation("AssetVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  company    Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  images     MediaAssetImage[]
+  periods    AvailabilityPeriod[]
+  inquiries  Inquiry[]
+  bookings   Booking[]
+  savedBy    SavedAsset[]
+
+  @@index([ownerId])
+  @@index([status, verificationStatus])
+  @@index([city])
+  @@index([assetType])
+  @@index([status, latitude, longitude])
+}
+
+model MediaAssetImage {
+  id        String   @id @default(cuid())
+  assetId   String
+  url       String
+  width     Int?
+  height    Int?
+  sizeBytes Int?
+  isPrimary Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, sortOrder])
+}
+
+/// Owner-declared window in which the asset may be sold.
+model AvailabilityPeriod {
+  id        String   @id @default(cuid())
+  assetId   String
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  note      String?
+  createdAt DateTime @default(now())
+
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, startDate, endDate])
+}
+
+model Inquiry {
+  id            String        @id @default(cuid())
+  assetId       String
+  advertiserId  String
+  intent        InquiryIntent @default(AVAILABILITY)
+  startDate     DateTime      @db.Date
+  endDate       DateTime      @db.Date
+  campaignName  String
+  budget        Int?
+  message       String?
+  contactName   String
+  contactEmail  String
+  contactPhone  String?
+  status        InquiryStatus @default(PENDING)
+  ownerResponse String?
+  respondedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  asset      MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  advertiser User       @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  bookings   Booking[]
+
+  @@index([assetId, status])
+  @@index([advertiserId, createdAt])
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  assetId       String
+  advertiserId  String
+  inquiryId     String?
+  startDate     DateTime      @db.Date
+  endDate       DateTime      @db.Date
+  priceEstimate Int?
+  status        BookingStatus @default(REQUESTED)
+  ownerNote     String?
+  decidedAt     DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  asset      MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  advertiser User       @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  inquiry    Inquiry?   @relation(fields: [inquiryId], references: [id], onDelete: SetNull)
+
+  @@index([assetId, status, startDate, endDate])
+  @@index([advertiserId, createdAt])
+}
+
+model SavedAsset {
+  id        String   @id @default(cuid())
+  userId    String
+  assetId   String
+  createdAt DateTime @default(now())
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, assetId])
+  @@index([userId, createdAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String?
+  linkUrl   String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
