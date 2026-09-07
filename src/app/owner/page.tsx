@@ -1,6 +1,7 @@
 import { requireRole } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
+import { CURRENCY } from "@/lib/constants";
 import { ownerNav } from "@/lib/nav";
 import { DashboardShell, Section } from "@/components/DashboardShell";
 import { EmptyState, LinkButton, StatTile } from "@/components/ui";
@@ -13,18 +14,24 @@ export default async function OwnerOverview() {
   const user = await requireRole("MEDIA_OWNER");
   const scope = { asset: { ownerId: user.id } };
 
-  const [activeAssets, pendingInquiries, confirmedBookings, pendingBookings, recent] = await Promise.all([
-    prisma.mediaAsset.count({ where: { ownerId: user.id, status: "ACTIVE" } }),
-    prisma.inquiry.count({ where: { ...scope, status: "PENDING" } }),
-    prisma.booking.count({ where: { ...scope, status: "APPROVED", endDate: { gte: todayUtc() } } }),
-    prisma.booking.count({ where: { ...scope, status: "REQUESTED" } }),
-    prisma.inquiry.findMany({
-      where: scope,
-      orderBy: { createdAt: "desc" },
-      take: 3,
-      include: { asset: { select: { id: true, title: true } } },
-    }),
-  ]);
+  const [activeAssets, pendingInquiries, confirmedBookings, pendingBookings, pipeline, recent] =
+    await Promise.all([
+      prisma.mediaAsset.count({ where: { ownerId: user.id, status: "ACTIVE" } }),
+      prisma.inquiry.count({ where: { ...scope, status: "PENDING" } }),
+      prisma.booking.count({ where: { ...scope, status: "APPROVED", endDate: { gte: todayUtc() } } }),
+      prisma.booking.count({ where: { ...scope, status: "REQUESTED" } }),
+      prisma.booking.aggregate({
+        _sum: { priceEstimate: true },
+        where: { ...scope, status: "REQUESTED" },
+      }),
+      prisma.inquiry.findMany({
+        where: scope,
+        orderBy: { createdAt: "desc" },
+        take: 3,
+        include: { asset: { select: { id: true, title: true } } },
+      }),
+    ]);
+  const pipelineValue = pipeline._sum.priceEstimate ?? 0;
 
   return (
     <DashboardShell
@@ -33,11 +40,17 @@ export default async function OwnerOverview() {
       current="/owner"
       action={<LinkButton href="/owner/assets/new">{t("dash.addAsset")}</LinkButton>}
     >
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-1">
         <StatTile label={t("dash.activeAssets")} value={activeAssets} href="/owner/assets" />
         <StatTile label={t("dash.pendingRequests")} value={pendingInquiries} href="/owner/inquiries" />
         <StatTile label={t("dash.confirmedBookings")} value={confirmedBookings} href="/owner/bookings" />
+        <StatTile
+          label={t("admin.pipelineValue")}
+          value={`${CURRENCY}${pipelineValue.toLocaleString("he-IL")}`}
+          href="/owner/bookings"
+        />
       </div>
+      <p className="text-xs text-ink-500 mb-6">{t("asset.priceEstimateNote")}</p>
 
       <Section title={t("dash.requests")}>
         {recent.length === 0 ? (

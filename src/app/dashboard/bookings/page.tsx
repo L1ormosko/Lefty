@@ -20,7 +20,7 @@ export default async function MyBookings() {
   return (
     <DashboardShell title={t("dash.myBookings")} nav={advertiserNav()} current="/dashboard/bookings">
       {bookings.length === 0 ? (
-        <EmptyState title={t("dash.noBookings")} action={<LinkButton href="/">{t("nav.explore")}</LinkButton>} />
+        <EmptyState title={t("dash.noBookings")} action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>} />
       ) : (
         <div className="space-y-3">
           {bookings.map((booking) => (

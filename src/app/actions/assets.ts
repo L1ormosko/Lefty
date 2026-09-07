@@ -213,6 +213,7 @@ export async function publishAssetAction(_prev: AssetActionState, formData: Form
       data: { status: "ACTIVE", verificationStatus: asset.verifiedAt ? asset.verificationStatus : "PENDING" },
     });
     revalidatePath("/owner/assets");
+    revalidatePath("/explore");
     revalidatePath("/");
     return { ok: true, assetId: asset.id, message: t("wizard.published") };
   } catch (err) {
@@ -226,6 +227,7 @@ export async function setAssetStatusAction(assetId: string, status: "ACTIVE" | "
     const asset = await loadOwnedAsset(assetId, user);
     await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status } });
     revalidatePath("/owner/assets");
+    revalidatePath("/explore");
     revalidatePath("/");
     return { ok: true, assetId: asset.id };
   } catch (err) {

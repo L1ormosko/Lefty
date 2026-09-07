@@ -28,7 +28,7 @@ export default async function SavedAssets() {
   return (
     <DashboardShell title={t("dash.savedAssets")} nav={advertiserNav()} current="/dashboard/saved">
       {saved.length === 0 ? (
-        <EmptyState title={t("dash.noSaved")} action={<LinkButton href="/">{t("nav.explore")}</LinkButton>} />
+        <EmptyState title={t("dash.noSaved")} action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>} />
       ) : (
         <div className="grid sm:grid-cols-2 gap-3">
           {saved.map(({ asset }) => (

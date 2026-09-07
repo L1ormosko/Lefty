@@ -20,7 +20,7 @@ export default async function OwnerAssets() {
     include: {
       periods: { select: { startDate: true, endDate: true } },
       bookings: { where: { status: "APPROVED" }, select: { startDate: true, endDate: true } },
-      _count: { select: { inquiries: true, images: true } },
+      _count: { select: { inquiries: true, images: true, bookings: true } },
     },
   });
 
@@ -80,8 +80,8 @@ export default async function OwnerAssets() {
                     )}
                   </p>
                   <p className="text-xs text-ink-500 mt-1">
-                    <Num>{asset._count.inquiries}</Num> {t("dash.requests")} · <Num>{asset._count.images}</Num>{" "}
-                    {t("wizard.images")}
+                    <Num>{asset._count.inquiries}</Num> {t("dash.requests")} · <Num>{asset._count.bookings}</Num>{" "}
+                    {t("dash.bookings")} · <Num>{asset._count.images}</Num> {t("wizard.images")}
                   </p>
                 </div>
               </div>

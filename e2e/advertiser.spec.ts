@@ -7,7 +7,7 @@ test("an advertiser can discover an asset and send a request", async ({ page }) 
   await register(page, "ADVERTISER", email);
 
   // The map is the entry point and shows real inventory counts.
-  await page.goto("/");
+  await page.goto("/explore");
   // The live inventory count is visible on both layouts (map chip / sheet header).
   await expect(page.locator("text=/שטחי פרסום/").locator("visible=true").first()).toBeVisible();
 
@@ -47,7 +47,7 @@ test("an advertiser can discover an asset and send a request", async ({ page }) 
 });
 
 test("an anonymous visitor is asked to sign in before requesting", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/explore");
   await openResults(page);
   const card = page.locator("[data-results]:visible [data-asset]").first();
   await expect(card).toBeVisible({ timeout: 20_000 });
@@ -61,5 +61,5 @@ test("an advertiser cannot reach the media owner area", async ({ page }) => {
   await page.goto("/owner");
   await expect(page).toHaveURL(/\/dashboard/);
   await page.goto("/admin");
-  await expect(page).toHaveURL(/\/$|\/dashboard/);
+  await expect(page).toHaveURL(/\/dashboard/);
 });

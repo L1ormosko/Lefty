@@ -8,6 +8,16 @@
 - [ ] Deploy: Node host + managed Postgres + object storage for uploads
 - [ ] Email delivery behind `notify()` (owner gets an inquiry while offline)
 
+## Before real customers (business, not technical)
+- [ ] Terms of Service and Privacy Policy — the app collects personal data
+      (name, email, phone, company info); no page presents legal terms yet
+- [ ] A registered business entity / VAT number to invoice media owners
+      (needed for whichever pricing model is chosen — see `COSTS.md`)
+- [ ] A support contact (email at minimum) surfaced somewhere in the product
+- [ ] Ratify the pricing-model recommendation in `COSTS.md` §3 — this is a
+      business decision, not a technical one; nothing in the code assumes
+      one model over another
+
 ## Done
 - [x] Phase 0 reconnaissance, Phase 1 product and engineering review
 - [x] Phase 2 foundation: schema, constraints, auth, roles, seed

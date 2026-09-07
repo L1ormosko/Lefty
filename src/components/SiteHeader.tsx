@@ -22,6 +22,9 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
         </span>
 
         <nav className="ms-auto flex items-center gap-1 sm:gap-2" aria-label="ניווט ראשי">
+          <Link href="/explore" className="text-sm text-ink-700 hover:text-ink-900 px-2 py-1">
+            {t("nav.explore")}
+          </Link>
           {!user && (
             <Link href="/register?role=MEDIA_OWNER" className="hidden sm:block text-sm text-ink-700 hover:text-ink-900 px-2">
               {t("nav.listYourSpace")}

@@ -69,7 +69,7 @@ export default async function AssetPage({ params }: Params) {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
       <nav className="mb-4 text-sm">
-        <Link href="/" className="text-brand-600 hover:underline">
+        <Link href="/explore" className="text-brand-600 hover:underline">
           → {t("asset.backToMap")}
         </Link>
       </nav>

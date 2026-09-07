@@ -31,7 +31,7 @@ export default async function AdvertiserOverview() {
       title={`${t("dash.overview")} · ${user.name}`}
       nav={advertiserNav({ requests: pendingResponses })}
       current="/dashboard"
-      action={<LinkButton href="/">{t("nav.explore")}</LinkButton>}
+      action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>}
     >
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <StatTile label={t("dash.activeRequests")} value={activeRequests} href="/dashboard/requests" />
@@ -45,7 +45,7 @@ export default async function AdvertiserOverview() {
           <EmptyState
             title={t("dash.noRequests")}
             hint={t("dash.noRequestsHint")}
-            action={<LinkButton href="/">{t("nav.explore")}</LinkButton>}
+            action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>}
           />
         ) : (
           <div className="space-y-3">

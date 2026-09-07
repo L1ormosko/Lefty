@@ -49,6 +49,7 @@ export async function verifyAssetAction(_prev: ActionState, formData: FormData):
     });
 
     revalidatePath("/admin/assets");
+    revalidatePath("/explore");
     revalidatePath("/");
     return { ok: true, message: t(`verify.${decision}`) };
   } catch (err) {
@@ -61,6 +62,7 @@ export async function setAssetStatusAdminAction(assetId: string, status: "ACTIVE
     await requireRole("ADMIN");
     await prisma.mediaAsset.update({ where: { id: assetId }, data: { status } });
     revalidatePath("/admin/assets");
+    revalidatePath("/explore");
     revalidatePath("/");
     return { ok: true, message: t(`status.${status}`) };
   } catch (err) {

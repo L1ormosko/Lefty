@@ -23,7 +23,7 @@ export default async function MyRequests() {
         <EmptyState
           title={t("dash.noRequests")}
           hint={t("dash.noRequestsHint")}
-          action={<LinkButton href="/">{t("nav.explore")}</LinkButton>}
+          action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>}
         />
       ) : (
         <div className="space-y-3">
