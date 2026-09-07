@@ -31,7 +31,6 @@ export function Discover({ initialAssets, cities }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState(filters.q);
   const bounds = useRef<Bounds | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
   const firstRun = useRef(true);
 
   const fetchAssets = useCallback(
@@ -94,7 +93,12 @@ export function Discover({ initialAssets, cities }: Props) {
     if (id) {
       setSheet((s) => (s === "collapsed" ? "half" : s));
       requestAnimationFrame(() => {
-        listRef.current?.querySelector(`[data-asset="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        for (const card of document.querySelectorAll(`[data-asset="${id}"]`)) {
+          if ((card as HTMLElement).offsetParent !== null) {
+            card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            break;
+          }
+        }
       });
     }
   }, []);
@@ -103,8 +107,8 @@ export function Discover({ initialAssets, cities }: Props) {
 
   const sheetHeight = { collapsed: "h-[92px]", half: "h-[52dvh]", full: "h-[88dvh]" }[sheet];
 
-  const resultsList = (
-    <div ref={listRef} className="space-y-2 p-3">
+  const resultsList = (surface: "desktop" | "mobile") => (
+    <div data-results={surface} className="space-y-2 p-3">
       {assets.length === 0 && !loading ? (
         <EmptyState
           title={t("map.noResults")}
@@ -254,7 +258,7 @@ export function Discover({ initialAssets, cities }: Props) {
 
         {/* Desktop results column */}
         <div className="hidden lg:block w-[380px] shrink-0 border-s border-ink-200 bg-ink-50 overflow-y-auto">
-          {resultsList}
+          {resultsList("desktop")}
         </div>
 
         {/* Mobile bottom sheet */}
@@ -276,7 +280,9 @@ export function Discover({ initialAssets, cities }: Props) {
               {t("map.resultsCount", { count: assets.length })}
             </span>
           </button>
-          <div className={cx("flex-1 overflow-y-auto", sheet === "collapsed" && "hidden")}>{resultsList}</div>
+          <div className={cx("flex-1 overflow-y-auto", sheet === "collapsed" && "hidden")}>
+            {resultsList("mobile")}
+          </div>
         </div>
 
         {/* Mobile filters: full-screen dialog, not a nested sheet */}

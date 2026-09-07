@@ -1,0 +1,13 @@
+import { chromium, devices } from '@playwright/test';
+const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args:['--enable-unsafe-swiftshader','--no-sandbox']});
+const p = await b.newPage({ ...devices['Pixel 7'], browserName: undefined });
+await p.goto('http://localhost:3000/', {waitUntil:'domcontentloaded'});
+await p.waitForTimeout(5000);
+const btn = p.getByRole('button', { name: 'רשימה' });
+console.log('toggle count', await btn.count(), 'visible', await btn.first().isVisible().catch(e=>e.message));
+console.log('cards before', await p.locator('[data-asset]').count());
+await btn.first().click();
+await p.waitForTimeout(1500);
+console.log('cards after', await p.locator('[data-asset]').count(), 'first visible', await p.locator('[data-asset]').first().isVisible().catch(e=>'ERR'));
+await p.screenshot({path:'/tmp/velto-sheet.png'});
+await b.close();
