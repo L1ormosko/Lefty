@@ -18,13 +18,17 @@ import { t } from "@/lib/labels";
 
 const OVERLAP_CONSTRAINT = "Booking_no_overlapping_approved";
 
+/**
+ * Postgres raises SQLSTATE 23P01 for the exclusion constraint. Prisma surfaces
+ * that as PrismaClientUnknownRequestError with the constraint name in the
+ * message today, but the mapping is a Prisma implementation detail: match on
+ * the constraint name anywhere in the error rather than on an error class or
+ * code, so a Prisma upgrade cannot silently turn a conflict into a 500.
+ */
 export function isOverlapViolation(err: unknown): boolean {
+  if (!err) return false;
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    const meta = JSON.stringify(err.meta ?? {});
-    return err.code === "P2010" && meta.includes(OVERLAP_CONSTRAINT);
-  }
-  if (err instanceof Prisma.PrismaClientUnknownRequestError) {
-    return err.message.includes(OVERLAP_CONSTRAINT);
+    if (JSON.stringify(err.meta ?? {}).includes(OVERLAP_CONSTRAINT)) return true;
   }
   return err instanceof Error && err.message.includes(OVERLAP_CONSTRAINT);
 }

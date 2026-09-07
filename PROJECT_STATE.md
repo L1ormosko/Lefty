@@ -1,32 +1,49 @@
 # VELTO — Project state
 
-**Phase:** 2 complete (foundation) → 3 (map / discovery) in progress.
+**Phase:** MVP complete end-to-end. Phases 0–7 done.
 
 ## Stack
-Next.js 15 (App Router, RSC) · TypeScript · Prisma 6 + PostgreSQL 16 · Tailwind 3 ·
-MapLibre GL 4 · Zod · bcryptjs sessions · Vitest + Playwright.
-Single application, single database. No microservices.
+Next.js 15 (App Router, server components + server actions) · TypeScript ·
+Prisma 6 + PostgreSQL 16 · Tailwind 3 · MapLibre GL 4 · Zod · Vitest ·
+Playwright. One application, one database.
 
-## Done
-- Prisma schema + migration, including hand-written SQL: CHECK constraints and the
-  GiST exclusion constraint that makes double-booking impossible at the DB level.
-- Domain layer: constants (all enums centralised), Hebrew label dictionary (`t()`),
-  date helpers, derived availability logic, price estimation.
-- Auth: bcrypt(12), 256-bit session token stored as sha256, HttpOnly cookie,
-  login rate limiting, timing-safe unknown-email path.
-- Authorization: `requireUser` / `requireRole` + `loadOwned*` gates.
-- Public asset queries with bbox + filters; booking service with conflict handling.
-- Development seed: 4 users, 16 demo assets (11 Be'er Sheva + 5 elsewhere), all `isDemo`.
+## What works, against the real backend
+- **Discovery** — map of Israel opening on Be'er Sheva, clustered markers
+  coloured and glyph-labelled by derived availability, bounding-box queries,
+  URL-synced filters (city, type, dates, price, digital, verified only),
+  desktop filter rail + results column, mobile bottom sheet + filter dialog.
+- **Asset page** — hero, verification and availability badges, location map,
+  specifications, commercial terms, declared availability windows, save,
+  and a request panel (availability / quote / booking).
+- **Advertiser** — register, login, requests, bookings, saved assets,
+  notifications, profile.
+- **Media owner** — seven-step asset wizard with draft autosave, map location
+  picker, image upload, pricing, availability windows, inquiry replies,
+  booking approve/reject.
+- **Admin** — verification queue (approve / reject with note / deactivate),
+  users (deactivate, which also kills sessions), inquiries, bookings.
 
-## Current task
-UI: root layout (RTL), map discovery page, asset detail.
+## Guarantees worth knowing
+- Overlapping approved bookings are impossible: a partial GiST exclusion
+  constraint enforces it in Postgres. Tested with two concurrent approvals.
+- Every mutation passes an ownership loader before any write.
+- Unknown data renders as "לא צוין"; nothing invents prices, audiences or
+  verification. Seed rows carry `isDemo` and are labelled in the UI.
 
-## Local development
-    service postgresql start
-    npm install && npx prisma migrate dev && npm run seed:dev && npm run dev
-Dev logins are printed by `npm run seed:dev` (local development only).
+## Tests
+54 Vitest tests (unit + integration) and 14 Playwright journeys across desktop
+and mobile viewports. All green.
 
-## Notes that matter
-- Availability is derived from AvailabilityPeriod minus APPROVED bookings — never stored.
-- Every demo record has `isDemo: true` and is labelled in the UI.
-- Unknown data renders as "לא צוין" — the product never invents inventory or prices.
+## Known limitations
+- The default map style uses keyless OpenStreetMap tiles; production needs a
+  commercial provider via `NEXT_PUBLIC_MAP_STYLE_URL`. (In the build sandbox,
+  tile hosts are blocked by network policy, so screenshots show markers over an
+  empty basemap — the app handles that with a visible notice.)
+- Notifications are in-app only; `notify()` is the single hook for email.
+- The rate limiter is in-process, which is correct for one instance only.
+- Uploads go to local disk; swapping to object storage touches one route.
+- English strings exist as a scaffold, not a translation.
+
+## Next action
+Pick from TODO.md — the top item is a commercial tile provider key, which is the
+only thing standing between this and a demo in front of a real advertiser.

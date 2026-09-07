@@ -147,8 +147,15 @@ export async function queryMapAssets(q: MapQuery): Promise<MapAsset[]> {
   return wanted?.length ? mapped.filter((a) => wanted.includes(a.availability)) : mapped;
 }
 
-/** Full public detail for one asset. Returns null when it must not be public. */
-export async function getPublicAsset(id: string) {
+/**
+ * Full public detail for one asset. Returns null when it must not be public.
+ *
+ * Only ACTIVE assets are public. A draft, a deactivated asset, or one an admin
+ * rejected stays reachable to its own owner and to admins (so they can review
+ * what the public would have seen) and to nobody else - a taken-down listing
+ * must stop exposing its contact details to anyone holding the URL.
+ */
+export async function getPublicAsset(id: string, viewer?: { id: string; role: string } | null) {
   const asset = await prisma.mediaAsset.findUnique({
     where: { id },
     include: {
@@ -161,7 +168,11 @@ export async function getPublicAsset(id: string) {
       owner: { select: { id: true, name: true } },
     },
   });
-  if (!asset || asset.status === "DRAFT") return null;
+  if (!asset) return null;
+  if (asset.status !== "ACTIVE") {
+    const privileged = viewer && (viewer.role === "ADMIN" || viewer.id === asset.ownerId);
+    if (!privileged) return null;
+  }
   return asset;
 }
 

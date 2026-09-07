@@ -78,6 +78,12 @@ describe("booking approval", () => {
     const approved = results.filter((r) => r.status === "fulfilled");
     expect(approved).toHaveLength(1);
 
+    // The loser must get the domain conflict, not a leaked database error:
+    // this is what proves isOverlapViolation still recognises what Postgres
+    // raises through Prisma.
+    const rejected = results.find((r) => r.status === "rejected");
+    expect(rejected && (rejected as PromiseRejectedResult).reason).toBeInstanceOf(ConflictError);
+
     const stored = await prisma.booking.count({ where: { assetId: asset.id, status: "APPROVED" } });
     expect(stored).toBe(1);
   });

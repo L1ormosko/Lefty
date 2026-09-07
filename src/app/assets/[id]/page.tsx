@@ -44,10 +44,10 @@ const unknown = <span className="text-ink-400">{t("common.notProvided")}</span>;
 
 export default async function AssetPage({ params }: Params) {
   const { id } = await params;
-  const asset = await getPublicAsset(id);
+  const user = await getCurrentUser();
+  const asset = await getPublicAsset(id, user);
   if (!asset) notFound();
 
-  const user = await getCurrentUser();
   const saved = user
     ? (await prisma.savedAsset.findUnique({
         where: { userId_assetId: { userId: user.id, assetId: asset.id } },

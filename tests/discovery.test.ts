@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cleanup, makeAsset, makeUser, prisma } from "./factories";
-import { queryMapAssets } from "@/server/assets";
+import { getPublicAsset, queryMapAssets } from "@/server/assets";
 import { mapQuerySchema } from "@/lib/validation";
 import { addDays, isoDate, todayUtc } from "@/lib/dates";
 
@@ -84,5 +84,33 @@ describe("map query", () => {
 
   it("rejects an out-of-range bounding box at the schema level", () => {
     expect(mapQuerySchema.safeParse({ minLat: 999 }).success).toBe(false);
+  });
+});
+
+describe("public asset detail", () => {
+  it("serves an active asset to anyone", async () => {
+    await expect(getPublicAsset(activeId)).resolves.toMatchObject({ id: activeId });
+  });
+
+  it("hides a draft asset", async () => {
+    await expect(getPublicAsset(draftId)).resolves.toBeNull();
+  });
+
+  it("hides a deactivated asset, so a taken-down listing stops leaking contact details", async () => {
+    const asset = await makeAsset(ownerId, { status: "INACTIVE" });
+    await expect(getPublicAsset(asset.id)).resolves.toBeNull();
+    const stranger = await makeUser("ADVERTISER");
+    await expect(getPublicAsset(asset.id, { id: stranger.id, role: "ADVERTISER" })).resolves.toBeNull();
+  });
+
+  it("still shows a deactivated asset to its owner and to an admin", async () => {
+    const asset = await makeAsset(ownerId, { status: "INACTIVE" });
+    const admin = await makeUser("ADMIN");
+    await expect(getPublicAsset(asset.id, { id: ownerId, role: "MEDIA_OWNER" })).resolves.toMatchObject({
+      id: asset.id,
+    });
+    await expect(getPublicAsset(asset.id, { id: admin.id, role: "ADMIN" })).resolves.toMatchObject({
+      id: asset.id,
+    });
   });
 });

@@ -18,9 +18,9 @@ export async function toggleSavedAction(assetId: string): Promise<{ saved?: bool
       revalidatePath("/dashboard/saved");
       return { saved: false };
     }
-    // Only a public asset can be saved.
+    // Only a publicly listed asset can be saved.
     const asset = await prisma.mediaAsset.findFirst({
-      where: { id: assetId, status: { not: "DRAFT" } },
+      where: { id: assetId, status: "ACTIVE" },
       select: { id: true },
     });
     if (!asset) return { error: "השטח אינו זמין." };
