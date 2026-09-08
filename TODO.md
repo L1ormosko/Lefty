@@ -4,11 +4,18 @@
 ## infrastructure, buy/sell loop). Ordered by what breaks first.
 
 ### P0 — will lose data or block launch
-- [ ] **Uploaded photos are wiped on every deploy.** Render's filesystem is
-      ephemeral, so `UPLOAD_DIR` is gone the moment the service restarts. Every
-      photo an owner uploads disappears — and publishing now *requires* a photo,
-      so listings silently break. Needs object storage (S3/R2/Cloudinary) before
-      any real owner uploads anything.
+- [x] ~~Uploaded photos are wiped on every deploy~~ — image bytes now live in
+      Postgres (`MediaAssetImageBlob`, served by `/api/images/[id]`). See
+      DECISIONS.md §14. Run `npx tsx prisma/backfill-image-blobs.ts` once per
+      environment, then remove `UPLOAD_DIR`.
+- [ ] **Swap `src/server/storage.ts` for object storage before ~250 assets.**
+      Postgres holds roughly 250 fully photographed assets per GB, and the free
+      tier is 1GB. This is a known ceiling, not a surprise — but it arrives
+      without warning, so watch the count.
+- [ ] Images are served unauthenticated by id, matching the old static
+      `/uploads/<uuid>.webp` behaviour. An image belonging to a non-ACTIVE
+      asset should arguably be owner/admin-only, the way `getPublicAsset`
+      already is.
 - [ ] **No database backups.** Free-tier Postgres has none, and it expires
       2026-10-07. A paid plan with daily backups is the minimum before real data.
 - [ ] **No way to delete a user's data**, although `/privacy` promises it.

@@ -66,15 +66,25 @@ debounced, with the current filters.
 
 ## Storage
 
-Uploaded images are re-encoded to WebP by `sharp` and written to
-`public/uploads` with generated UUID filenames. `MediaAssetImage` stores the
-public path plus dimensions and size.
+Uploaded images are re-encoded to WebP by `sharp` and stored as bytes in
+Postgres. `MediaAssetImage` holds the metadata (url, dimensions, size, order)
+and `MediaAssetImageBlob` holds the bytes in a separate table, so the map and
+asset-page queries that `include` images never pull image data into memory.
+`src/app/api/images/[id]` serves them; `src/server/storage.ts` is the only
+module that knows where they live.
+
+They were previously written to `public/uploads` on local disk. That is fatal
+on a host with an ephemeral filesystem: every deploy erased every photo while
+the rows survived, so listings pointed at 404s. Postgres was chosen because it
+is already the backed-up source of truth; the trade is a ceiling of roughly 250
+fully photographed assets per GB, at which point `storage.ts` is swapped for
+object storage and `prisma/backfill-image-blobs.ts` shows the shape of the
+migration.
 
 ## Deployment
 
-Needs a Node runtime (sharp and the filesystem writes rule out a pure edge
-deployment), a PostgreSQL database, and a writable uploads directory or an
-object-storage swap in the upload route. `npm run build` runs `prisma generate`;
+Needs a Node runtime (`sharp` rules out a pure edge deployment) and a
+PostgreSQL database. No writable filesystem is required. `npm run build` runs `prisma generate`;
 apply migrations with `prisma migrate deploy`. Required environment variables
 are listed in `.env.example`.
 

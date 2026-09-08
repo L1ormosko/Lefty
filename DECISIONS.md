@@ -88,8 +88,7 @@ Filenames are server-generated UUIDs, so no user input reaches a filesystem
 path. SVG is rejected outright (it can carry script). Size, dimension and
 per-user rate limits cap the DoS surface.
 
-Local disk under `public/uploads` is deliberate for the MVP; the upload route is
-the only writer, so moving to object storage later touches one file.
+Where those bytes are kept is decision 14.
 
 ## 9. Three request intents, one entity
 
@@ -155,3 +154,37 @@ The same rule killed the hero mock-up's contents: the sample cards carry the
 real availability and verification badges over neutral placeholder bars, not
 invented cities and prices. The page shows what the interface looks like
 without asserting that any particular space exists at any particular price.
+
+## 14. Image bytes live in Postgres, not on disk
+
+Uploads were written to `public/uploads`. On a host with an ephemeral
+filesystem that is silently destructive: every deploy erased every photo a
+media owner had ever uploaded, while the `MediaAssetImage` rows survived and
+went on pointing at 404s. Publishing an asset requires at least one photo, so
+listings passed validation and then quietly broke. The failure produced no
+error anywhere - the only symptom was a broken picture on someone else's
+screen.
+
+The bytes now live in Postgres, the store that is already the backed-up source
+of truth. Three consequences worth stating plainly:
+
+- **A separate table.** `MediaAssetImageBlob` is 1:1 with `MediaAssetImage`
+  rather than a column on it, because the map query and the asset page both
+  `include` images. A `Bytes` column would have dragged megabytes into memory
+  on every one of them. Nothing reads the blob table except the route that
+  serves an image.
+- **Deletion stopped leaking.** The disk implementation needed an `unlink`
+  alongside every row delete, and `deleteAssetImageAction` did not have one, so
+  each deleted photo leaked a file that nothing would ever reclaim. The cascade
+  makes that unrepresentable, which is why `storage.ts` has no `deleteImage`.
+- **A ceiling, named.** A WebP at 1920px/q82 runs 150-400KB, so a fully
+  photographed asset is ~3MB and a 1GB database holds on the order of 250 of
+  them. That is comfortable for the Be'er Sheva pilot and is not a
+  national-scale answer. `src/server/storage.ts` is the only module that knows
+  where bytes live; swapping it for R2 or S3 is a one-file change, and
+  `prisma/backfill-image-blobs.ts` is the shape of the accompanying migration.
+
+Serving is unauthenticated by image id, which is exactly what the previous
+static `/uploads/<uuid>.webp` path was. This change deliberately moved storage
+and nothing else: folding an authorization change into it would have left
+neither properly reviewed. Tightening it is tracked in TODO.md.

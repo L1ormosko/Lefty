@@ -6,8 +6,6 @@ build
 .env.local
 *.tsbuildinfo
 next-env.d.ts
-public/uploads/*
-!public/uploads/.gitkeep
 test-results
 playwright-report
 coverage

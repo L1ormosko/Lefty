@@ -16,13 +16,8 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
         ],
       },
-      {
-        source: "/uploads/:path*",
-        headers: [
-          { key: "Content-Disposition", value: "inline" },
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
-        ],
-      },
+      // Images are no longer static files under /uploads; they are served by
+      // src/app/api/images/[id], which sets its own caching headers.
     ];
   },
 };

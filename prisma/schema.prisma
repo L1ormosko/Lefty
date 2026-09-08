@@ -234,9 +234,25 @@ model MediaAssetImage {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
-  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  asset MediaAsset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  blob  MediaAssetImageBlob?
 
   @@index([assetId, sortOrder])
+}
+
+/// The image bytes themselves, deliberately in their own table.
+///
+/// MediaAssetImage is pulled in with `include` by every map query and every
+/// asset page (see server/assets.ts). A Bytes column on that model would drag
+/// megabytes into memory on each of them. Nothing reads this table except the
+/// route that serves an image, and the cascade means deleting an image
+/// disposes of its bytes - there is no orphan to collect.
+model MediaAssetImageBlob {
+  imageId     String @id
+  data        Bytes
+  contentType String @default("image/webp")
+
+  image MediaAssetImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
 }
 
 /// Owner-declared window in which the asset may be sold.

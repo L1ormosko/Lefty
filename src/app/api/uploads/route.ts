@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { prisma } from "@/server/db";
@@ -8,6 +6,7 @@ import { requireUser } from "@/server/auth";
 import { loadOwnedAsset } from "@/server/authz";
 import { AppError } from "@/server/errors";
 import { rateLimit } from "@/server/rate-limit";
+import { MAX_STORED_BYTES, imageUrl, storeImage } from "@/server/storage";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_DIMENSION = 8000;
@@ -60,21 +59,29 @@ export async function POST(request: Request) {
       .webp({ quality: 82 })
       .toBuffer({ resolveWithObject: true });
 
-    const dir = path.join(process.cwd(), process.env.UPLOAD_DIR || "public/uploads");
-    await mkdir(dir, { recursive: true });
-    const filename = `${randomUUID()}.webp`;
-    await writeFile(path.join(dir, filename), output.data);
+    if (output.info.size > MAX_STORED_BYTES) {
+      return NextResponse.json({ error: "התמונה גדולה מדי לאחסון. נסו תמונה קטנה יותר." }, { status: 413 });
+    }
 
-    const image = await prisma.mediaAssetImage.create({
-      data: {
-        assetId: asset.id,
-        url: `/uploads/${filename}`,
-        width: output.info.width,
-        height: output.info.height,
-        sizeBytes: output.info.size,
-        isPrimary: existing === 0,
-        sortOrder: existing,
-      },
+    // The id is minted here so the row can carry its own final url, and both
+    // writes go in one transaction: an image row without bytes would render as
+    // a broken picture, which is the exact failure this replaces.
+    const id = randomUUID();
+    const image = await prisma.$transaction(async (tx) => {
+      const row = await tx.mediaAssetImage.create({
+        data: {
+          id,
+          assetId: asset.id,
+          url: imageUrl(id),
+          width: output.info.width,
+          height: output.info.height,
+          sizeBytes: output.info.size,
+          isPrimary: existing === 0,
+          sortOrder: existing,
+        },
+      });
+      await storeImage({ imageId: id, data: output.data, tx });
+      return row;
     });
 
     return NextResponse.json({ image });

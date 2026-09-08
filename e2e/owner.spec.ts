@@ -50,6 +50,20 @@ test("a media owner can publish an asset through the wizard", async ({ page }) =
     .locator('input[type="file"]')
     .setInputFiles({ name: "billboard.jpg", mimeType: "image/jpeg", buffer: imageBuffer });
   await expect(page.getByRole("button", { name: "מחיקה" })).toBeVisible({ timeout: 15_000 });
+
+  // The photo must be stored somewhere that survives a restart. The host's
+  // filesystem is ephemeral, so an image written to disk is gone on the next
+  // deploy while its row remains, and the listing renders a broken picture.
+  // Assert both halves: it is served from the database-backed route, and the
+  // bytes actually come back.
+  const src = await page.locator('img[alt=""]').first().getAttribute("src");
+  expect(src, "uploaded images must not be served from the ephemeral disk").toMatch(
+    /^\/api\/images\//
+  );
+  const served = await page.request.get(src!);
+  expect(served.status()).toBe(200);
+  expect(served.headers()["content-type"]).toBe("image/webp");
+
   await page.getByRole("button", { name: "המשך" }).click();
 
   await page.getByRole("button", { name: "פרסום השטח" }).click();

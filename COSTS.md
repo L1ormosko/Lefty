@@ -12,8 +12,8 @@ realistic paid floor once free tiers are outgrown.
 | Component | Why it's needed | Free-tier floor | Realistic paid floor |
 | --- | --- | --- | --- |
 | PostgreSQL (managed) | primary datastore | $0 (Neon/Supabase free tier) | ~$15–25/mo (small dedicated instance) |
-| App host (Node runtime) | `sharp` image processing and local-disk uploads need a real Node process, not a pure edge/serverless function | $0–7/mo (Render free/starter, Railway hobby) | ~$15–25/mo (always-on small instance) |
-| Object storage for images | only once uploads move off local disk (see ARCHITECTURE.md) | $0 (a few GB free on R2/S3) | a few $/mo at MVP volume (pennies per GB + egress) |
+| App host (Node runtime) | `sharp` image processing needs a real Node process, not a pure edge/serverless function | $0–7/mo (Render free/starter, Railway hobby) | ~$15–25/mo (always-on small instance) |
+| Object storage for images | not yet — images live in Postgres, which holds ~250 fully photographed assets per GB. Needed once inventory outgrows that (see DECISIONS.md §14) | $0 today | $0 (10GB free on Cloudflare R2, no egress fee) to a few $/mo |
 | Map tiles (commercial provider) | production traffic — the default keyless OSM style is dev-only | $0 (MapTiler/Mapbox free tiers cover tens of thousands of loads/mo) | $0–50/mo depending on traffic |
 | Domain | `velto.co.il` or similar | — | ~$10–15/year |
 | Transactional email | once `notify()` gets an email backend | $0 (Resend/Postmark free tiers cover low thousands/mo) | ~$0–20/mo |
