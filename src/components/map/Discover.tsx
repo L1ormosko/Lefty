@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { MapAsset } from "@/server/assets";
 import { DEFAULT_MAP_CENTER, ISRAEL_VIEW } from "@/lib/constants";
 import { t } from "@/lib/labels";
@@ -21,6 +21,10 @@ type Sheet = "collapsed" | "half" | "full";
 export function Discover({ initialAssets, cities }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Never hardcode the route here: this component renders at /explore, and
+  // writing filters back to "/" navigated the user off the map onto the
+  // marketing page every time they touched a filter.
+  const pathname = usePathname();
 
   const [filters, setFilters] = useState<Filters>(() => filtersFromParams(new URLSearchParams(searchParams)));
   const [assets, setAssets] = useState<MapAsset[]>(initialAssets);
@@ -32,32 +36,42 @@ export function Discover({ initialAssets, cities }: Props) {
   const [search, setSearch] = useState(filters.q);
   const bounds = useRef<Bounds | null>(null);
   const firstRun = useRef(true);
+  const inFlight = useRef<AbortController | null>(null);
+  const panTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchAssets = useCallback(
-    async (next: Filters) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = filtersToParams(next);
-        // Bounding box keeps the payload small: only what the viewport shows.
-        if (bounds.current && !next.city) {
-          params.set("minLat", String(bounds.current.minLat));
-          params.set("maxLat", String(bounds.current.maxLat));
-          params.set("minLng", String(bounds.current.minLng));
-          params.set("maxLng", String(bounds.current.maxLng));
-        }
-        const res = await fetch(`/api/assets?${params.toString()}`);
-        if (!res.ok) throw new Error("request failed");
-        const data = (await res.json()) as { assets: MapAsset[] };
-        setAssets(data.assets);
-      } catch {
-        setError(t("common.error"));
-      } finally {
+  const fetchAssets = useCallback(async (next: Filters) => {
+    // Panning fires these back to back. Without cancellation a slow early
+    // response can land after a newer one and repopulate the map with assets
+    // for a viewport the user already left.
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const params = filtersToParams(next);
+      // Bounding box keeps the payload small: only what the viewport shows.
+      if (bounds.current && !next.city) {
+        params.set("minLat", String(bounds.current.minLat));
+        params.set("maxLat", String(bounds.current.maxLat));
+        params.set("minLng", String(bounds.current.minLng));
+        params.set("maxLng", String(bounds.current.maxLng));
+      }
+      const res = await fetch(`/api/assets?${params.toString()}`, { signal: controller.signal });
+      if (!res.ok) throw new Error("request failed");
+      const data = (await res.json()) as { assets: MapAsset[] };
+      setAssets(data.assets);
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") return;
+      setError(t("common.error"));
+    } finally {
+      if (inFlight.current === controller) {
+        inFlight.current = null;
         setLoading(false);
       }
-    },
-    []
-  );
+    }
+  }, []);
 
   // Debounced refetch + URL sync whenever the filters change.
   useEffect(() => {
@@ -67,11 +81,11 @@ export function Discover({ initialAssets, cities }: Props) {
     }
     const id = setTimeout(() => {
       const qs = filtersToParams(filters).toString();
-      router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
       void fetchAssets(filters);
     }, 350);
     return () => clearTimeout(id);
-  }, [filters, fetchAssets, router]);
+  }, [filters, fetchAssets, router, pathname]);
 
   const patch = useCallback((p: Partial<Filters>) => setFilters((f) => ({ ...f, ...p })), []);
   const reset = useCallback(() => {
@@ -83,7 +97,10 @@ export function Discover({ initialAssets, cities }: Props) {
     (b: Bounds) => {
       const first = bounds.current == null;
       bounds.current = b;
-      if (!first) void fetchAssets(filters);
+      if (first) return;
+      // Inertial panning emits several moveend events; refetch once it settles.
+      if (panTimer.current) clearTimeout(panTimer.current);
+      panTimer.current = setTimeout(() => void fetchAssets(filters), 300);
     },
     [fetchAssets, filters]
   );

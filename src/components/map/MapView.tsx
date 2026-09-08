@@ -4,8 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapAsset } from "@/server/assets";
-import { AVAILABILITY_COLORS, DEFAULT_MAP_CENTER, ISRAEL_BOUNDS } from "@/lib/constants";
-import { t } from "@/lib/labels";
+import {
+  AVAILABILITY_COLORS,
+  CURRENCY,
+  DEFAULT_MAP_CENTER,
+  ISRAEL_BOUNDS,
+  type AvailabilityState,
+} from "@/lib/constants";
+import { AVAILABILITY_GLYPH, t } from "@/lib/labels";
 
 export type Bounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
 
@@ -31,11 +37,61 @@ function toGeoJSON(assets: MapAsset[]): GeoJSON.FeatureCollection<GeoJSON.Point>
       properties: {
         id: a.id,
         title: a.title,
+        city: a.city,
+        assetType: a.assetType,
         availability: a.availability,
+        priceMonthly: a.priceMonthly ?? null,
+        priceWeekly: a.priceWeekly ?? null,
+        verified: a.verificationStatus === "VERIFIED",
         color: AVAILABILITY_COLORS[a.availability],
       },
     })),
   };
+}
+
+/** Popup content is injected as HTML, and titles are owner-supplied text. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function popupHtml(props: Record<string, unknown>): string {
+  const title = escapeHtml(String(props.title ?? ""));
+  const city = escapeHtml(String(props.city ?? ""));
+  const id = encodeURIComponent(String(props.id ?? ""));
+  const type = t(`type.${String(props.assetType)}`);
+  const state = String(props.availability) as AvailabilityState;
+
+  const monthly = props.priceMonthly as number | null;
+  const weekly = props.priceWeekly as number | null;
+  const price =
+    monthly != null
+      ? `${t("asset.priceFrom")}${CURRENCY}${monthly.toLocaleString("he-IL")} / חודש`
+      : weekly != null
+        ? `${t("asset.priceFrom")}${CURRENCY}${weekly.toLocaleString("he-IL")} / שבוע`
+        : t("asset.priceNotPublished");
+
+  const verified = props.verified
+    ? `<span style="color:#1b37ad">✓ ${escapeHtml(t("verify.VERIFIED"))}</span>`
+    : `<span style="color:#525e73">◷ ${escapeHtml(t("verify.PENDING"))}</span>`;
+
+  return `
+    <div dir="rtl" style="min-width:210px;padding:12px;font-family:inherit">
+      <p style="margin:0;font-weight:600;font-size:14px;color:#191d26">${title}</p>
+      <p style="margin:2px 0 0;font-size:12px;color:#67758c">${escapeHtml(type)} · ${city}</p>
+      <p style="margin:8px 0 0;font-size:12px">
+        <span style="color:${AVAILABILITY_COLORS[state]}">${escapeHtml(AVAILABILITY_GLYPH[state])} ${escapeHtml(t(`avail.${state}`))}</span>
+        &nbsp;·&nbsp; ${verified}
+      </p>
+      <p style="margin:6px 0 0;font-size:13px;font-weight:500;color:#191d26" dir="ltr">${escapeHtml(price)}</p>
+      <a href="/assets/${id}" style="display:inline-block;margin-top:10px;font-size:13px;color:#1f45d6;font-weight:500">
+        ${escapeHtml(t("asset.requestAvailability"))} ←
+      </a>
+    </div>`;
 }
 
 export function MapView({
@@ -51,6 +107,7 @@ export function MapView({
   const map = useRef<MLMap | null>(null);
   const ready = useRef(false);
   const clusterLabels = useRef(new Map<string, maplibregl.Marker>());
+  const popup = useRef<maplibregl.Popup | null>(null);
   const resizeObserver = useRef<ResizeObserver | null>(null);
   const [tilesFailed, setTilesFailed] = useState(false);
   const assetsRef = useRef(assets);
@@ -119,6 +176,20 @@ export function MapView({
         m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
       }
 
+      // "Where am I" is the first thing a field buyer wants on a map of
+      // physical sites. The browser still asks for permission; nothing is sent
+      // anywhere - the position only moves the camera.
+      if (interactive) {
+        m.addControl(
+          new maplibregl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: false,
+            showAccuracyCircle: true,
+          }),
+          "top-left"
+        );
+      }
+
       // Keep the canvas in step with layout changes (sheet snap points,
       // orientation change, window resize).
       const ro = new ResizeObserver(() => m.resize());
@@ -173,8 +244,14 @@ export function MapView({
       // Cluster counts are drawn as DOM labels rather than a symbol layer,
       // because a symbol layer needs a glyph endpoint and the default style is
       // keyless. Only clusters get a DOM node - individual points stay on the
-      // GPU layer, so thousands of assets remain cheap.
-      m.on("render", renderClusterLabels);
+      // GPU layer, so thousands of assets remain cheap. Bound to "idle" rather
+      // than "render": querySourceFeatures on every animation frame was the
+      // single most expensive thing the map did while panning.
+      m.on("idle", renderClusterLabels);
+      // Markers stay anchored to their coordinate while panning, so panning
+      // needs no help. Zooming re-clusters, which leaves counts attached to
+      // circles that no longer exist - hide them until "idle" recomputes.
+      m.on("zoomstart", hideClusterLabels);
 
       // Tiles can fail (offline, blocked network, provider outage). The markers
       // still work, so say so instead of showing an unexplained empty canvas.
@@ -187,8 +264,21 @@ export function MapView({
 
       if (interactive) {
         m.on("click", "points", (e) => {
-          const id = e.features?.[0]?.properties?.id as string | undefined;
-          if (id) selectCb.current(id);
+          const feature = e.features?.[0];
+          const id = feature?.properties?.id as string | undefined;
+          if (!feature || !id) return;
+          selectCb.current(id);
+          // A tap should answer "what is this?" on the map itself, without
+          // making the user hunt for the matching card in the results list.
+          popup.current?.remove();
+          popup.current = new maplibregl.Popup({
+            closeButton: true,
+            maxWidth: "280px",
+            offset: 14,
+          })
+            .setLngLat((feature.geometry as GeoJSON.Point).coordinates as [number, number])
+            .setHTML(popupHtml(feature.properties as Record<string, unknown>))
+            .addTo(m);
         });
         m.on("click", "clusters", async (e) => {
           const feature = e.features?.[0];
@@ -202,7 +292,11 @@ export function MapView({
         });
         m.on("click", (e) => {
           const hits = m.queryRenderedFeatures(e.point, { layers: ["points", "clusters"] });
-          if (hits.length === 0) selectCb.current(null);
+          if (hits.length === 0) {
+            popup.current?.remove();
+            popup.current = null;
+            selectCb.current(null);
+          }
         });
         for (const layer of ["points", "clusters"]) {
           m.on("mouseenter", layer, () => {
@@ -215,6 +309,11 @@ export function MapView({
         m.on("moveend", emitBounds);
       }
     })();
+
+    function hideClusterLabels() {
+      for (const marker of clusterLabels.current.values()) marker.remove();
+      clusterLabels.current.clear();
+    }
 
     function renderClusterLabels() {
       const m = map.current;
@@ -252,6 +351,8 @@ export function MapView({
       resizeObserver.current = null;
       for (const marker of clusterLabels.current.values()) marker.remove();
       clusterLabels.current.clear();
+      popup.current?.remove();
+      popup.current = null;
       map.current?.remove();
       map.current = null;
       ready.current = false;
