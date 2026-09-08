@@ -36,6 +36,19 @@ export function Button({ variant = "primary", size = "md", className, ...rest }:
   return <button className={cx(BUTTON_BASE, BUTTON_VARIANTS[variant], BUTTON_SIZES[size], className)} {...rest} />;
 }
 
+/**
+ * Button styling for the rare element that must be a plain <a> rather than a
+ * Link - a file download, where the browser's own navigation is what turns the
+ * response into a saved file and a client-side route transition would not.
+ */
+export function buttonClass(
+  variant: keyof typeof BUTTON_VARIANTS = "primary",
+  size: keyof typeof BUTTON_SIZES = "md",
+  className?: string
+) {
+  return cx(BUTTON_BASE, BUTTON_VARIANTS[variant], BUTTON_SIZES[size], className);
+}
+
 export function LinkButton({
   href,
   variant = "primary",

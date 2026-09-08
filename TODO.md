@@ -18,9 +18,10 @@
       already is.
 - [ ] **No database backups.** Free-tier Postgres has none, and it expires
       2026-10-07. A paid plan with daily backups is the minimum before real data.
-- [ ] **No way to delete a user's data**, although `/privacy` promises it.
-      Either build the deletion path or correct the policy — the current state
-      is a promise the product cannot keep.
+- [x] ~~No way to delete a user's data~~ — the three rights the policy promises
+      (see, correct, erase) are live on the profile page for both roles. Erasure
+      is anonymization: see DECISIONS.md §15 for why a hard delete would have
+      destroyed the counterparty's records.
 
 ### P1 — the flows have dead ends
 - [x] ~~Filtering navigated the user off the map to the landing page~~ (fixed)
@@ -28,8 +29,8 @@
       forever, so "what did I actually run last quarter" is unanswerable
 - [ ] An owner cannot cancel an approved booking (only the advertiser can)
 - [ ] An asset cannot be deleted, only deactivated
-- [ ] The profile page is read-only: a typo'd phone number can never be fixed,
-      and there is no password change for a logged-in user
+- [x] ~~The profile page is read-only~~ — profile editing, company details and
+      password change now exist, and media owners have an account page at all
 - [ ] No thread on an inquiry — one question, one answer, no follow-up
 - [ ] The admin asset queue defaults to "pending", which is empty, so an
       admin's first view is a blank page while 16 assets sit one tab away

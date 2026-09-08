@@ -25,7 +25,13 @@ export function DashboardShell({
           {action && <div className="ms-auto">{action}</div>}
         </div>
         <div className="grid lg:grid-cols-[220px_1fr] gap-6 items-start">
-          <nav aria-label={title} className="lg:sticky lg:top-20">
+          {/* min-w-0 is load-bearing: a grid item defaults to min-width:auto,
+              so on mobile the nav refused to shrink below the full width of its
+              own links, the single-column track grew to fit, and the entire
+              page scrolled sideways - putting form buttons off-screen. The
+              overflow-x-auto below only scrolls once the nav is allowed to be
+              narrower than its contents. */}
+          <nav aria-label={title} className="min-w-0 lg:sticky lg:top-20">
             <ul className="flex lg:flex-col gap-1 overflow-x-auto pb-1">
               {nav.map((item) => {
                 const active = current === item.href;

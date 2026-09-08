@@ -81,6 +81,13 @@ fully photographed assets per GB, at which point `storage.ts` is swapped for
 object storage and `prisma/backfill-image-blobs.ts` shows the shape of the
 migration.
 
+## Accounts and personal data
+
+`src/server/account.ts` implements the three rights `/privacy` promises:
+`exportUserData` (see), the profile forms (correct), and `anonymizeUser`
+(erase). Erasure keeps the rows and destroys the identity - see DECISIONS.md
+§15 for why deleting them would have taken the counterparty's records with it.
+
 ## Deployment
 
 Needs a Node runtime (`sharp` rules out a pure edge deployment) and a

@@ -269,6 +269,28 @@ const he: Dict = {
   "dash.savedAssets": "שטחים שמורים",
   "dash.profile": "פרופיל",
   "dash.myAssets": "השטחים שלי",
+
+  // Account: the three rights the privacy policy promises.
+  "account.details": "פרטים אישיים",
+  "account.detailsHint": "השם והטלפון שיוצגו לצד שני בפניות ובהזמנות.",
+  "account.company": "פרטי החברה",
+  "account.companyHint": "פרטי הקשר של החברה הם אלה שמוצגים לציבור בדף השטח — לא הפרטים האישיים שלכם.",
+  "account.emailLocked": "שינוי כתובת הדוא״ל אינו זמין עדיין. לפנייה בנושא: support@velto.co.il",
+  "account.password": "שינוי סיסמה",
+  "account.passwordHint": "שינוי סיסמה מנתק את כל ההתחברויות האחרות שלכם.",
+  "account.currentPassword": "הסיסמה הנוכחית",
+  "account.newPassword": "סיסמה חדשה",
+  "account.changePassword": "עדכון סיסמה",
+  "account.export": "המידע שלי",
+  "account.exportHint":
+    "הורדת כל המידע השמור עליכם ב-VELTO כקובץ JSON — פרטי החשבון, החברה, הפניות, ההזמנות והשטחים.",
+  "account.exportAction": "הורדת המידע שלי",
+  "account.danger": "מחיקת החשבון",
+  "account.dangerHint":
+    "מחיקת החשבון היא פעולה בלתי הפיכה. פרטי הזיהוי שלכם יימחקו מכל מקום שבו הם שמורים, וההזמנות עצמן יישמרו ללא שם כרשומה מסחרית של הצד השני. לא תוכלו להתחבר שוב.",
+  "account.confirmWord": "להמשך, הקלידו את המילה מחיקה",
+  "account.deleteAction": "מחיקת החשבון לצמיתות",
+  "account.deleted": "החשבון נמחק. פרטי הזיהוי שלכם הוסרו מהמערכת.",
   "dash.availability": "זמינות",
   "dash.requests": "בקשות",
   "dash.bookings": "הזמנות",

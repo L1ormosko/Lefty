@@ -47,4 +47,12 @@ export async function makeAsset(
 export async function cleanup() {
   await prisma.mediaAsset.deleteMany({ where: { title: { contains: TEST_TAG } } });
   await prisma.user.deleteMany({ where: { email: { contains: TEST_TAG } } });
+  // Anonymization overwrites the email, so a user the account tests erased no
+  // longer carries TEST_TAG and the rule above would never find it. Tombstones
+  // are unmistakable (deletedAt set, reserved .invalid domain) and setup.ts
+  // already refuses to run against anything but a VELTO development database.
+  await prisma.user.deleteMany({
+    where: { deletedAt: { not: null }, email: { endsWith: "@velto.invalid" } },
+  });
+  await prisma.company.deleteMany({ where: { name: { contains: TEST_TAG } } });
 }

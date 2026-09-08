@@ -6,12 +6,19 @@ import { loginAction, type FormState } from "../actions";
 import { t } from "@/lib/labels";
 import { Alert, Button, Card, Field, inputClass } from "@/components/ui";
 
-export function LoginForm({ next }: { next?: string }) {
+export function LoginForm({ next, deleted }: { next?: string; deleted?: boolean }) {
   const [state, action, pending] = useActionState<FormState, FormData>(loginAction, undefined);
 
   return (
     <Card className="p-6">
       <h1 className="text-xl font-semibold text-ink-900">{t("auth.login")}</h1>
+      {/* A deleted account has no inbox to confirm to, so say it here - this is
+          where the redirect lands and the only chance to close the loop. */}
+      {deleted && (
+        <div className="mt-3">
+          <Alert kind="success">{t("account.deleted")}</Alert>
+        </div>
+      )}
       <form action={action} className="mt-5 space-y-4">
         {next && <input type="hidden" name="next" value={next} />}
         {state?.error && <Alert>{state.error}</Alert>}

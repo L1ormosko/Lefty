@@ -15,6 +15,7 @@ export const ownerNav = (counts: { inquiries?: number; bookings?: number } = {})
   { href: "/owner/inquiries", label: t("dash.requests"), badge: counts.inquiries },
   { href: "/owner/bookings", label: t("dash.bookings"), badge: counts.bookings },
   { href: "/owner/notifications", label: t("nav.notifications") },
+  { href: "/owner/profile", label: t("dash.profile") },
 ];
 
 export const adminNav = () => [

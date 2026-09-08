@@ -100,6 +100,10 @@ model User {
   /// When the user accepted the Terms of Service / Privacy Policy at registration.
   /// Required going forward; null only for accounts created before this field existed.
   termsAcceptedAt DateTime?
+  /// Set when the user exercised their right to erasure. The row survives
+  /// because bookings and inquiries are two-party commercial records, but
+  /// every identifying field on it has been overwritten. See server/account.ts.
+  deletedAt       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

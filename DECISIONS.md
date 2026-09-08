@@ -188,3 +188,49 @@ Serving is unauthenticated by image id, which is exactly what the previous
 static `/uploads/<uuid>.webp` path was. This change deliberately moved storage
 and nothing else: folding an authorization change into it would have left
 neither properly reviewed. Tightening it is tracked in TODO.md.
+
+## 15. Erasure means anonymization, and the two traps that forced it
+
+`/privacy` promises three rights: to see the data we hold, to correct it, and
+to have it erased. None of them existed in the product. That is worse than not
+promising them, so it was P0.
+
+The obvious implementation - delete the `User` row and let the cascades do the
+rest - is wrong twice over, and the schema is what says so:
+
+- **`Inquiry` keeps its own copy of the contact details.** `contactName`,
+  `contactEmail` and `contactPhone` are snapshotted onto every inquiry. Deleting
+  the user row alone would have left the person's name, email and phone sitting
+  in every inquiry they ever sent: an erasure that erases nothing, while
+  reporting success.
+- **`Inquiry` and `Booking` cascade from `User`.** A booking is a record of two
+  parties. A hard delete would erase a media owner's approved bookings because
+  the advertiser closed their account. For a media owner it is worse still:
+  their `MediaAsset` rows cascade too, taking every advertiser's bookings on
+  those assets with them.
+
+So erasure destroys what is purely personal (sessions, saved assets,
+notifications, reset tokens), overwrites every identifying field *wherever it is
+stored* - the user row, the inquiry snapshots, and the free text the user wrote,
+which can name people - and leaves the commercial records standing with nobody's
+name on them. The tombstone email uses the `.invalid` TLD, reserved by RFC 2606,
+so it can never collide with an address someone later registers.
+
+Three consequences that are easy to miss and are covered by tests:
+
+- A departing media owner's assets are set `INACTIVE`, not deleted. That takes
+  them off the map immediately (and `getPublicAsset` already refuses to serve a
+  non-ACTIVE asset's company contact details) without destroying other people's
+  bookings.
+- If the leaving user is the last member of their company, the company's
+  contact email and phone are cleared too: for a sole trader those *are* the
+  person's own details, published on every asset page. With other members still
+  in the company they are left alone, because wiping them would be erasing
+  someone else's data.
+- Deletion is refused while an approved booking has not ended, in either
+  direction. Walking away mid-commitment leaves the counterparty holding a
+  booked space with nobody to contact.
+
+Not built: a grace period before the erasure takes effect. It needs a scheduled
+job, which the current hosting plan does not have, and a deletion that silently
+does not happen yet would be its own kind of dishonesty.

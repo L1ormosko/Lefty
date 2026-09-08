@@ -38,6 +38,36 @@ export const resetPasswordSchema = z.object({
   password: passwordSchema,
 });
 
+/**
+ * Editing your own profile. Deliberately no email and no role: changing the
+ * login identity needs a verification step this product does not have yet, and
+ * role is not the user's to grant themselves.
+ */
+export const profileSchema = z.object({
+  name: z.string().trim().min(2, "יש להזין שם מלא").max(120),
+  phone: phoneSchema.optional().or(z.literal("")),
+  companyName: z.string().trim().min(2).max(160).optional().or(z.literal("")),
+  companyEmail: emailSchema.optional().or(z.literal("")),
+  companyPhone: phoneSchema.optional().or(z.literal("")),
+  companyWebsite: z.string().trim().url("כתובת אתר לא תקינה").max(200).optional().or(z.literal("")),
+  businessId: z.string().trim().max(20).optional().or(z.literal("")),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "common.required"),
+  password: passwordSchema,
+});
+
+/**
+ * Closing an account. The current password proves it is really the account
+ * holder at the keyboard, and the typed word makes an irreversible action
+ * deliberate rather than a mis-tap.
+ */
+export const deleteAccountSchema = z.object({
+  currentPassword: z.string().min(1, "common.required"),
+  confirm: z.literal("מחיקה", { message: "יש להקליד את המילה מחיקה לאישור." }),
+});
+
 export const assetBasicSchema = z.object({
   title: z.string().trim().min(3, "יש להזין שם לשטח").max(160),
   description: z.string().trim().max(2000).optional().or(z.literal("")),

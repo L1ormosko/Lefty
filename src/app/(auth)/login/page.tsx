@@ -8,10 +8,10 @@ export const metadata: Metadata = { title: "כניסה" };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; deleted?: string }>;
 }) {
   const user = await getCurrentUser();
   if (user) redirect(user.role === "MEDIA_OWNER" ? "/owner" : user.role === "ADMIN" ? "/admin" : "/dashboard");
-  const { next } = await searchParams;
-  return <LoginForm next={next} />;
+  const { next, deleted } = await searchParams;
+  return <LoginForm next={next} deleted={deleted === "1"} />;
 }
