@@ -134,3 +134,24 @@ traffic field anywhere, because we have no source for those numbers.
 - Separate "verification" and "campaign" tables from the original sketch:
   verification is three fields on the asset (`verificationStatus`, `verifiedAt`,
   `verifiedById`, plus `reviewNote`), which is the whole workflow admin needs.
+
+## 13. The landing page counts real inventory only
+
+Two reviewers disagreed on the landing page's proof-of-life element. The design
+review wanted a city-coverage strip with counts, as the one concrete piece of
+evidence on an otherwise text-only page. The product review flagged the same
+element as the riskiest line on the page: every seeded row carries `isDemo`,
+so a count drawn from them presents demo data as a live marketplace.
+
+Data integrity wins over polish, but the visual idea survives intact.
+`realInventorySummary()` (src/server/assets.ts) counts only `ACTIVE` rows with
+`isDemo: false`. When that is zero - which is the case today - the hero states
+plainly that VELTO is in pilot and that the map currently shows demo listings.
+The coverage strip renders the moment real inventory exists, with numbers that
+are true on the day they appear. An E2E test asserts the invariant against the
+database rather than against fixture assumptions.
+
+The same rule killed the hero mock-up's contents: the sample cards carry the
+real availability and verification badges over neutral placeholder bars, not
+invented cities and prices. The page shows what the interface looks like
+without asserting that any particular space exists at any particular price.

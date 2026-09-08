@@ -204,3 +204,27 @@ export async function citiesWithInventory(): Promise<{ city: string; count: numb
   });
   return rows.map((r) => ({ city: r.city, count: r._count._all }));
 }
+
+/**
+ * Real, non-demo public inventory, for the marketing page.
+ *
+ * Deliberately excludes `isDemo` rows: a city count that includes seed data
+ * reads to a visitor as a claim about commercial inventory we do not have.
+ * When this comes back empty the landing page says so plainly rather than
+ * dressing up demo rows as a marketplace - see DECISIONS.md.
+ */
+export async function realInventorySummary(): Promise<{
+  assets: number;
+  cities: { city: string; count: number }[];
+}> {
+  const rows = await prisma.mediaAsset.groupBy({
+    by: ["city"],
+    where: { status: "ACTIVE", isDemo: false },
+    _count: { _all: true },
+    orderBy: { _count: { id: "desc" } },
+  });
+  return {
+    assets: rows.reduce((sum, r) => sum + r._count._all, 0),
+    cities: rows.map((r) => ({ city: r.city, count: r._count._all })),
+  };
+}

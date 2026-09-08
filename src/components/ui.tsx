@@ -13,6 +13,12 @@ const BUTTON_VARIANTS = {
   secondary: "bg-white text-ink-800 border border-ink-200 hover:bg-ink-50",
   ghost: "text-ink-700 hover:bg-ink-100",
   danger: "bg-bad-500 text-white hover:bg-bad-700",
+  // For dark bands (the landing page's closing CTA). Declared as variants
+  // rather than className overrides: Tailwind resolves conflicting utilities
+  // by stylesheet order, not by prop order, so overriding a variant's colours
+  // from className silently produces white-on-white.
+  inverse: "bg-white text-ink-900 hover:bg-ink-100",
+  inverseGhost: "border border-white/30 text-white hover:bg-white/10",
 } as const;
 const BUTTON_SIZES = {
   sm: "h-8 px-3 text-sm",
