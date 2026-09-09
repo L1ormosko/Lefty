@@ -69,13 +69,10 @@ test("both sides can keep talking on an inquiry", async ({ page, browser }) => {
   await page.goto(threadUrl);
   await expect(page.getByText("אפשר גם חודשיים?")).toBeVisible();
   await expect(page.getByText("כן, אפשר. אחזור עם מחיר.")).toBeVisible();
-});
 
-test("a notification links straight to the thread it is about", async ({ page }) => {
-  await login(page, "owner@velto.dev");
-  await page.goto("/owner/notifications");
-
-  const link = page.locator('a[href*="/owner/inquiries/"], a[href*="/dashboard/requests/"]').first();
-  if ((await link.count()) === 0) test.skip(true, "no message notifications seeded");
-  await expect(link).toHaveAttribute("href", /\/(owner\/inquiries|dashboard\/requests)\/[^/]+$/);
+  // The notification about that reply points at this thread, not at a list the
+  // advertiser then has to search through.
+  await page.goto("/dashboard/notifications");
+  const link = page.locator(`a[href="${new URL(threadUrl).pathname}"]`).first();
+  await expect(link).toBeVisible();
 });

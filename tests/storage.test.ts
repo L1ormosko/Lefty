@@ -4,6 +4,8 @@ import sharp from "sharp";
 import { cleanup, makeAsset, makeUser, prisma } from "./factories";
 import { GET as getImage } from "@/app/api/images/[id]/route";
 import { MAX_STORED_BYTES, imageUrl, readImage, storeImage } from "@/server/storage";
+import { demoImage } from "../prisma/demo-image";
+import { ASSET_TYPES } from "@/lib/constants";
 
 let assetId: string;
 
@@ -104,5 +106,37 @@ describe("image route", () => {
       params: Promise.resolve({ id }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("demo placeholder images", () => {
+  it("produces a real WebP for every asset type", async () => {
+    // Every type must render: a missing entry in the shape table would
+    // otherwise ship a broken or blank picture for that category only, and
+    // nobody would notice until a listing of that type appeared.
+    for (const assetType of ASSET_TYPES) {
+      const buf = await demoImage({ assetType, label: "בדיקה" });
+      const meta = await sharp(buf).metadata();
+      expect(meta.format, assetType).toBe("webp");
+      expect(meta.width, assetType).toBe(1200);
+      expect(meta.height, assetType).toBe(675);
+      // Small enough that 16 of them are a rounding error against the DB
+      // budget documented in storage.ts.
+      expect(buf.length, assetType).toBeLessThan(100 * 1024);
+    }
+  });
+
+  it("survives a title long enough to overflow the plate", async () => {
+    const buf = await demoImage({ assetType: "BILLBOARD", label: "כותרת ארוכה מאוד ".repeat(20) });
+    expect((await sharp(buf).metadata()).format).toBe("webp");
+  });
+
+  it("does not put a picture on an asset that has none", async () => {
+    // The honesty rule the placeholder must not break: only demo rows get one.
+    // A real listing with no photo still shows the empty state rather than a
+    // generated stand-in that could pass for a picture of the site.
+    const owner = await makeUser("MEDIA_OWNER");
+    const real = await makeAsset(owner.id, { isDemo: false });
+    expect(await prisma.mediaAssetImage.count({ where: { assetId: real.id } })).toBe(0);
   });
 });

@@ -7,6 +7,8 @@
  */
 import { PrismaClient, type AssetType, type Illumination } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
+import { demoImage } from "./demo-image";
 
 const prisma = new PrismaClient();
 
@@ -325,6 +327,32 @@ async function main() {
         },
       },
     });
+    // A placeholder picture, so the marketplace does not read as unfinished
+    // with every listing showing an empty frame. Deliberately a schematic with
+    // "demo image" burned into the bitmap rather than anything resembling a
+    // photograph: inventing a picture of a hoarding that does not exist would
+    // be fabricating inventory. Written through the same table and encoder the
+    // real upload route uses, so there is no second storage path to maintain.
+    const imageId = randomUUID();
+    const bytes = await demoImage({ assetType: s.assetType, label: asset.title });
+    await prisma.$transaction([
+      prisma.mediaAssetImage.create({
+        data: {
+          id: imageId,
+          assetId: asset.id,
+          url: `/api/images/${imageId}`,
+          width: 1200,
+          height: 675,
+          sizeBytes: bytes.length,
+          isPrimary: true,
+          sortOrder: 0,
+        },
+      }),
+      prisma.mediaAssetImageBlob.create({
+        data: { imageId, data: new Uint8Array(bytes), contentType: "image/webp" },
+      }),
+    ]);
+
     created.push({ id: asset.id, title: asset.title });
   }
 
