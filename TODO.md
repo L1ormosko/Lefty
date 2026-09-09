@@ -25,15 +25,19 @@
 
 ### P1 — the flows have dead ends
 - [x] ~~Filtering navigated the user off the map to the landing page~~ (fixed)
-- [ ] A booking never reaches `COMPLETED`; approved bookings stay approved
-      forever, so "what did I actually run last quarter" is unanswerable
-- [ ] An owner cannot cancel an approved booking (only the advertiser can)
-- [ ] An asset cannot be deleted, only deactivated
+- [x] ~~A booking never reaches `COMPLETED`~~ — derived from the end date in
+      `lib/bookings.ts`, never stored (no scheduled job exists to flip rows)
+- [x] ~~An owner cannot cancel an approved booking~~ — the server always
+      supported it; only the button was missing
+- [x] ~~An asset cannot be deleted~~ — a draft nobody engaged with is deleted;
+      anything else deactivates, because MediaAsset cascades to other people's
+      bookings (DECISIONS.md §15 is the same trap)
 - [x] ~~The profile page is read-only~~ — profile editing, company details and
       password change now exist, and media owners have an account page at all
-- [ ] No thread on an inquiry — one question, one answer, no follow-up
-- [ ] The admin asset queue defaults to "pending", which is empty, so an
-      admin's first view is a blank page while 16 assets sit one tab away
+- [x] ~~No thread on an inquiry~~ — `InquiryMessage` plus detail pages for both
+      sides, which did not exist at all before
+- [x] ~~The admin asset queue opens on a blank page~~ — every tab shows its
+      count and the empty state links to "all"
 
 ### P2 — correctness and scale
 - [ ] Availability is computed in JS *after* `take`, so pagination would drop
@@ -51,20 +55,21 @@
 - [ ] Keep the viewport in the URL, and `fitBounds` to the results after a filter
 - [ ] Hover on a result card highlights its marker (and back)
 - [ ] Draggable mobile sheet (today it snaps between three fixed heights)
-- [ ] Every seeded asset has zero photos, so the whole marketplace reads as
-      unfinished; the photo step of the wizard is effectively unexercised
-- [ ] Notifications are undifferentiated duplicates with no link to the
-      request or booking they refer to, and no per-item "mark read"
-- [ ] Destructive actions (cancel booking, deactivate user) fire with no
-      confirmation and no undo
-- [ ] Submit buttons show no pending state, so a slow network invites a
-      double submit
-- [ ] A booking never shows which inquiry it came from
-- [ ] The verification badge names no verifier and no date
-- [ ] Price formatting differs on three screens; email and phone use two
-      different LTR-isolation techniques on adjacent rows
-- [ ] Mobile: the header row is cramped below 44px touch targets, and the
-      asset page stacks ~2500px above the request form with no sticky CTA
+- [x] ~~Every seeded asset has zero photos~~ — schematic placeholders with
+      "תמונת הדגמה" burned into the bitmap; never anything resembling a photo
+- [x] ~~Notifications do not link to what they refer to~~ — message
+      notifications open the thread itself
+- [ ] Notifications still have no per-item "mark read", only "mark all"
+- [x] ~~Destructive actions fire with no confirmation~~ — `ConfirmButton`,
+      with distinct labels so the confirm and the back-out never read alike
+- [x] ~~Submit buttons show no pending state~~ — verified; every real submit
+      already had one, only logout and mark-all-read did not (both idempotent)
+- [x] ~~A booking never shows which inquiry it came from~~ — `Booking.inquiryId`
+      was stored and never rendered; now a link
+- [x] ~~The verification badge names no date~~ — shows when it was verified
+- [x] ~~Price formatting differs on three screens~~ — one `<Price>` component
+- [x] ~~Mobile touch targets and the buried request form~~ — header controls
+      are 44px on touch, and a sticky bar jumps to the form
 
 ## Before showing it to a real customer
 - [ ] Set `NEXT_PUBLIC_MAP_STYLE_URL` to a commercial tile provider (keyless OSM

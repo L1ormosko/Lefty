@@ -1,10 +1,9 @@
 /** Shared row renderers for the dashboards. */
 import Link from "next/link";
 import { t } from "@/lib/labels";
-import { CURRENCY } from "@/lib/constants";
 import { formatRange, formatDate } from "@/lib/dates";
 import { effectiveBookingStatus } from "@/lib/bookings";
-import { Card, Num } from "./ui";
+import { Card, Num, Price } from "./ui";
 import { StatusPill, bookingTone } from "./badges";
 
 export function InquiryRow({
@@ -66,11 +65,7 @@ export function InquiryRow({
         <div>
           <dt className="text-ink-500 text-xs">{t("request.budget")}</dt>
           <dd className="text-ink-900">
-            {inquiry.budget != null ? (
-              <Num>{`${CURRENCY}${inquiry.budget.toLocaleString("he-IL")}`}</Num>
-            ) : (
-              <span className="text-ink-400">{t("common.notProvided")}</span>
-            )}
+            <Price amount={inquiry.budget} />
           </dd>
         </div>
         <div>
@@ -145,6 +140,7 @@ export function InquiryRow({
 
 export function BookingRow({
   booking,
+  perspective = "advertiser",
   children,
 }: {
   booking: {
@@ -160,7 +156,10 @@ export function BookingRow({
       company?: { name: string; contactEmail: string; contactPhone: string | null } | null;
     };
     advertiser?: { name: string; email: string; phone?: string | null };
+    inquiryId?: string | null;
   };
+  /** Where this row lives, so the provenance link points at the right side. */
+  perspective?: "advertiser" | "owner";
   children?: React.ReactNode;
 }) {
   // COMPLETED is derived from the end date, never stored - see lib/bookings.ts.
@@ -184,11 +183,7 @@ export function BookingRow({
         <div>
           <dt className="text-ink-500 text-xs">{t("asset.priceFrom")}</dt>
           <dd>
-            {booking.priceEstimate != null ? (
-              <Num>{`${CURRENCY}${booking.priceEstimate.toLocaleString("he-IL")}`}</Num>
-            ) : (
-              <span className="text-ink-400">{t("common.notProvided")}</span>
-            )}
+            <Price amount={booking.priceEstimate} />
           </dd>
         </div>
         {booking.advertiser && (
@@ -207,6 +202,24 @@ export function BookingRow({
         )}
       </dl>
       {booking.ownerNote && <p className="mt-2 text-sm text-ink-700">{booking.ownerNote}</p>}
+
+      {/* Which conversation this booking came out of. Booking.inquiryId was
+          already stored and never shown, so comparing several concurrent
+          requests meant guessing which one turned into which booking. */}
+      {booking.inquiryId && (
+        <p className="mt-2 text-sm">
+          <Link
+            href={
+              perspective === "owner"
+                ? `/owner/inquiries/${booking.inquiryId}`
+                : `/dashboard/requests/${booking.inquiryId}`
+            }
+            className="text-brand-600 hover:underline"
+          >
+            {t("booking.fromInquiry")}
+          </Link>
+        </p>
+      )}
 
       {booking.advertiser?.email && (
         <p className="mt-1 text-sm">

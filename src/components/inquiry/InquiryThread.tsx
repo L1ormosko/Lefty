@@ -1,7 +1,6 @@
 import { t } from "@/lib/labels";
 import { formatDate, formatRange } from "@/lib/dates";
-import { CURRENCY } from "@/lib/constants";
-import { Card, Num } from "@/components/ui";
+import { Card, Num, Price } from "@/components/ui";
 import { InquiryMessageForm } from "@/components/InquiryMessageForm";
 
 type Message = {
@@ -64,11 +63,7 @@ export function InquiryThread({
           <div>
             <dt className="text-ink-500 text-xs">{t("request.budget")}</dt>
             <dd>
-              {inquiry.budget != null ? (
-                <Num>{`${CURRENCY}${inquiry.budget.toLocaleString("he-IL")}`}</Num>
-              ) : (
-                <span className="text-ink-400">{t("common.notProvided")}</span>
-              )}
+              <Price amount={inquiry.budget} />
             </dd>
           </div>
         </dl>

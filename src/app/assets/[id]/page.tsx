@@ -6,9 +6,9 @@ import { getCurrentUser } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { CURRENCY } from "@/lib/constants";
-import { formatRange, todayUtc } from "@/lib/dates";
+import { formatDate, formatRange, todayUtc } from "@/lib/dates";
 import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
-import { Card, ImagePlaceholder, Num } from "@/components/ui";
+import { Card, ImagePlaceholder, Num, Price, buttonClass } from "@/components/ui";
 import { AssetMiniMap } from "@/components/map/AssetMiniMap";
 import { RequestPanel } from "@/components/request/RequestPanel";
 import { SaveAssetButton } from "@/components/SaveAssetButton";
@@ -93,13 +93,26 @@ export default async function AssetPage({ params }: Params) {
                 {asset.city} · {asset.address}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <AvailabilityBadge state={availability} />
+                {/* An unverified asset reports its availability as
+                    PENDING_VERIFICATION, which renders the identical words the
+                    verification badge beside it already says. Two adjacent
+                    badges reading "ממתין לאימות" looked like a rendering bug.
+                    The verification badge is the one that means it. */}
+                {availability !== "PENDING_VERIFICATION" && <AvailabilityBadge state={availability} />}
                 <VerificationBadge status={asset.verificationStatus} />
                 {asset.isDemo && <DemoBadge />}
               </div>
               {asset.verificationStatus === "PENDING" && (
                 <p className="mt-3 text-sm text-ink-600 bg-ink-50 border border-ink-200 rounded p-3">
                   {t("verify.PENDING.help")}
+                </p>
+              )}
+              {/* A verification badge that names nobody and no date asks to be
+                  taken on faith. verifiedAt is already stored - saying when
+                  turns the badge into a checkable claim. */}
+              {asset.verificationStatus === "VERIFIED" && asset.verifiedAt && (
+                <p className="mt-3 text-xs text-ink-500">
+                  {t("verify.VERIFIED.when")} <Num>{formatDate(asset.verifiedAt)}</Num>
                 </p>
               )}
               {asset.isDemo && (
@@ -188,7 +201,7 @@ export default async function AssetPage({ params }: Params) {
                 label={t("asset.priceWeekly")}
                 value={
                   asset.priceWeekly != null ? (
-                    <Num>{`${CURRENCY}${asset.priceWeekly.toLocaleString("he-IL")}`}</Num>
+                    <Price amount={asset.priceWeekly} />
                   ) : (
                     unknown
                   )
@@ -198,7 +211,7 @@ export default async function AssetPage({ params }: Params) {
                 label={t("asset.priceMonthly")}
                 value={
                   asset.priceMonthly != null ? (
-                    <Num>{`${CURRENCY}${asset.priceMonthly.toLocaleString("he-IL")}`}</Num>
+                    <Price amount={asset.priceMonthly} />
                   ) : (
                     unknown
                   )
@@ -285,7 +298,7 @@ export default async function AssetPage({ params }: Params) {
         </div>
 
         {/* Request panel */}
-        <div className="lg:sticky lg:top-20">
+        <div id="request" className="lg:sticky lg:top-20 pb-20 lg:pb-0">
           <RequestPanel
             assetId={asset.id}
             title={asset.title}
@@ -298,6 +311,29 @@ export default async function AssetPage({ params }: Params) {
               user ? { contactName: user.name, contactEmail: user.email, contactPhone: user.phone ?? "" } : undefined
             }
           />
+        </div>
+      </div>
+
+      {/*
+        On a phone the request form sits under roughly 2,500px of specification,
+        pricing, availability and owner detail, with nothing at the top offering
+        a way down to it. This bar is the way down. Desktop already has the
+        panel pinned beside the content, so it only exists on small screens.
+        scroll-padding-top in globals.css keeps the target clear of the sticky
+        header.
+      */}
+      <div className="lg:hidden fixed inset-x-0 bottom-0 z-20 border-t border-ink-200 bg-white/95 backdrop-blur px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-ink-900 truncate">
+              {priceLine ?? t("asset.priceNotPublished")}
+            </p>
+          </div>
+          {/* A shorter label than the panel's own heading: the full
+              "בדיקת זמינות ומחיר" truncates inside a bar that also shows the price. */}
+          <a href="#request" className={buttonClass("primary", "md", "shrink-0 whitespace-nowrap")}>
+            {t("asset.requestShort")}
+          </a>
         </div>
       </div>
     </main>

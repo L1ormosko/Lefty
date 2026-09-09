@@ -30,7 +30,7 @@ export default async function OwnerBookings() {
       ) : (
         <div className="space-y-3">
           {bookings.map((booking) => (
-            <BookingRow key={booking.id} booking={booking}>
+            <BookingRow key={booking.id} booking={booking} perspective="owner">
               {booking.status === "REQUESTED" && <BookingDecision bookingId={booking.id} />}
               {/* cancelBooking and loadOwnBooking already handled the owner
                   side and notified the advertiser; only this button was

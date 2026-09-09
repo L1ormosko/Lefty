@@ -1,6 +1,8 @@
 /** Small shared primitives. Restrained on purpose: one button, one card, one badge. */
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { t } from "@/lib/labels";
+import { CURRENCY } from "@/lib/constants";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -120,6 +122,41 @@ export const textareaClass =
 /** Numbers, prices and dates stay LTR inside Hebrew sentences. */
 export function Num({ children, className }: { children: ReactNode; className?: string }) {
   return <bdi className={cx("num", className)}>{children}</bdi>;
+}
+
+/**
+ * A shekel amount.
+ *
+ * Prices were formatted at eight call sites with the same template literal
+ * copied around, and rendered three visibly different ways across the explore
+ * cards, the asset page and the dashboard tiles. One component, so the
+ * thousands separator, the currency position and the LTR isolation are decided
+ * once. `null` is the honest "not published" case rather than a zero.
+ */
+export function Price({
+  amount,
+  per,
+  from,
+  fallback,
+  className,
+}: {
+  amount: number | null | undefined;
+  /** "חודש" / "שבוע" - omitted for a plain total. */
+  per?: string;
+  from?: boolean;
+  fallback?: ReactNode;
+  className?: string;
+}) {
+  if (amount == null) {
+    return <span className={cx("text-ink-400", className)}>{fallback ?? t("common.notProvided")}</span>;
+  }
+  return (
+    <span className={className}>
+      {from && t("asset.priceFrom")}
+      <Num>{`${CURRENCY}${amount.toLocaleString("he-IL")}`}</Num>
+      {per && ` / ${per}`}
+    </span>
+  );
 }
 
 export function EmptyState({

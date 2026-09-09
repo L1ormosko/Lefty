@@ -10,6 +10,9 @@ function dashboardHref(role: SessionUser["role"]) {
   return "/dashboard";
 }
 
+/** 44px on touch, compact on a pointer device. */
+const TOUCH = "min-h-11 sm:min-h-0";
+
 export function SiteHeader({ user, unread }: { user: SessionUser | null; unread: number }) {
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-ink-200">
@@ -22,7 +25,7 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
         </span>
 
         <nav className="ms-auto flex items-center gap-1 sm:gap-2" aria-label="ניווט ראשי">
-          <Link href="/explore" className="text-sm text-ink-700 hover:text-ink-900 px-2 py-1">
+          <Link href="/explore" className="inline-flex items-center min-h-11 text-sm text-ink-700 hover:text-ink-900 px-2">
             {t("nav.explore")}
           </Link>
           {!user && (
@@ -34,7 +37,7 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
             <>
               <Link
                 href={`${dashboardHref(user.role)}/notifications`}
-                className="relative text-sm text-ink-700 hover:text-ink-900 px-2 py-1"
+                className="relative inline-flex items-center min-h-11 text-sm text-ink-700 hover:text-ink-900 px-2"
               >
                 {t("nav.notifications")}
                 {unread > 0 && (
@@ -43,17 +46,17 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
                   </span>
                 )}
               </Link>
-              <LinkButton href={dashboardHref(user.role)} variant="secondary" size="sm">
+              <LinkButton href={dashboardHref(user.role)} variant="secondary" size="sm" className={TOUCH}>
                 {t("nav.dashboard")}
               </LinkButton>
               <LogoutButton />
             </>
           ) : (
             <>
-              <LinkButton href="/login" variant="ghost" size="sm">
+              <LinkButton href="/login" variant="ghost" size="sm" className={TOUCH}>
                 {t("nav.login")}
               </LinkButton>
-              <LinkButton href="/register" size="sm">
+              <LinkButton href="/register" size="sm" className={TOUCH}>
                 {t("nav.register")}
               </LinkButton>
             </>

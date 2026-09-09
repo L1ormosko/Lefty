@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { DEV_PASSWORD, register, uniqueEmail } from "./helpers";
+import { DEV_PASSWORD, login, register, uniqueEmail } from "./helpers";
 
 /**
  * The three rights /privacy promises, exercised through the interface a real
@@ -68,4 +68,24 @@ test("changing the password requires the current one", async ({ page }) => {
   await page.locator("#password").fill("a-brand-new-password");
   await page.getByRole("button", { name: "עדכון סיסמה" }).click();
   await expect(page.getByText("הסיסמה הנוכחית שגויה.")).toBeVisible();
+});
+
+test("a destructive action asks before it fires", async ({ page }) => {
+  // Cancelling a booking used to happen on a single click, with nothing to
+  // undo. This checks the guard without actually cancelling anything: back out
+  // of the confirmation and the booking must still be there.
+  await login(page, "advertiser@velto.dev");
+  await page.goto("/dashboard/bookings");
+
+  const cancel = page.getByRole("button", { name: "ביטול" }).first();
+  if ((await cancel.count()) === 0) return; // nothing cancellable in this run
+  await cancel.click();
+
+  await expect(page.getByText(/לבטל את ההזמנה\?/)).toBeVisible();
+  // The confirm and the back-out must not read the same: "ביטול" next to
+  // "ביטול" meaning opposite things is how someone ends the wrong booking.
+  await expect(page.getByRole("button", { name: "כן, לבטל את ההזמנה" })).toBeVisible();
+  await page.getByRole("button", { name: "חזרה" }).first().click();
+  await expect(page.getByText(/לבטל את ההזמנה\?/)).toHaveCount(0);
+  await expect(page.getByText("בוטלה")).toHaveCount(0);
 });
