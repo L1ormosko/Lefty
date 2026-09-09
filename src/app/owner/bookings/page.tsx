@@ -6,6 +6,8 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState } from "@/components/ui";
 import { BookingRow } from "@/components/lists";
 import { BookingDecision } from "@/components/BookingDecision";
+import { CancelBookingButton } from "@/components/CancelBookingButton";
+import { isLiveBooking } from "@/lib/bookings";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,10 @@ export default async function OwnerBookings() {
           {bookings.map((booking) => (
             <BookingRow key={booking.id} booking={booking}>
               {booking.status === "REQUESTED" && <BookingDecision bookingId={booking.id} />}
+              {/* cancelBooking and loadOwnBooking already handled the owner
+                  side and notified the advertiser; only this button was
+                  missing, so an owner who needed to pull out had no way to. */}
+              {isLiveBooking(booking) && <CancelBookingButton bookingId={booking.id} />}
             </BookingRow>
           ))}
         </div>

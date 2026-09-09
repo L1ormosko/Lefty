@@ -9,6 +9,7 @@ import { AvailabilityBadge, StatusPill, VerificationBadge } from "@/components/b
 import { CURRENCY } from "@/lib/constants";
 import { availabilityFor } from "@/lib/availability";
 import { AssetStatusToggle } from "@/components/owner/AssetStatusToggle";
+import { DeleteAssetButton } from "@/components/owner/DeleteAssetButton";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,13 @@ export default async function OwnerAssets() {
                     <AssetStatusToggle assetId={asset.id} status={asset.status} />
                   </>
                 )}
+                {/* _count is already loaded for the summary line above, so
+                    "has anyone engaged with this listing" costs no extra query. */}
+                <DeleteAssetButton
+                  assetId={asset.id}
+                  status={asset.status}
+                  engaged={asset._count.inquiries > 0 || asset._count.bookings > 0}
+                />
               </div>
             </Card>
           ))}

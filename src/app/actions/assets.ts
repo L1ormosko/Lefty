@@ -261,3 +261,59 @@ export async function deleteAssetImageAction(imageId: string): Promise<AssetActi
     return { ok: false, error: toUserMessage(err) };
   }
 }
+
+/**
+ * Delete an asset - but only when deleting it destroys nothing of anyone
+ * else's.
+ *
+ * MediaAsset cascades to images, availability periods, inquiries, bookings and
+ * saved-asset rows. That makes a plain delete the same trap account deletion
+ * had: it would erase advertisers' booking history because the owner tidied up
+ * their listings. So a hard delete is allowed only for a draft that nobody has
+ * ever engaged with - there is no counterparty record to take down with it.
+ *
+ * Anything else deactivates instead, which is the honest equivalent: an
+ * INACTIVE asset leaves the map immediately and stops exposing its contact
+ * details, while the bookings made against it survive.
+ */
+export async function deleteAssetAction(assetId: string): Promise<AssetActionState> {
+  try {
+    const user = await requireUser();
+    const asset = await loadOwnedAsset(assetId, user);
+
+    const [inquiries, bookings] = await Promise.all([
+      prisma.inquiry.count({ where: { assetId: asset.id } }),
+      prisma.booking.count({ where: { assetId: asset.id } }),
+    ]);
+    const engaged = inquiries > 0 || bookings > 0;
+
+    if (asset.status === "DRAFT" && !engaged) {
+      await prisma.mediaAsset.delete({ where: { id: asset.id } });
+      revalidatePath("/owner/assets");
+      return { ok: true, assetId: asset.id, message: "השטח נמחק." };
+    }
+
+    if (asset.status === "INACTIVE") {
+      return {
+        ok: false,
+        error: engaged
+          ? "לשטח יש פניות או הזמנות, ולכן הוא מושבת ולא נמחק — מחיקתו הייתה מוחקת גם את ההיסטוריה של הצד השני."
+          : "השטח כבר מושבת.",
+      };
+    }
+
+    await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status: "INACTIVE" } });
+    revalidatePath("/owner/assets");
+    revalidatePath("/explore");
+    revalidatePath("/");
+    return {
+      ok: true,
+      assetId: asset.id,
+      message: engaged
+        ? "השטח הושבת וירד מהמפה. הוא לא נמחק, כדי לא למחוק את היסטוריית ההזמנות של הצד השני."
+        : "השטח הושבת וירד מהמפה.",
+    };
+  } catch (err) {
+    return { ok: false, error: toUserMessage(err) };
+  }
+}

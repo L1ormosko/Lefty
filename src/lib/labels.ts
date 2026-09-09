@@ -163,6 +163,12 @@ const he: Dict = {
   "asset.removal": "פירוק",
   "asset.notIncluded": "לא כלול",
   "asset.owner": "בעל השטח",
+  "asset.delete": "מחיקת השטח",
+  "asset.deleteConfirm": "השטח טיוטה ואיש לא פנה לגביו — למחוק לצמיתות?",
+  "asset.takeDown": "הסרה מהמפה",
+  "asset.takeDownConfirm": "השטח יורד מהמפה ויעבור לסטטוס לא פעיל. להמשיך?",
+  "asset.takeDownConfirmEngaged":
+    "לשטח יש פניות או הזמנות, ולכן הוא יושבת ולא יימחק — מחיקה הייתה מוחקת גם את היסטוריית ההזמנות של הצד השני. להמשיך?",
   "asset.availabilityPeriods": "חלונות זמינות שהוגדרו",
   "asset.noPeriods": "בעל השטח טרם הגדיר חלונות זמינות.",
   "asset.save": "שמירה לרשימה",

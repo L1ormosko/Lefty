@@ -10,6 +10,7 @@
 import "server-only";
 import { Prisma, type BookingStatus } from "@prisma/client";
 import { prisma } from "./db";
+import { isLiveBooking } from "@/lib/bookings";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { notify } from "./notifications";
 import { daysBetween, toUtcDate, todayUtc } from "@/lib/dates";
@@ -167,8 +168,15 @@ export async function cancelBooking(bookingId: string, byUserId: string) {
     include: { asset: { select: { ownerId: true, title: true } } },
   });
   if (!booking) throw new NotFoundError();
-  if (booking.status === "CANCELLED" || booking.status === "COMPLETED") {
+  // COMPLETED is derived, so the stored value is never that - checking for it
+  // here would have been a guard that could not fire. What actually must be
+  // refused is cancelling a booking that has already run: those dates were
+  // used, and "cancelled" would be a false record of them.
+  if (booking.status === "REJECTED" || booking.status === "CANCELLED") {
     throw new ConflictError("לא ניתן לבטל הזמנה זו.");
+  }
+  if (booking.status === "APPROVED" && !isLiveBooking(booking)) {
+    throw new ConflictError("לא ניתן לבטל הזמנה שכבר הסתיימה.");
   }
   const updated = await prisma.booking.update({
     where: { id: bookingId },

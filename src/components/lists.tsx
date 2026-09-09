@@ -3,6 +3,7 @@ import Link from "next/link";
 import { t } from "@/lib/labels";
 import { CURRENCY } from "@/lib/constants";
 import { formatRange, formatDate } from "@/lib/dates";
+import { effectiveBookingStatus } from "@/lib/bookings";
 import { Card, Num } from "./ui";
 import { StatusPill, bookingTone } from "./badges";
 
@@ -150,6 +151,8 @@ export function BookingRow({
   };
   children?: React.ReactNode;
 }) {
+  // COMPLETED is derived from the end date, never stored - see lib/bookings.ts.
+  const status = effectiveBookingStatus(booking);
   const showOwnerContact = booking.status === "APPROVED" && booking.asset.company;
   return (
     <Card className="p-4">
@@ -157,7 +160,7 @@ export function BookingRow({
         <Link href={`/assets/${booking.asset.id}`} className="font-medium text-ink-900 hover:underline flex-1 min-w-0">
           {booking.asset.title}
         </Link>
-        <StatusPill label={t(`booking.${booking.status}`)} tone={bookingTone(booking.status)} />
+        <StatusPill label={t(`booking.${status}`)} tone={bookingTone(status)} />
       </div>
       <dl className="mt-3 grid sm:grid-cols-3 gap-2 text-sm">
         <div>

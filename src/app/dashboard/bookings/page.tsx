@@ -6,6 +6,7 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState, LinkButton } from "@/components/ui";
 import { BookingRow } from "@/components/lists";
 import { CancelBookingButton } from "@/components/CancelBookingButton";
+import { isLiveBooking } from "@/lib/bookings";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export default async function MyBookings() {
         <div className="space-y-3">
           {bookings.map((booking) => (
             <BookingRow key={booking.id} booking={booking}>
-              {(booking.status === "REQUESTED" || booking.status === "APPROVED") && (
+              {(booking.status === "REQUESTED" || isLiveBooking(booking)) && (
                 <CancelBookingButton bookingId={booking.id} />
               )}
             </BookingRow>

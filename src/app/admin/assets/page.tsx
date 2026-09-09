@@ -4,7 +4,7 @@ import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
-import { Card, EmptyState, Num, cx } from "@/components/ui";
+import { Card, EmptyState, LinkButton, Num, cx } from "@/components/ui";
 import { DemoBadge, StatusPill, VerificationBadge } from "@/components/badges";
 import { VerifyAssetForm } from "@/components/admin/VerifyAssetForm";
 
@@ -33,6 +33,24 @@ export default async function AdminAssets({
           ? {}
           : { verificationStatus: "PENDING" as const, status: { not: "DRAFT" as const } };
 
+  // Counts on every tab. The default view is "pending" because that is the
+  // admin's actual queue, but with 0 pending assets it opened on a bare empty
+  // state that read as a broken page while 16 assets sat one tab away. A tab
+  // labelled 0 next to one labelled 16 explains itself.
+  const pendingWhere = { verificationStatus: "PENDING" as const, status: { not: "DRAFT" as const } };
+  const [countPending, countVerified, countRejected, countAll] = await Promise.all([
+    prisma.mediaAsset.count({ where: pendingWhere }),
+    prisma.mediaAsset.count({ where: { verificationStatus: "VERIFIED" } }),
+    prisma.mediaAsset.count({ where: { verificationStatus: "REJECTED" } }),
+    prisma.mediaAsset.count(),
+  ]);
+  const counts: Record<string, number> = {
+    pending: countPending,
+    verified: countVerified,
+    rejected: countRejected,
+    all: countAll,
+  };
+
   const assets = await prisma.mediaAsset.findMany({
     where,
     orderBy: { updatedAt: "desc" },
@@ -56,12 +74,30 @@ export default async function AdminAssets({
             )}
           >
             {f.label}
+            <span
+              className={cx(
+                "ms-1.5 text-xs tabular-nums",
+                filter === f.key ? "text-white/70" : "text-ink-400"
+              )}
+            >
+              <Num>{counts[f.key]}</Num>
+            </span>
           </Link>
         ))}
       </div>
 
       {assets.length === 0 ? (
-        <EmptyState title="אין שטחים בסטטוס זה." />
+        <EmptyState
+          title="אין שטחים בסטטוס זה."
+          hint={countAll > 0 ? `במערכת יש ${countAll} שטחים בסטטוסים אחרים.` : undefined}
+          action={
+            countAll > 0 && filter !== "all" ? (
+              <LinkButton href="/admin/assets?filter=all" variant="secondary" size="sm">
+                הצגת כל השטחים
+              </LinkButton>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="space-y-3">
           {assets.map((asset) => (
