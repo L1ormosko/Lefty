@@ -28,7 +28,11 @@ export default async function OwnerOverview() {
         where: scope,
         orderBy: { createdAt: "desc" },
         take: 3,
-        include: { asset: { select: { id: true, title: true } } },
+        include: {
+          asset: { select: { id: true, title: true } },
+        messages: { orderBy: { createdAt: "desc" }, take: 1, select: { body: true, createdAt: true } },
+        _count: { select: { messages: true } },
+        },
       }),
     ]);
   const pipelineValue = pipeline._sum.priceEstimate ?? 0;

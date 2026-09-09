@@ -13,7 +13,11 @@ export default async function AdminInquiries() {
   const inquiries = await prisma.inquiry.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
-    include: { asset: { select: { id: true, title: true } } },
+    include: {
+      asset: { select: { id: true, title: true } },
+      messages: { orderBy: { createdAt: "desc" }, take: 1, select: { body: true, createdAt: true } },
+      _count: { select: { messages: true } },
+    },
   });
 
   return (

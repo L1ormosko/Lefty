@@ -28,6 +28,14 @@ async function world() {
     },
   });
 
+  await prisma.inquiryMessage.create({
+    data: {
+      inquiryId: inquiry.id,
+      authorId: advertiser.id,
+      body: "אפשר לחזור אליי? דנה, 050-1234567",
+    },
+  });
+
   const booking = await prisma.booking.create({
     data: {
       assetId: asset.id,
@@ -100,6 +108,22 @@ describe("account erasure", () => {
     // Free text the user wrote can name people or carry a phone number.
     expect(after.message).toBeNull();
     expect(after.campaignName).not.toContain("דנה");
+  });
+
+  it("scrubs the messages the user wrote in the thread", async () => {
+    // Adding inquiry threads created a second place free text lives. Without
+    // this, the thread feature would have quietly reopened the hole that the
+    // erasure work closed - the name and phone number would sit in the
+    // conversation after the account was "deleted".
+    const { advertiser } = await world();
+    await anonymizeUser(advertiser.id);
+
+    const messages = await prisma.inquiryMessage.findMany({ where: { authorId: advertiser.id } });
+    expect(messages.length).toBeGreaterThan(0);
+    for (const m of messages) {
+      expect(m.body).not.toContain("דנה");
+      expect(m.body).not.toContain("050-1234567");
+    }
   });
 
   it("keeps the counterparty's commercial records intact", async () => {

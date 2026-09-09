@@ -139,9 +139,10 @@ export const inquirySchema = z
     path: ["endDate"],
   });
 
-export const inquiryResponseSchema = z.object({
+/** A message on an inquiry, from either side of the conversation. */
+export const inquiryMessageSchema = z.object({
   inquiryId: z.string().min(1),
-  ownerResponse: z.string().trim().min(2, "יש להזין תשובה").max(2000),
+  body: z.string().trim().min(2, "יש להזין הודעה").max(2000),
 });
 
 export const bookingDecisionSchema = z.object({

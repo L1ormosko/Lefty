@@ -4,9 +4,10 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db";
 import { requireUser } from "@/server/auth";
 import { loadOwnInquiry } from "@/server/authz";
-import { inquirySchema, inquiryResponseSchema, fieldErrors } from "@/lib/validation";
+import { inquirySchema, inquiryMessageSchema, fieldErrors } from "@/lib/validation";
 import { toUserMessage, ValidationError } from "@/server/errors";
 import { createBookingRequest, validateRequestWindow } from "@/server/bookings";
+import { postInquiryMessage } from "@/server/inquiries";
 import { notify } from "@/server/notifications";
 import { toUtcDate } from "@/lib/dates";
 import { rateLimit } from "@/server/rate-limit";
@@ -92,34 +93,21 @@ export async function createInquiryAction(_prev: ActionState, formData: FormData
 }
 
 /** Media owner responds to an inquiry. */
-export async function respondToInquiryAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+/**
+ * Add a message to an inquiry. Either side may write - the whole point of the
+ * thread is that the conversation can continue past one answer.
+ */
+export async function postInquiryMessageAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   try {
     const user = await requireUser();
-    const parsed = inquiryResponseSchema.safeParse(Object.fromEntries(formData));
+    const parsed = inquiryMessageSchema.safeParse(Object.fromEntries(formData));
     if (!parsed.success) return { ok: false, fields: fieldErrors(parsed.error) };
 
-    const { inquiry, isOwner } = await loadOwnInquiry(parsed.data.inquiryId, user);
-    if (!isOwner && user.role !== "ADMIN") {
-      return { ok: false, error: "רק בעל השטח יכול להשיב לפנייה." };
-    }
+    const { inquiry } = await loadOwnInquiry(parsed.data.inquiryId, user);
+    await postInquiryMessage({ inquiryId: inquiry.id, authorId: user.id, body: parsed.data.body });
 
-    await prisma.inquiry.update({
-      where: { id: inquiry.id },
-      data: {
-        ownerResponse: parsed.data.ownerResponse,
-        status: "RESPONDED",
-        respondedAt: new Date(),
-      },
-    });
-
-    await notify({
-      userId: inquiry.advertiserId,
-      type: "INQUIRY_RESPONDED",
-      title: `התקבל מענה: ${inquiry.asset.title}`,
-      body: parsed.data.ownerResponse.slice(0, 200),
-      linkUrl: "/dashboard/requests",
-    });
-
+    revalidatePath(`/owner/inquiries/${inquiry.id}`);
+    revalidatePath(`/dashboard/requests/${inquiry.id}`);
     revalidatePath("/owner/inquiries");
     revalidatePath("/dashboard/requests");
     return { ok: true, message: t("dash.responseSent") };

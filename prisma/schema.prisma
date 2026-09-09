@@ -116,6 +116,7 @@ model User {
   savedAssets         SavedAsset[]
   notifications       Notification[]
   passwordResetTokens PasswordResetToken[]
+  inquiryMessages     InquiryMessage[]
 
   @@index([role])
   @@index([companyId])
@@ -287,17 +288,36 @@ model Inquiry {
   contactEmail  String
   contactPhone  String?
   status        InquiryStatus @default(PENDING)
-  ownerResponse String?
   respondedAt   DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  asset      MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  advertiser User       @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  asset      MediaAsset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  advertiser User             @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
   bookings   Booking[]
+  messages   InquiryMessage[]
 
   @@index([assetId, status])
   @@index([advertiserId, createdAt])
+}
+
+/// One message in the conversation on an inquiry.
+///
+/// The inquiry used to hold a single `ownerResponse` string: one question, one
+/// answer, and nowhere to put the second round that every real negotiation
+/// has. Those responses were migrated into this table, so the conversation has
+/// exactly one representation.
+model InquiryMessage {
+  id        String   @id @default(cuid())
+  inquiryId String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  inquiry Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  author  User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([inquiryId, createdAt])
 }
 
 model Booking {

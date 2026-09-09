@@ -79,8 +79,8 @@ export async function exportUserData(userId: string) {
           contactEmail: true,
           contactPhone: true,
           status: true,
-          ownerResponse: true,
           createdAt: true,
+          messages: { select: { body: true, createdAt: true } },
           asset: { select: { id: true, title: true, city: true } },
         },
       },
@@ -211,6 +211,14 @@ export async function anonymizeUser(userId: string): Promise<void> {
         campaignName: REDACTED,
         message: null,
       },
+    });
+
+    // Messages are free text this person wrote, exactly like Inquiry.message
+    // above. Adding the thread without adding this line would have quietly
+    // reopened the hole the erasure work closed.
+    await tx.inquiryMessage.updateMany({
+      where: { authorId: userId },
+      data: { body: REDACTED },
     });
 
     // A media owner's assets are not deleted - that would cascade away other

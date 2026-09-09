@@ -21,8 +21,10 @@ export function InquiryRow({
     message: string | null;
     status: string;
     intent: string;
-    ownerResponse: string | null;
     createdAt: Date;
+    /** Latest message first; the list only ever needs the most recent one. */
+    messages?: { body: string; createdAt: Date }[];
+    _count?: { messages: number };
     contactName?: string;
     contactEmail?: string;
     contactPhone?: string | null;
@@ -100,10 +102,20 @@ export function InquiryRow({
         </p>
       )}
 
-      {inquiry.ownerResponse && (
+      {inquiry.messages?.[0] && (
         <div className="mt-3 border-s-2 border-brand-500 ps-3">
-          <p className="text-xs text-ink-500">{t("dash.respond")}</p>
-          <p className="text-sm text-ink-800 whitespace-pre-line">{inquiry.ownerResponse}</p>
+          <p className="text-xs text-ink-500">
+            {t("inquiry.lastMessage")}
+            {inquiry._count && inquiry._count.messages > 1 && (
+              <>
+                {" · "}
+                <Num>{inquiry._count.messages}</Num> {t("inquiry.messages")}
+              </>
+            )}
+          </p>
+          <p className="text-sm text-ink-800 whitespace-pre-line line-clamp-3">
+            {inquiry.messages[0].body}
+          </p>
         </div>
       )}
 

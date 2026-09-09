@@ -22,6 +22,8 @@ export default async function MyRequests() {
           company: { select: { name: true, contactEmail: true, contactPhone: true } },
         },
       },
+      messages: { orderBy: { createdAt: "desc" }, take: 1, select: { body: true, createdAt: true } },
+      _count: { select: { messages: true } },
     },
   });
   const pending = inquiries.filter((i) => i.status === "PENDING").length;
@@ -37,7 +39,11 @@ export default async function MyRequests() {
       ) : (
         <div className="space-y-3">
           {inquiries.map((inquiry) => (
-            <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="advertiser" />
+            <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="advertiser">
+              <LinkButton href={`/dashboard/requests/${inquiry.id}`} variant="secondary" size="sm">
+                {t("inquiry.openThread")}
+              </LinkButton>
+            </InquiryRow>
           ))}
         </div>
       )}

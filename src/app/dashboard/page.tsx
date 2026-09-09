@@ -30,6 +30,8 @@ export default async function AdvertiserOverview() {
             company: { select: { name: true, contactEmail: true, contactPhone: true } },
           },
         },
+        messages: { orderBy: { createdAt: "desc" }, take: 1, select: { body: true, createdAt: true } },
+        _count: { select: { messages: true } },
       },
     }),
   ]);
