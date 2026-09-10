@@ -1,4 +1,17 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
+
+// Load .env without adding a dependency, the same way tests/setup.ts does.
+// The suite signs in as the seeded accounts, so it needs SEED_PASSWORD - and
+// Playwright, unlike Prisma, does not read .env on its own.
+try {
+  for (const line of readFileSync(".env", "utf8").split("\n")) {
+    const match = /^([A-Z0-9_]+)="?([^"\n]*)"?$/.exec(line.trim());
+    if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
+  }
+} catch {
+  // Optional: CI may provide the variables directly.
+}
 
 const BROWSER = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 

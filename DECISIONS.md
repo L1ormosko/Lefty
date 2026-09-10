@@ -234,3 +234,37 @@ Three consequences that are easy to miss and are covered by tests:
 Not built: a grace period before the erasure takes effect. It needs a scheduled
 job, which the current hosting plan does not have, and a deletion that silently
 does not happen yet would be its own kind of dishonesty.
+
+## 16. Seed credentials come from the environment, and missing means failure
+
+The deploy's build command ends with `npm run seed:dev`, so `prisma/seed.ts`
+runs against the production database on every deploy and creates
+`admin@velto.dev`. Its password was a constant in that file. The repository is
+public. Those two facts together meant a working ADMIN login for the live site
+was published on GitHub - able to verify and reject assets and to deactivate
+users - for as long as both were true.
+
+The fix is small; the reasoning worth keeping is about the failure mode:
+
+- **No default.** `requireSeedPassword()` throws when `SEED_PASSWORD` is unset.
+  The tempting alternative - fall back to a built-in value - is precisely how
+  the hole returns, silently, the first time someone deploys without the
+  variable set.
+- **Fail loudly, do not skip.** A seed that quietly no-ops on missing config
+  would leave an empty database and no signal. A failed deploy is far cheaper
+  than an exposed admin account, so the seed exits non-zero.
+- **A length floor.** 24 characters, so the variable cannot be satisfied with
+  something typed in a hurry.
+- **The password is never printed.** The old seed echoed it to stdout. Build
+  logs are retained and readable in the hosting dashboard, so logging the
+  credential would undo half the point of moving it out of the file.
+- **`SEED_DEMO` gates the whole thing**, defaulting to off. Turning the demo
+  off for a real launch is now one environment variable rather than a code
+  change - which matters because this seed deletes and recreates the demo rows
+  every time it runs.
+
+The guard is unit-tested against an injected environment rather than by
+mutating `process.env`. That is not fussiness: Prisma's client loads `.env` on
+import, so an early manual check of the "missing password" case passed when it
+should have failed. The test takes the environment as an argument so it cannot
+be fooled the same way.

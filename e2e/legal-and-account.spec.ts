@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { uniqueEmail } from "./helpers";
+import { DEV_PASSWORD, uniqueEmail } from "./helpers";
 
 test("the three legal pages render and link to each other", async ({ page }) => {
   await page.goto("/takanon");
@@ -18,7 +18,7 @@ test("registration is blocked without accepting the terms", async ({ page }) => 
   await page.goto("/register?role=ADVERTISER");
   await page.locator("#name").fill("בודק ללא הסכמה");
   await page.locator("#email").fill(uniqueEmail("noconsent"));
-  await page.locator("#password").fill("velto-dev-1234");
+  await page.locator("#password").fill(DEV_PASSWORD);
   // The terms checkbox is left unchecked on purpose.
   await page.getByRole("button", { name: "יצירת חשבון" }).click();
   // A required, unchecked checkbox blocks native form submission - still on /register.

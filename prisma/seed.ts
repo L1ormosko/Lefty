@@ -1,18 +1,25 @@
 /**
- * Development seed.
+ * Demo seed.
  *
  * Everything created here is flagged isDemo: true. These are NOT real
  * commercial listings - the UI labels them as development/demo records.
- * Credentials below are for local development only.
+ *
+ * Two things about this file are easy to forget and were both true at once:
+ * the repository is public, and the deploy's build command ends with
+ * `npm run seed:dev`. So a password written here was a working ADMIN login for
+ * the live site, published on GitHub. That is not hypothetical - it was the
+ * case until this change, and the credential has since been rotated.
+ *
+ * Hence no credential lives here any more, and there is no fallback - a
+ * fallback is exactly how that hole comes back quietly. See DECISIONS.md 16.
  */
 import { PrismaClient, type AssetType, type Illumination } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { demoImage } from "./demo-image";
+import { demoSeedEnabled, requireSeedPassword } from "./seed-config";
 
 const prisma = new PrismaClient();
-
-const DEV_PASSWORD = "velto-dev-1234";
 
 function d(iso: string) {
   return new Date(`${iso}T00:00:00.000Z`);
@@ -230,8 +237,16 @@ const REST_OF_ISRAEL: AssetSeed[] = [
 ];
 
 async function main() {
-  console.log("Seeding VELTO development data…");
-  const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
+  // The switch that turns demo data off for a real launch: one environment
+  // variable rather than a code change, because this seed deletes and recreates
+  // the demo rows on every single deploy.
+  if (!demoSeedEnabled()) {
+    console.log("SEED_DEMO is not \"1\" - skipping demo data entirely.");
+    return;
+  }
+
+  console.log("Seeding VELTO demo data…");
+  const passwordHash = await bcrypt.hash(requireSeedPassword(), 10);
 
   // Remove previous demo data only. Real records are never touched.
   await prisma.mediaAsset.deleteMany({ where: { isDemo: true } });
@@ -411,11 +426,13 @@ async function main() {
   });
 
   console.log(`Created ${created.length} demo assets, 4 users.`);
-  console.log("Development logins (local only):");
-  console.log(`  admin@velto.dev / ${DEV_PASSWORD}`);
-  console.log(`  owner@velto.dev / ${DEV_PASSWORD}`);
-  console.log(`  owner2@velto.dev / ${DEV_PASSWORD}`);
-  console.log(`  advertiser@velto.dev / ${DEV_PASSWORD}`);
+  // The password is deliberately not printed. Build logs are retained and
+  // readable in the hosting dashboard; echoing the credential there would
+  // undo half the point of moving it out of the file.
+  console.log("Demo logins (password: the SEED_PASSWORD value for this environment):");
+  for (const email of ["admin@velto.dev", "owner@velto.dev", "owner2@velto.dev", "advertiser@velto.dev"]) {
+    console.log(`  ${email}`);
+  }
   console.log(`Inquiry seeded: ${inquiry.id}`);
 }
 

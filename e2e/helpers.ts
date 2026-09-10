@@ -1,7 +1,22 @@
 import { randomUUID } from "node:crypto";
 import type { Cookie, Page } from "@playwright/test";
 
-export const DEV_PASSWORD = "velto-dev-1234";
+/**
+ * The seeded accounts' password, from the same environment variable the seed
+ * reads. Hard-coding it here would have meant the tests kept passing while the
+ * real password changed - and the temptation would be to paste the literal
+ * back in.
+ */
+export const DEV_PASSWORD = (() => {
+  const value = process.env.SEED_PASSWORD;
+  if (!value) {
+    throw new Error(
+      "SEED_PASSWORD is not set. The e2e suite signs in as the seeded accounts, " +
+        "so it needs the same password the seed used. Set it in .env."
+    );
+  }
+  return value;
+})();
 
 export function uniqueEmail(prefix: string) {
   return `${prefix}-${randomUUID().slice(0, 8)}@velto-e2e.local`;
