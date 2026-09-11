@@ -2,6 +2,7 @@ import { t } from "./labels";
 
 export const advertiserNav = (counts: { requests?: number } = {}) => [
   { href: "/dashboard", label: t("dash.overview") },
+  { href: "/brief", label: t("nav.brief") },
   { href: "/dashboard/requests", label: t("dash.myRequests"), badge: counts.requests },
   { href: "/dashboard/bookings", label: t("dash.myBookings") },
   { href: "/dashboard/saved", label: t("dash.savedAssets") },

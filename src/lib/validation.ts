@@ -1,6 +1,6 @@
 /** Input schemas. Everything crossing the network boundary is parsed here. */
 import { z } from "zod";
-import { ASSET_TYPES, ILLUMINATIONS, PERMIT_STATUSES, ISRAEL_BOUNDS } from "./constants";
+import { ASSET_TYPES, ILLUMINATIONS, LOCATION_TAGS, PERMIT_STATUSES, ISRAEL_BOUNDS } from "./constants";
 
 const isoDateString = z
   .string()
@@ -98,6 +98,10 @@ export const assetSpecsSchema = z.object({
   illumination: z.enum(ILLUMINATIONS as [string, ...string[]]).default("UNKNOWN"),
   isDigital: z.coerce.boolean().default(false),
   permitStatus: z.enum(PERMIT_STATUSES as [string, ...string[]]).default("UNKNOWN"),
+  // Owner-declared surroundings. Unknown values are rejected rather than
+  // dropped: a tag that is not in our vocabulary means the form and the schema
+  // have drifted apart, which is worth failing on.
+  locationTags: z.array(z.enum(LOCATION_TAGS as [string, ...string[]])).max(11).default([]),
 });
 
 export const assetPricingSchema = z.object({
@@ -170,6 +174,27 @@ export const mapQuerySchema = z.object({
 });
 
 export type MapQuery = z.infer<typeof mapQuerySchema>;
+
+/**
+ * The brief form's query string.
+ *
+ * Everything is optional and nothing has a default beyond "not stated". A
+ * brief that invents a city or a budget the advertiser never typed would go on
+ * to filter real inventory out of their shortlist.
+ */
+export const briefQuerySchema = z.object({
+  text: z.string().trim().max(1000).optional(),
+  cities: z.string().trim().max(300).optional(),
+  types: z.string().trim().max(300).optional(),
+  tags: z.string().trim().max(300).optional(),
+  startDate: isoDateString.optional().or(z.literal("")),
+  endDate: isoDateString.optional().or(z.literal("")),
+  budget: z.union([z.coerce.number().int().positive(), z.literal("")]).optional(),
+  digitalOnly: z.enum(["1", "0"]).optional(),
+  verifiedOnly: z.enum(["1", "0"]).optional(),
+});
+
+export type BriefQuery = z.infer<typeof briefQuerySchema>;
 
 /** Flatten a ZodError into { field: message } for form rendering. */
 export function fieldErrors(err: z.ZodError): Record<string, string> {

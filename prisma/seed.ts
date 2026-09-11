@@ -13,7 +13,7 @@
  * Hence no credential lives here any more, and there is no fallback - a
  * fallback is exactly how that hole comes back quietly. See DECISIONS.md 16.
  */
-import { PrismaClient, type AssetType, type Illumination } from "@prisma/client";
+import { PrismaClient, type AssetType, type Illumination, type LocationTag } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { demoImage } from "./demo-image";
@@ -51,12 +51,15 @@ type AssetSeed = {
   status?: "ACTIVE" | "INACTIVE" | "DRAFT";
   instantBookable?: boolean;
   description?: string;
+  /** Owner-declared surroundings. Demo values, chosen to match the address. */
+  tags?: LocationTag[];
 };
 
 // Coordinates are approximate street locations used for development only.
 const BEER_SHEVA: AssetSeed[] = [
   {
     title: "שלט חוצות — כניסה לעיר, דרך חברון",
+    tags: ["MAIN_ROAD", "CITY_CENTER"],
     assetType: "BILLBOARD",
     address: "דרך חברון 1",
     city: "באר שבע",
@@ -70,6 +73,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "מסך דיגיטלי — קניון הנגב",
+    tags: ["MALL"],
     assetType: "DIGITAL_BILLBOARD",
     address: "שדרות רגר 43",
     city: "באר שבע",
@@ -82,6 +86,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "קיר פרסום — העיר העתיקה",
+    tags: ["CITY_CENTER"],
     assetType: "WALL",
     address: "רחוב הרצל 62",
     city: "באר שבע",
@@ -94,6 +99,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "טוטם — פארק ההייטק",
+    tags: ["INDUSTRIAL"],
     assetType: "TOTEM",
     address: "שדרות דוד טוביהו 20",
     city: "באר שבע",
@@ -105,6 +111,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "תחנת אוטובוס — אוניברסיטת בן־גוריון",
+    tags: ["EDUCATION", "TRANSIT_HUB"],
     assetType: "BUS_STOP",
     address: "שדרות בן־גוריון 100",
     city: "באר שבע",
@@ -116,6 +123,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "שלט חוצות — צומת שוק",
+    tags: ["CITY_CENTER", "MAIN_ROAD"],
     assetType: "BILLBOARD",
     address: "אליהו נאוי 4",
     city: "באר שבע",
@@ -128,6 +136,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "באנר — אצטדיון טוטו טרנר",
+    tags: ["STADIUM"],
     assetType: "BANNER",
     address: "רחוב יצחק בן צבי 1",
     city: "באר שבע",
@@ -139,6 +148,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "ריהוט רחוב — שדרות רגר",
+    tags: ["MAIN_ROAD", "RESIDENTIAL"],
     assetType: "STREET_FURNITURE",
     address: "שדרות רגר 100",
     city: "באר שבע",
@@ -150,6 +160,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "מסך דיגיטלי — רמות",
+    tags: ["RESIDENTIAL"],
     assetType: "DIGITAL_BILLBOARD",
     address: "שדרות טוביהו 120",
     city: "באר שבע",
@@ -161,6 +172,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "שלט חוצות — יציאה דרומית",
+    tags: ["HIGHWAY"],
     assetType: "BILLBOARD",
     address: "כביש 40, יציאה דרומית",
     city: "באר שבע",
@@ -172,6 +184,7 @@ const BEER_SHEVA: AssetSeed[] = [
   },
   {
     title: "קיר — אזור תעשייה עמק שרה",
+    tags: ["INDUSTRIAL"],
     assetType: "WALL",
     address: "האורגים 12",
     city: "באר שבע",
@@ -186,6 +199,7 @@ const BEER_SHEVA: AssetSeed[] = [
 const REST_OF_ISRAEL: AssetSeed[] = [
   {
     title: "שלט חוצות — איילון דרום",
+    tags: ["HIGHWAY"],
     assetType: "BILLBOARD",
     address: "נתיבי איילון",
     city: "תל אביב-יפו", region: "מרכז",
@@ -196,6 +210,7 @@ const REST_OF_ISRAEL: AssetSeed[] = [
   },
   {
     title: "מסך דיגיטלי — הכניסה לירושלים",
+    tags: ["MAIN_ROAD", "TRANSIT_HUB"],
     assetType: "DIGITAL_BILLBOARD",
     address: "שדרות הרצל",
     city: "ירושלים", region: "ירושלים",
@@ -206,6 +221,7 @@ const REST_OF_ISRAEL: AssetSeed[] = [
   },
   {
     title: "שלט חוצות — צ׳ק פוסט חיפה",
+    tags: ["MAIN_ROAD", "INDUSTRIAL"],
     assetType: "BILLBOARD",
     address: "דרך יד לבנים",
     city: "חיפה", region: "צפון",
@@ -216,6 +232,7 @@ const REST_OF_ISRAEL: AssetSeed[] = [
   },
   {
     title: "טוטם — מרכז אשדוד",
+    tags: ["CITY_CENTER"],
     assetType: "TOTEM",
     address: "רוגוזין 12",
     city: "אשדוד", region: "דרום",
@@ -226,6 +243,7 @@ const REST_OF_ISRAEL: AssetSeed[] = [
   },
   {
     title: "תחנת אוטובוס — מרכז אילת",
+    tags: ["CITY_CENTER", "BEACH"],
     assetType: "BUS_STOP",
     address: "דרך התמרים 5",
     city: "אילת", region: "דרום",
@@ -327,6 +345,7 @@ async function main() {
         verifiedAt: s.verification === "VERIFIED" ? new Date() : null,
         verifiedById: s.verification === "VERIFIED" ? admin.id : null,
         permitStatus: "UNKNOWN",
+        locationTags: s.tags ?? [],
         priceWeekly: s.priceWeekly ?? null,
         priceMonthly: s.priceMonthly ?? null,
         minimumBookingDays: s.minDays ?? 7,
@@ -380,6 +399,21 @@ async function main() {
       startDate: daysFromNow(3),
       endDate: daysFromNow(45),
       priceEstimate: 15000,
+      status: "APPROVED",
+      decidedAt: new Date(),
+    },
+  });
+
+  // A second approved booking, ending sooner and on a different owner's asset,
+  // so the renewal pipeline and "frees up soon" show an ordered list rather
+  // than a single row that could be right by accident.
+  await prisma.booking.create({
+    data: {
+      assetId: created[2].id,
+      advertiserId: advertiser.id,
+      startDate: daysFromNow(-20),
+      endDate: daysFromNow(12),
+      priceEstimate: 7400,
       status: "APPROVED",
       decidedAt: new Date(),
     },

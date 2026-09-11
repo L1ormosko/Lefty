@@ -32,6 +32,29 @@ enum AssetType {
   OTHER
 }
 
+/**
+ * What kind of place the asset stands in, as declared by its owner.
+ *
+ * Deliberately a list of things an owner can see out of the window rather than
+ * anything about an audience. VELTO has no traffic counts, no impressions and
+ * no demographics, so it cannot say who passes a billboard - and a marketplace
+ * that invents that number is worse than one that admits it. These are facts
+ * about the location, reported by whoever owns it, and the UI always says so.
+ */
+enum LocationTag {
+  CITY_CENTER
+  MALL
+  HIGHWAY
+  MAIN_ROAD
+  INDUSTRIAL
+  RESIDENTIAL
+  TRANSIT_HUB
+  EDUCATION
+  HOSPITAL
+  STADIUM
+  BEACH
+}
+
 enum Illumination {
   NONE
   FRONTLIT
@@ -191,6 +214,11 @@ model MediaAsset {
   sides        Int          @default(1)
   illumination Illumination @default(UNKNOWN)
   isDigital    Boolean      @default(false)
+
+  // Owner-declared context, never measured. Empty is the honest default: an
+  // asset nobody tagged says nothing about its surroundings rather than
+  // claiming to be somewhere generic.
+  locationTags LocationTag[]
 
   status             AssetStatus        @default(DRAFT)
   verificationStatus VerificationStatus @default(PENDING)

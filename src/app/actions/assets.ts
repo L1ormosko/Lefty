@@ -15,7 +15,7 @@ import {
 import { toUserMessage, ValidationError } from "@/server/errors";
 import { toUtcDate } from "@/lib/dates";
 import { t } from "@/lib/labels";
-import type { AssetType, Illumination, PermitStatus } from "@prisma/client";
+import type { AssetType, Illumination, LocationTag, PermitStatus } from "@prisma/client";
 
 export type AssetActionState =
   | { ok: true; assetId: string; message?: string }
@@ -99,6 +99,9 @@ export async function saveAssetSpecsAction(_prev: AssetActionState, formData: Fo
     const parsed = assetSpecsSchema.safeParse({
       ...raw,
       isDigital: raw.isDigital === "on" || raw.isDigital === "true",
+      // Object.fromEntries keeps only the last value of a repeated key, which
+      // would silently reduce a whole checkbox group to one tag.
+      locationTags: formData.getAll("locationTags").map(String),
     });
     if (!parsed.success) return { ok: false, fields: fieldErrors(parsed.error) };
     const asset = await loadOwnedAsset(String(formData.get("assetId")), user);
@@ -113,6 +116,7 @@ export async function saveAssetSpecsAction(_prev: AssetActionState, formData: Fo
         illumination: parsed.data.illumination as Illumination,
         isDigital: parsed.data.isDigital,
         permitStatus: parsed.data.permitStatus as PermitStatus,
+        locationTags: parsed.data.locationTags as LocationTag[],
       },
     });
     return { ok: true, assetId: asset.id };

@@ -28,6 +28,9 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
           <Link href="/explore" className="inline-flex items-center min-h-11 text-sm text-ink-700 hover:text-ink-900 px-2">
             {t("nav.explore")}
           </Link>
+          <Link href="/brief" className="inline-flex items-center min-h-11 text-sm text-ink-700 hover:text-ink-900 px-2">
+            {t("nav.brief")}
+          </Link>
           {!user && (
             <Link href="/register?role=MEDIA_OWNER" className="hidden sm:block text-sm text-ink-700 hover:text-ink-900 px-2">
               {t("nav.listYourSpace")}

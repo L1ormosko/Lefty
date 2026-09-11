@@ -7,6 +7,7 @@ import type {
   AssetType,
   AssetStatus,
   Illumination,
+  LocationTag,
   VerificationStatus,
   PermitStatus,
   InquiryStatus,
@@ -24,6 +25,24 @@ export const ASSET_TYPES: AssetType[] = [
   "STREET_FURNITURE",
   "BANNER",
   "OTHER",
+];
+
+/**
+ * Owner-declared location context. Not an audience measurement, and the UI
+ * must never present it as one - see the enum's comment in schema.prisma.
+ */
+export const LOCATION_TAGS: LocationTag[] = [
+  "CITY_CENTER",
+  "MALL",
+  "HIGHWAY",
+  "MAIN_ROAD",
+  "INDUSTRIAL",
+  "RESIDENTIAL",
+  "TRANSIT_HUB",
+  "EDUCATION",
+  "HOSPITAL",
+  "STADIUM",
+  "BEACH",
 ];
 
 export const ILLUMINATIONS: Illumination[] = ["NONE", "FRONTLIT", "BACKLIT", "UNKNOWN"];

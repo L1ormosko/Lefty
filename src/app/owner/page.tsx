@@ -4,9 +4,11 @@ import { t } from "@/lib/labels";
 import { CURRENCY } from "@/lib/constants";
 import { ownerNav } from "@/lib/nav";
 import { DashboardShell, Section } from "@/components/DashboardShell";
-import { EmptyState, LinkButton, StatTile } from "@/components/ui";
+import { Card, EmptyState, LinkButton, Num, StatTile } from "@/components/ui";
 import { InquiryRow } from "@/components/lists";
-import { todayUtc } from "@/lib/dates";
+import { formatDate, todayUtc } from "@/lib/dates";
+import Link from "next/link";
+import { expiringForOwner } from "@/server/expiring";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +16,7 @@ export default async function OwnerOverview() {
   const user = await requireRole("MEDIA_OWNER");
   const scope = { asset: { ownerId: user.id } };
 
-  const [activeAssets, pendingInquiries, confirmedBookings, pendingBookings, pipeline, recent] =
+  const [activeAssets, pendingInquiries, confirmedBookings, pendingBookings, pipeline, recent, expiring] =
     await Promise.all([
       prisma.mediaAsset.count({ where: { ownerId: user.id, status: "ACTIVE" } }),
       prisma.inquiry.count({ where: { ...scope, status: "PENDING" } }),
@@ -34,6 +36,7 @@ export default async function OwnerOverview() {
         _count: { select: { messages: true } },
         },
       }),
+      expiringForOwner(user.id),
     ]);
   const pipelineValue = pipeline._sum.priceEstimate ?? 0;
 
@@ -71,6 +74,40 @@ export default async function OwnerOverview() {
           <div className="space-y-3">
             {recent.map((inquiry) => (
               <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="owner" />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/*
+        The renewal pipeline. An owner's most sellable inventory is the space
+        that is about to come free, and until now nothing told them - the
+        booking calendar held the answer and never surfaced it.
+      */}
+      <Section title={t("expiring.title")}>
+        <p className="-mt-2 mb-3 text-sm text-ink-600">{t("expiring.ownerLead")}</p>
+        {expiring.length === 0 ? (
+          <EmptyState title={t("expiring.none")} />
+        ) : (
+          <div className="space-y-2">
+            {expiring.map((item) => (
+              <Card key={item.bookingId} className="p-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                <Link
+                  href={`/assets/${item.assetId}`}
+                  className="font-medium text-ink-900 hover:underline"
+                >
+                  {item.assetTitle}
+                </Link>
+                <span className="text-sm text-ink-600">{item.city}</span>
+                <span className="text-sm text-ink-600">{item.advertiserName}</span>
+                <span className="ms-auto text-sm text-ink-700">
+                  {t("expiring.endsOn")} <Num>{formatDate(item.endDate)}</Num>
+                  <span className="text-ink-500">
+                    {" "}
+                    (<Num>{item.daysLeft}</Num> {t("expiring.daysLeft")})
+                  </span>
+                </span>
+              </Card>
             ))}
           </div>
         )}

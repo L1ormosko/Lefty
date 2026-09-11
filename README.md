@@ -7,6 +7,25 @@ manage their own inventory; VELTO stays neutral — it never owns the assets.
 Interface is Hebrew-first and right-to-left. The map covers all of Israel; only
 assets that actually exist in the database appear as inventory.
 
+## What the product is for
+
+A map of other people's billboards is a directory. What VELTO holds that nobody
+else does is the calendar — when each listed asset is free, and when the
+contract on it ends. Three features turn that into the reason to use it:
+
+- **`/brief`** — describe a campaign in one sentence (or fill in the fields) and
+  get a ranked shortlist of real inventory, each result showing why it matched
+  **and what is unknown about it**. Optionally parsed by a language model; the
+  model produces a filter, never a result.
+- **The renewal pipeline** (`/owner`) — which of an owner's bookings end in the
+  next 60 days, which is exactly when that space should be sold again.
+- **"Frees up soon"** (`/brief`) — the same data from the advertiser's side.
+
+What the product deliberately does **not** do is estimate an audience. There are
+no impressions, no traffic counts and no demographics anywhere in it, because we
+have none; location context is declared by the owner and labelled as declared.
+See DECISIONS.md §18.
+
 ## Running it locally
 
     service postgresql start                # or point DATABASE_URL elsewhere

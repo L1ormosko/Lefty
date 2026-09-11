@@ -47,6 +47,25 @@
 - [x] ~~The admin asset queue opens on a blank page~~ — every tab shows its
       count and the empty state links to "all"
 
+### The brief and the calendar (the product's reason to exist)
+- [x] ~~The product was a catalogue with a map — a directory an advertiser
+      could replace with a phone call~~ — `/brief` matches a campaign against
+      real inventory, the owner dashboard shows contracts ending within 60 days,
+      and `/brief` shows what frees up soon. DECISIONS.md §18.
+- [ ] **`runBrief` scores in JS after a `take: 500` ceiling.** Fine at pilot
+      scale and wrong the moment there are more than 500 active assets: the
+      cut happens before the ranking. Move the hard filters into SQL first.
+- [ ] Saved briefs and an alert when an asset matching one frees up. The data
+      is already there (`freeingSoon` + `SavedAsset`); the notification is not.
+- [ ] Location tags are free-form per owner and unverifiable. If they start
+      driving real spend, an admin needs to be able to dispute one — the
+      verification queue is the obvious place.
+- [ ] No audience data of any kind, by choice (see DECISIONS.md §18). If real
+      traffic or demographic data is ever licensed, it belongs in its own
+      table with its source and date attached — never merged into an asset's
+      own fields, where it would become indistinguishable from an owner's
+      claim.
+
 ### P2 — correctness and scale
 - [ ] Availability is computed in JS *after* `take`, so pagination would drop
       rows. Nothing paginates yet — that is the bug waiting to happen.

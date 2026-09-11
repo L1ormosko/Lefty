@@ -190,6 +190,25 @@ export default async function AssetPage({ params }: Params) {
                   </span>
                 }
               />
+              {/*
+                Surroundings as the owner described them. Rendered with the
+                "declared, not measured" line attached, because this is the
+                field an advertiser is most likely to read as an audience
+                claim - and VELTO measures nothing.
+              */}
+              <Spec
+                label={t("tag.sectionTitle")}
+                value={
+                  asset.locationTags.length === 0 ? (
+                    <span className="text-ink-400">{t("tag.none")}</span>
+                  ) : (
+                    <span>
+                      {asset.locationTags.map((tag) => t(`tag.${tag}`)).join(" · ")}
+                      <span className="block text-xs text-ink-500 mt-0.5">{t("tag.declared")}</span>
+                    </span>
+                  )
+                }
+              />
             </dl>
           </Card>
 

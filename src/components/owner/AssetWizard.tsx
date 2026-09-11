@@ -12,7 +12,7 @@ import {
   saveAssetSpecsAction,
   type AssetActionState,
 } from "@/app/actions/assets";
-import { ASSET_TYPES, CURRENCY, ILLUMINATIONS, PERMIT_STATUSES } from "@/lib/constants";
+import { ASSET_TYPES, CURRENCY, ILLUMINATIONS, LOCATION_TAGS, PERMIT_STATUSES } from "@/lib/constants";
 import { t } from "@/lib/labels";
 import { formatRange } from "@/lib/dates";
 import { Alert, Button, Card, Field, Num, cx, inputClass, textareaClass } from "@/components/ui";
@@ -36,6 +36,7 @@ export type WizardAsset = {
   illumination: string;
   isDigital: boolean;
   permitStatus: string;
+  locationTags: string[];
   priceWeekly: number | null;
   priceMonthly: number | null;
   minimumBookingDays: number;
@@ -248,6 +249,32 @@ function SpecsStep({ asset, assetId, onSaved }: { asset: WizardAsset | null; ass
         <input type="checkbox" name="isDigital" defaultChecked={asset?.isDigital} className="size-4 rounded border-ink-300" />
         {t("asset.digital")}
       </label>
+
+      {/*
+        Surroundings, declared by the owner. The hint is not decoration: this
+        is the closest VELTO gets to "who sees this billboard", and an owner
+        who thinks they are filling in an audience figure will fill it in
+        wrongly. We measure nothing, and the advertiser is told the same.
+      */}
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-ink-800">{t("tag.sectionTitle")}</legend>
+        <p className="text-xs text-ink-500">{t("tag.ownerHelp")}</p>
+        <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5">
+          {LOCATION_TAGS.map((tag) => (
+            <label key={tag} className="flex items-center gap-2 text-sm text-ink-700">
+              <input
+                type="checkbox"
+                name="locationTags"
+                value={tag}
+                defaultChecked={asset?.locationTags?.includes(tag)}
+                className="size-4 rounded border-ink-300"
+              />
+              {t(`tag.${tag}`)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
       <StepFooter pending={pending} />
     </form>
   );

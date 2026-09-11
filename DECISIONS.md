@@ -312,3 +312,57 @@ The consequences worth keeping:
   and it refuses a database that already has users unless forced. A
   half-restored database is worse than an empty one, because it looks like it
   worked.
+
+## 18. The brief: a matcher that cannot invent, and a model that cannot decide
+
+Until now VELTO was a catalogue with a map. That is a directory, and an
+advertiser can get a directory from a phone call. The value we actually hold is
+the calendar: we know when every listed asset is free, and when the contract on
+it ends. `/brief` is that value made usable - describe a campaign, get a ranked
+shortlist of inventory that exists, with the reasoning shown.
+
+Three decisions inside it are worth not re-litigating.
+
+**The ranking is computed only from columns somebody filled in.** Availability
+for the requested dates, the price the owner published, the type, the city, the
+verification status, the presence of a photo, the surroundings the owner
+declared. What is deliberately absent is any notion of audience: no impressions,
+no traffic counts, no demographics, no "reach". We hold none of that data, and a
+recommendation engine that produces such a number is producing fiction with a
+ranking attached - which is precisely the failure the project's first rule
+exists to prevent. A unit test asserts that two assets identical in every column
+score identically, so no such term can be slipped in later without failing.
+
+**What is missing is shown, not hidden.** Every result carries its gaps: no
+published price, no dimensions, no photo, no declared surroundings, over the
+stated budget. An asset with no price is neither dropped nor quietly assumed
+affordable - it ranks below one that demonstrably fits, and says why. A
+shortlist that only shows strengths is how an advertiser ends up discovering on
+the phone that nobody ever published a rate.
+
+**The language model is optional, and it cannot reach the inventory.** The free
+text box is parsed by a model when `ANTHROPIC_API_KEY` is set and by a Hebrew
+word-list parser when it is not, and the page states which one answered. The
+contract with the model is narrow on purpose: it is given a sentence and asked
+for a filter object - never the inventory, never a recommendation. Its answer is
+then validated against our own enums and against the list of cities that
+actually have assets, and anything invented is discarded rather than repaired: a
+city we have no inventory in is not a near miss. Every failure path - no key, a
+timeout, a non-JSON answer, a schema violation - falls back to the rules, so the
+advertiser always gets a shortlist. That is the difference between an optional
+enhancement and a dependency, and it is also why the feature could ship without
+a paid key: a button labelled "AI" that does nothing without one would be the
+fake feature this project does not build.
+
+**Location tags are declared, never measured.** `LocationTag` is a list of
+things an owner can see out of the window - a mall, a highway, a campus - not a
+description of who passes by. The owner's form says VELTO measures nothing, and
+every place a tag is rendered to an advertiser carries the same line. This is
+the honest half of "target audience": we can say what is next to the billboard
+because someone who owns it told us, and we cannot say who walks past it,
+because nobody has counted.
+
+The contract-expiry views (`src/server/expiring.ts`) are the same data seen from
+two sides: the owner's renewal pipeline and the advertiser's "frees up soon".
+Both are derived from APPROVED bookings. Note what is **not** claimed - whether
+the current advertiser will renew. The end date is a fact; the renewal is not.
