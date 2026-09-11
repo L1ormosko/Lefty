@@ -203,7 +203,7 @@ function DeletePanel({ blocked }: { blocked: string | null }) {
   const err = (k: string) => (state && !state.ok ? state.fields?.[k] : undefined);
 
   return (
-    <Card className="p-5 border-bad-500/30">
+    <Card className="p-5 border-bad-200">
       <h2 className="text-base font-semibold text-bad-700">{t("account.danger")}</h2>
       <p className="mt-1 text-sm text-ink-600">{t("account.dangerHint")}</p>
 

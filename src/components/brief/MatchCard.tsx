@@ -69,7 +69,7 @@ export function MatchCard({ match }: { match: Recommendation }) {
             {match.reasons.map((reason) => (
               <li
                 key={reason}
-                className="rounded-full bg-ok-50 text-ok-700 border border-ok-500/30 px-2.5 py-1 text-xs"
+                className="rounded-full bg-ok-50 text-ok-700 border border-ok-200 px-2.5 py-1 text-xs"
               >
                 {t(reason)}
               </li>

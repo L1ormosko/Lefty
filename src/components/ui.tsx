@@ -8,13 +8,20 @@ export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }
 
+/*
+ * `active:translate-y-px` is the whole press animation. It is one pixel and it
+ * is the difference between a button that feels like a control and one that
+ * feels like a coloured rectangle - and unlike a scale or a shadow change it
+ * cannot reflow anything around it.
+ */
 const BUTTON_BASE =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors " +
+  "active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-y-0";
 const BUTTON_VARIANTS = {
-  primary: "bg-brand-600 text-white hover:bg-brand-700",
-  secondary: "bg-white text-ink-800 border border-ink-200 hover:bg-ink-50",
-  ghost: "text-ink-700 hover:bg-ink-100",
-  danger: "bg-bad-500 text-white hover:bg-bad-700",
+  primary: "bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800",
+  secondary: "bg-white text-ink-800 border border-ink-200 hover:bg-ink-50 hover:border-ink-300 active:bg-ink-100",
+  ghost: "text-ink-700 hover:bg-ink-100 active:bg-ink-200",
+  danger: "bg-bad-500 text-white hover:bg-bad-700 active:bg-bad-800",
   // For dark bands (the landing page's closing CTA). Declared as variants
   // rather than className overrides: Tailwind resolves conflicting utilities
   // by stylesheet order, not by prop order, so overriding a variant's colours
@@ -76,9 +83,26 @@ export function LinkButton({
   );
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+export function Card({
+  className,
+  interactive,
+  children,
+}: {
+  className?: string;
+  /** Adds hover lift. Only for a card that is itself a link or a target. */
+  interactive?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className={cx("bg-white rounded-lg border border-ink-200 shadow-card", className)}>{children}</div>
+    <div
+      className={cx(
+        "bg-white rounded-lg border border-ink-200 shadow-card",
+        interactive && "transition-shadow transition-colors hover:shadow-raised hover:border-ink-300",
+        className
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -179,9 +203,9 @@ export function EmptyState({
 
 export function Alert({ kind = "error", children }: { kind?: "error" | "success" | "info"; children: ReactNode }) {
   const styles = {
-    error: "bg-bad-50 text-bad-700 border-bad-500/30",
-    success: "bg-ok-50 text-ok-700 border-ok-500/30",
-    info: "bg-brand-50 text-brand-700 border-brand-500/30",
+    error: "bg-bad-50 text-bad-700 border-bad-200",
+    success: "bg-ok-50 text-ok-700 border-ok-200",
+    info: "bg-brand-50 text-brand-700 border-brand-200",
   } as const;
   return (
     <div role={kind === "error" ? "alert" : "status"} className={cx("rounded-md border px-3 py-2 text-sm", styles[kind])}>
@@ -200,7 +224,10 @@ export function StatTile({ label, value, href }: { label: string; value: number 
     </>
   );
   return href ? (
-    <Link href={href} className="block bg-white rounded-lg border border-ink-200 p-4 shadow-card hover:border-brand-300">
+    <Link
+      href={href}
+      className="block bg-white rounded-lg border border-ink-200 p-4 shadow-card transition-shadow transition-colors hover:border-brand-300 hover:shadow-raised"
+    >
       {body}
     </Link>
   ) : (

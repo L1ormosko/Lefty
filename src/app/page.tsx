@@ -20,7 +20,7 @@ function StepList({ title, steps }: { title: string; steps: { title: string; bod
       <ol className="space-y-4">
         {steps.map((step, i) => (
           <li key={step.title} className="flex gap-3">
-            <span className="shrink-0 size-7 rounded-full bg-ink-900 text-white text-sm font-semibold flex items-center justify-center">
+            <span className="shrink-0 size-7 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-sm font-semibold flex items-center justify-center">
               <Num>{i + 1}</Num>
             </span>
             <div>
@@ -57,11 +57,17 @@ export default async function LandingPage() {
   return (
     <>
       <main className="flex-1">
-        {/* Hero */}
-        <section className="border-b border-ink-200 bg-white">
-          <div className="mx-auto max-w-[1200px] px-4 py-14 sm:py-20 grid lg:grid-cols-[1.05fr_0.95fr] items-center gap-12 lg:gap-16">
+        {/* Hero. The tint is a single soft brand wash behind the map motif -
+            enough to stop the fold reading as a blank white page, light enough
+            that no text sits on a gradient. */}
+        <section className="relative border-b border-ink-200 bg-white overflow-hidden">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(60rem_36rem_at_15%_-10%,theme(colors.brand.50),transparent_70%)]"
+          />
+          <div className="relative mx-auto max-w-[1200px] px-4 py-14 sm:py-20 grid lg:grid-cols-[1.25fr_0.75fr] items-center gap-12 lg:gap-16">
             <div>
-              <span className="inline-block text-xs font-medium text-brand-700 bg-brand-50 border border-brand-500/30 rounded px-2 py-1 mb-4">
+              <span className="inline-block text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded px-2 py-1 mb-4">
                 {t("landing.eyebrow")}
               </span>
               <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-ink-900 text-balance">
@@ -70,11 +76,20 @@ export default async function LandingPage() {
               <p className="mt-4 text-base sm:text-lg text-ink-600 max-w-xl leading-relaxed">
                 {t("landing.sub")}
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <LinkButton href="/explore" size="lg">
+              {/* Full width and stacked on a phone, inline from sm up. Left to
+                  wrap, the two Hebrew labels are different lengths and produce
+                  two buttons of different widths on two lines, which reads as
+                  an accident rather than a choice. */}
+              <div className="mt-8 flex flex-col sm:flex-row sm:flex-wrap gap-3">
+                <LinkButton href="/explore" size="lg" className="w-full sm:w-auto">
                   {t("landing.ctaExplore")}
                 </LinkButton>
-                <LinkButton href="/register?role=MEDIA_OWNER" variant="secondary" size="lg">
+                <LinkButton
+                  href="/register?role=MEDIA_OWNER"
+                  variant="secondary"
+                  size="lg"
+                  className="w-full sm:w-auto"
+                >
                   {t("landing.ctaOwner")}
                 </LinkButton>
               </div>
@@ -112,7 +127,11 @@ export default async function LandingPage() {
               </div>
             </div>
 
-            <div className="lg:pb-8">
+            {/* Capped, and pushed to the far edge. The motif is 3:4, so at the
+                column's full width it forced a hero taller than the copy and
+                left the text floating in a narrow lane with empty space under
+                it. It is decoration; it should not set the height of the fold. */}
+            <div className="lg:pb-8 w-full max-w-[380px] mx-auto lg:mx-0 lg:ms-auto">
               <HeroMapMotif />
             </div>
           </div>
@@ -227,11 +246,16 @@ export default async function LandingPage() {
             <h2 className="text-2xl sm:text-3xl font-semibold text-white">
               {t("landing.footerCta")}
             </h2>
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <LinkButton href="/explore" size="lg" variant="inverse">
+            <div className="mt-8 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center sm:justify-center gap-3">
+              <LinkButton href="/explore" size="lg" variant="inverse" className="w-full sm:w-auto">
                 {t("landing.ctaExplore")}
               </LinkButton>
-              <LinkButton href="/register?role=MEDIA_OWNER" size="lg" variant="inverseGhost">
+              <LinkButton
+                href="/register?role=MEDIA_OWNER"
+                size="lg"
+                variant="inverseGhost"
+                className="w-full sm:w-auto"
+              >
                 {t("landing.ctaOwner")}
               </LinkButton>
             </div>

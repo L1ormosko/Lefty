@@ -7,9 +7,9 @@ import { AVAILABILITY_GLYPH, t } from "@/lib/labels";
 import { cx } from "./ui";
 
 const AVAILABILITY_CLASS: Record<AvailabilityState, string> = {
-  AVAILABLE: "bg-ok-50 text-ok-700 border-ok-500/40",
-  PARTIAL: "bg-warn-50 text-warn-700 border-warn-500/40",
-  OCCUPIED: "bg-bad-50 text-bad-700 border-bad-500/40",
+  AVAILABLE: "bg-ok-50 text-ok-700 border-ok-200",
+  PARTIAL: "bg-warn-50 text-warn-700 border-warn-200",
+  OCCUPIED: "bg-bad-50 text-bad-700 border-bad-200",
   INACTIVE: "bg-ink-100 text-ink-600 border-ink-300",
   PENDING_VERIFICATION: "bg-ink-100 text-ink-700 border-ink-300",
 };
@@ -47,9 +47,9 @@ export function VerificationBadge({
   size?: "sm" | "md";
 }) {
   const styles = {
-    VERIFIED: "bg-brand-50 text-brand-700 border-brand-500/40",
+    VERIFIED: "bg-brand-50 text-brand-700 border-brand-200",
     PENDING: "bg-ink-100 text-ink-700 border-ink-300",
-    REJECTED: "bg-bad-50 text-bad-700 border-bad-500/40",
+    REJECTED: "bg-bad-50 text-bad-700 border-bad-200",
   } as const;
   const glyph = { VERIFIED: "✓", PENDING: "◷", REJECTED: "✕" } as const;
   return (
@@ -81,9 +81,9 @@ export function DemoBadge() {
 export function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "ok" | "warn" | "bad" }) {
   const styles = {
     neutral: "bg-ink-100 text-ink-700 border-ink-300",
-    ok: "bg-ok-50 text-ok-700 border-ok-500/40",
-    warn: "bg-warn-50 text-warn-700 border-warn-500/40",
-    bad: "bg-bad-50 text-bad-700 border-bad-500/40",
+    ok: "bg-ok-50 text-ok-700 border-ok-200",
+    warn: "bg-warn-50 text-warn-700 border-warn-200",
+    bad: "bg-bad-50 text-bad-700 border-bad-200",
   } as const;
   return (
     <span className={cx("inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium", styles[tone])}>

@@ -116,7 +116,7 @@ export default async function AssetPage({ params }: Params) {
                 </p>
               )}
               {asset.isDemo && (
-                <p className="mt-3 text-sm text-ink-600 bg-warn-50 border border-warn-500/30 rounded p-3">
+                <p className="mt-3 text-sm text-ink-600 bg-warn-50 border border-warn-200 rounded p-3">
                   {t("common.demoDataNote")}
                 </p>
               )}

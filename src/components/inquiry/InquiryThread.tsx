@@ -117,7 +117,7 @@ function Bubble({
     <li
       className={
         mine
-          ? "rounded-lg border border-brand-500/30 bg-brand-50 p-4"
+          ? "rounded-lg border border-brand-200 bg-brand-50 p-4"
           : "rounded-lg border border-ink-200 bg-white p-4"
       }
     >

@@ -218,7 +218,7 @@ export function Discover({ initialAssets, cities }: Props) {
 
           {error && (
             <div className="absolute bottom-24 lg:bottom-4 inset-x-4 lg:inset-x-auto lg:start-4 z-10">
-              <div role="alert" className="bg-bad-50 border border-bad-500/30 text-bad-700 text-sm rounded-md px-3 py-2 shadow-card">
+              <div role="alert" className="bg-bad-50 border border-bad-200 text-bad-700 text-sm rounded-md px-3 py-2 shadow-card">
                 {error}
               </div>
             </div>
