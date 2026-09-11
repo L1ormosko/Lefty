@@ -16,8 +16,11 @@ assets that actually exist in the database appear as inventory.
     npm run seed:dev
     npm run dev
 
-`npm run seed:dev` prints four development logins. They exist only in a local
-development database and are printed, never committed.
+`npm run seed:dev` creates four development logins. It needs `SEED_PASSWORD`
+(at least 24 characters) and refuses to run without it — there is no built-in
+password, because this seed creates an ADMIN account and runs against whatever
+`DATABASE_URL` points at. The password is never printed either: build logs are
+retained and readable. Set `SEED_DEMO=1` to create demo data at all.
 
 ## Scripts
 
@@ -29,6 +32,29 @@ development database and are printed, never committed.
 | `npm test` | Vitest — unit + integration against the database |
 | `npm run test:e2e` | Playwright — advertiser / owner / admin journeys |
 | `npm run seed:dev` | reset and recreate the demo inventory |
+| `npm run backup:check <file>` | compare a backup file against the live database |
+| `npm run backup:restore <file>` | restore a backup into an empty database |
+
+## Backup and restore
+
+**The hosted free-tier database is deleted on 2026-10-07 and has no backups.**
+Copy the data out before then. Put a reminder in a calendar; nothing here does.
+
+1. Sign in as an ADMIN and download `/api/admin/backup`. The file is named
+   `velto-backup-SENSITIVE-<date>.json` and it deserves that name: it holds
+   every user's personal data and their bcrypt password hashes. Do not leave it
+   in a downloads folder.
+2. `npm run backup:check ./velto-backup-SENSITIVE-<date>.json` — run it against
+   the same database it came from. A file nobody has checked is not a backup.
+3. To restore: point `DATABASE_URL` at the new, empty database, run
+   `npx prisma migrate deploy`, then
+   `npm run backup:restore ./velto-backup-SENSITIVE-<date>.json`. It refuses a
+   database that already has users unless you pass `--force`, and it writes
+   everything in one transaction, so it either completes or changes nothing.
+
+Sessions are deliberately not backed up — everyone signs in again after a
+restore, which is the correct outcome. See DECISIONS.md §17 for why the backup
+goes out through the app instead of `pg_dump`.
 
 ## Maps
 

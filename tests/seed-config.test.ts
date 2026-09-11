@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { MIN_PASSWORD_LENGTH, demoSeedEnabled, requireSeedPassword } from "../prisma/seed-config";
 
@@ -23,13 +24,17 @@ describe("seed credentials", () => {
 
   it("rejects a password short enough to be typed in by hand", () => {
     expect(() => requireSeedPassword({ SEED_PASSWORD: "1234" })).toThrow(/at least/);
-    expect(() => requireSeedPassword({ SEED_PASSWORD: "velto-dev-1234" })).toThrow(/at least/);
+    expect(() => requireSeedPassword({ SEED_PASSWORD: "short-and-guessable" })).toThrow(/at least/);
     // The boundary itself, so the check cannot be quietly loosened by one.
     expect(() => requireSeedPassword({ SEED_PASSWORD: "x".repeat(MIN_PASSWORD_LENGTH - 1) })).toThrow();
   });
 
   it("accepts a generated one", () => {
-    const generated = "nRZH3socZAF9atGWf1STckWNq4-YoEx0";
+    // Generated here rather than pasted in. An earlier version of this test
+    // hard-coded a real value that was live at the time, which put the actual
+    // production password in a public repository - the very thing the module
+    // under test exists to prevent.
+    const generated = randomBytes(24).toString("base64url");
     expect(generated.length).toBeGreaterThanOrEqual(MIN_PASSWORD_LENGTH);
     expect(requireSeedPassword({ SEED_PASSWORD: generated })).toBe(generated);
   });

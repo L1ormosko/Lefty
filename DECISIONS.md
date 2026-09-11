@@ -268,3 +268,47 @@ mutating `process.env`. That is not fussiness: Prisma's client loads `.env` on
 import, so an early manual check of the "missing password" case passed when it
 should have failed. The test takes the environment as an argument so it cannot
 be fooled the same way.
+
+## 17. The backup goes out through the app, not `pg_dump`
+
+The hosted database is on a free plan: no backups, and the instance is deleted
+on 2026-10-07. Copying the data out is therefore not a nice-to-have, and the
+obvious tool does not work here.
+
+`pg_dump` needs a connection. The instance's IP allow-list is empty, which
+means it accepts no external connections at all — not from a laptop, not from
+anywhere. The alternative, dumping from inside the running container, produces
+a file on an ephemeral disk with no way to download it. What is left is the one
+path that works from a browser with nothing installed: an admin-only route that
+serializes the database and returns it as an attachment.
+
+The consequences worth keeping:
+
+- **Admin-only, and that is the whole security story.** The response is every
+  user's personal data and password hashes in one object. `requireRole("ADMIN")`
+  guards it, and the rate limit is deliberately tight (5/hour): nobody needs
+  more, and a stolen admin session should not be able to pull the database
+  repeatedly. The filename says `SENSITIVE` because that is the only warning
+  still attached to the file once it is sitting in a downloads folder.
+- **Sessions and password-reset tokens are excluded.** Both are transient
+  authentication material. Restoring live sessions into a new database would be
+  a security bug wearing a backup's clothes; everyone signing in again is the
+  correct outcome, and the restore script says so when it finishes.
+- **Password hashes are included.** A restore that forced a password reset on
+  every user would not really be a backup. They are bcrypt hashes rather than
+  passwords — which is why the file is sensitive rather than catastrophic.
+- **Image bytes are included, as base64.** Counts can match while every image
+  restores blank, so this is what makes it a whole backup rather than half of
+  one. It is also the limit: the object is built in memory, so past roughly a
+  few hundred photographed assets this needs replacing with a real `pg_dump`
+  against a database that permits external connections. Same ceiling as §14.
+- **`src/lib/backup.ts` is separate from `src/server/backup.ts`.** The shared
+  table list has to be readable by both the route and the `tsx` restore script,
+  and a `server-only` module cannot be imported from a script — verified, not
+  assumed: it fails with "Cannot find module 'server-only'". Restore walks that
+  shared list, so a table added to the export but not to the list shows up as a
+  missing line rather than vanishing quietly.
+- **A restore is all-or-nothing.** One transaction, rows in foreign-key order,
+  and it refuses a database that already has users unless forced. A
+  half-restored database is worse than an empty one, because it looks like it
+  worked.

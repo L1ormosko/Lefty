@@ -14,7 +14,9 @@
     "seed:dev": "tsx prisma/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "backup:restore": "tsx prisma/restore.ts",
+    "backup:check": "tsx prisma/backup-check.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

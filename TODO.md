@@ -16,8 +16,16 @@
       `/uploads/<uuid>.webp` behaviour. An image belonging to a non-ACTIVE
       asset should arguably be owner/admin-only, the way `getPublicAsset`
       already is.
-- [ ] **No database backups.** Free-tier Postgres has none, and it expires
-      2026-10-07. A paid plan with daily backups is the minimum before real data.
+- [ ] **No database backups.** Free-tier Postgres has none, and **it is deleted
+      on 2026-10-07** — that is a hard date, not an estimate. A paid plan with
+      daily backups is the minimum before real customer data.
+      There is now a manual route out, because the usual one does not work here
+      (the instance's IP allow-list is empty, so `pg_dump` cannot connect, and
+      the service's disk is ephemeral): download `/api/admin/backup` as an
+      ADMIN, then `npm run backup:check <file>` against the live database, and
+      `npm run backup:restore <file>` into the new one. See README and
+      DECISIONS.md §17. **Nobody is reminded of the date automatically — put it
+      in a calendar.**
 - [x] ~~No way to delete a user's data~~ — the three rights the policy promises
       (see, correct, erase) are live on the profile page for both roles. Erasure
       is anonymization: see DECISIONS.md §15 for why a hard delete would have

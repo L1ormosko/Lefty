@@ -381,6 +381,11 @@ const he: Dict = {
   "admin.ownerCompanies": "חברות בעלי שטחים",
   "admin.topCities": "ערים מובילות לפי מלאי פעיל",
   "admin.pipelineValue": "צפי מהזמנות פתוחות",
+  "admin.backup": "גיבוי מסד הנתונים",
+  "admin.backupDownload": "הורדת גיבוי",
+  "admin.backupNote":
+    "הקובץ מכיל את כל נתוני המשתמשים וגיבוב של סיסמאותיהם. שמרו אותו במקום מוגן, " +
+    "ואל תשאירו אותו בתיקיית ההורדות.",
 
   "notif.empty": "אין התראות חדשות.",
   "notif.markRead": "סימון כנקרא",

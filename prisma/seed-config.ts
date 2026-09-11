@@ -5,6 +5,9 @@
  * importing it would seed the database rather than assert on the guard.
  */
 
+/** Only what these functions actually read, so a test can pass a plain object. */
+type SeedEnv = { SEED_PASSWORD?: string; SEED_DEMO?: string; [key: string]: string | undefined };
+
 /** Long enough that nobody is tempted to type one in by hand. */
 export const MIN_PASSWORD_LENGTH = 24;
 
@@ -17,7 +20,7 @@ export const MIN_PASSWORD_LENGTH = 24;
  * exactly how that comes back quietly, so a missing or weak value throws and
  * the deploy fails loudly instead. See DECISIONS.md 16.
  */
-export function requireSeedPassword(env: NodeJS.ProcessEnv = process.env): string {
+export function requireSeedPassword(env: SeedEnv = process.env): string {
   const value = env.SEED_PASSWORD;
   if (!value) {
     throw new Error(
@@ -43,6 +46,6 @@ export function requireSeedPassword(env: NodeJS.ProcessEnv = process.env): strin
  * variable rather than a code change, which matters because the seed deletes
  * and recreates the demo rows on every single deploy.
  */
-export function demoSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function demoSeedEnabled(env: SeedEnv = process.env): boolean {
   return env.SEED_DEMO === "1";
 }

@@ -5,7 +5,7 @@ import { t } from "@/lib/labels";
 import { CURRENCY } from "@/lib/constants";
 import { adminNav } from "@/lib/nav";
 import { DashboardShell, Section } from "@/components/DashboardShell";
-import { Card, LinkButton, Num, StatTile } from "@/components/ui";
+import { Card, LinkButton, Num, StatTile, buttonClass } from "@/components/ui";
 import { addDays, todayUtc } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +87,21 @@ export default async function AdminOverview() {
           <StatTile label={t("verify.PENDING")} value={pendingVerification} href="/admin/assets?filter=pending" />
           <StatTile label={t("verify.REJECTED")} value={rejectedCount} href="/admin/assets?filter=rejected" />
         </div>
+      </Section>
+
+      {/*
+        A backup nobody can find is not a backup. The route is admin-only and
+        does the real work; this is the only thing that makes it reachable
+        without typing a URL from memory.
+      */}
+      <Section title={t("admin.backup")}>
+        <Card className="p-4 flex flex-wrap items-center gap-3">
+          {/* A plain <a>: the browser's own navigation is what saves the file. */}
+          <a href="/api/admin/backup" className={buttonClass("secondary", "sm")}>
+            {t("admin.backupDownload")}
+          </a>
+          <p className="text-xs text-ink-500 flex-1 min-w-0">{t("admin.backupNote")}</p>
+        </Card>
       </Section>
 
       <Section title={t("admin.topCities")}>
