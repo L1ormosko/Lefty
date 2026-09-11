@@ -6,12 +6,12 @@ test("the landing page explains the product and both CTAs navigate correctly", a
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  await page.getByRole("link", { name: "גלו שטחי פרסום במפה" }).first().click();
+  await page.getByRole("link", { name: "ראו מה פנוי במפה" }).first().click();
   await page.waitForURL(/\/explore/);
   await expect(page.getByRole("application")).toBeVisible({ timeout: 20_000 });
 
   await page.goto("/");
-  await page.getByRole("link", { name: "פרסמו שטח פרסום" }).first().click();
+  await page.getByRole("link", { name: "פרסמו את השטח שלכם" }).first().click();
   await page.waitForURL(/\/register/);
   await expect(page.locator("#name")).toBeVisible();
 });

@@ -14,22 +14,32 @@ type Dict = Record<string, string>;
 const he: Dict = {
   "app.name": "VELTO",
   "app.tagline": "שטחי פרסום חוץ בישראל — חיפוש, השוואה ובקשת זמינות",
-  "home.headline": "מצאו שטחי פרסום חוץ בישראל, והזמינו ישירות מבעלי השטח",
-  "home.sub": "חיפוש על המפה, בדיקת זמינות בתאריכים שלכם, ובקשת מחיר — בלי סבב טלפונים.",
+  // Shown in the thin bar above the map, so it has to survive truncation.
+  "home.headline": "שטחי פרסום חוץ בישראל — מה פנוי, ומתי",
+  "home.sub": "סננו לפי עיר, סוג ותאריכים, ופנו ישירות לבעל השטח.",
 
   "landing.title": "VELTO",
-  "landing.eyebrow": "שוק שטחי הפרסום חוץ של ישראל",
-  "landing.headline": "שטחי פרסום חוץ בישראל, על מפה אחת",
-  "landing.sub": "מצאו שלטי חוצות, מסכים דיגיטליים, קירות וטוטמים לפי עיר, תאריך ותקציב — ופנו ישירות לבעל השטח, בלי סבב טלפונים ובלי מתווכים.",
-  "landing.ctaExplore": "גלו שטחי פרסום במפה",
-  "landing.ctaOwner": "פרסמו שטח פרסום",
+  // "שוק שטחי הפרסום חוץ של ישראל" claimed to *be* the market. We are a pilot
+  // in one city with a national map, and the product's own rule is not to
+  // claim what it cannot show.
+  "landing.eyebrow": "מפה ארצית · פיילוט מסחרי בבאר שבע",
+  // Three words, and they are the exact question a media buyer picks up the
+  // phone to ask ten owners. "On one map" was in here and is format, not the
+  // promise - it moved to the subheadline, which also fixed a wrap that left
+  // the em dash orphaned at the start of line two.
+  "landing.headline": "מה פנוי, איפה ומתי",
+  "landing.sub": "שלטי חוצות, מסכים דיגיטליים, קירות וטוטמים — על מפה אחת, עם התאריכים שבהם כל שטח באמת פנוי. סננו לפי עיר, תאריך ותקציב, ופנו ישירות לבעל השטח.",
+  "landing.ctaExplore": "ראו מה פנוי במפה",
+  "landing.ctaOwner": "פרסמו את השטח שלכם",
 
   "landing.coverageTitle": "מלאי פעיל",
   "landing.coverageNote": "{assets} שטחים ב-{cities} ערים",
   "landing.coverageEmpty": "VELTO בהרצה. המלאי המסחרי הראשון נבנה כרגע בבאר שבע — במפה מוצגים בינתיים שטחי הדגמה, מסומנים ככאלה.",
 
-  "landing.sidesTitle": "פלטפורמה אחת, שני צדדים",
-  "landing.sidesBody": "VELTO היא מתווכת ניטרלית: איננו מחזיקים שטחי פרסום ואיננו סוגרים את העסקה. אנחנו מחברים בין מי שמחפש שטח למי שמחזיק בו — התמחור והסגירה המסחרית נשארים ביניכם.",
+  // Was "one platform, two sides" over a paragraph of company language
+  // ("neutral intermediary"). The same fact, said as what it means for them.
+  "landing.sidesTitle": "אנחנו לא לוקחים נתח מהעסקה",
+  "landing.sidesBody": "VELTO לא מחזיקה שטחי פרסום ולא סוגרת עסקאות. אנחנו מראים מה קיים ומתי הוא פנוי — המחיר, המשא ומתן והסגירה נשארים בינכם לבין בעל השטח.",
 
   "landing.howTitle": "איך זה עובד",
   "landing.advertiserTitle": "למפרסמים ולמשרדי פרסום",
@@ -56,7 +66,18 @@ const he: Dict = {
   "landing.mapFeature6": "אזור אישי לשני הצדדים — למפרסמים ולבעלי השטחים.",
 
   "landing.trustTitle": "שקיפות היא לא סלוגן — היא איך שהמערכת בנויה",
-  "landing.trustIntro": "VELTO היא פלטפורמה חדשה. איננו מציגים לקוחות, המלצות או מספרים שאין לנו. מה שכן יש: מבנה נתונים שלא משאיר מקום להמצאות.",
+  /*
+   * This used to open with "VELTO is a new platform, we have no customers or
+   * testimonials to show" - leading with the weakness and asking to be
+   * forgiven for it. The same fact is a stronger claim said forward, and it is
+   * checkable: the US has Geopath and the UK has Route, independent industry
+   * measurement bodies that publish their methodology. Market research for
+   * this project found no Israeli equivalent - the one public methodology
+   * belongs to a single vendor and is not audited. So "we quote no impression
+   * numbers" is not modesty, it is the only honest option available here, and
+   * saying so is worth more than a logo wall we do not have.
+   */
+  "landing.trustIntro": "בפרסום חוץ נהוג לצטט מספרי חשיפה. בארה״ב ובבריטניה יש ועדות מדידה עצמאיות שעומדות מאחורי המספרים האלה; בישראל אין מקבילה — ולכן לא תמצאו כאן אף מספר חשיפה. מה שתמצאו: מה שבעל השטח הצהיר, מתי אומת, ומה עדיין לא ידוע.",
   "landing.trustPoint1": "סטטוס אימות גלוי לכל שטח — מאומת, ממתין לאימות או נדחה. שטח שלא אומת אינו מוסתר, אבל גם אינו מוצג כאילו אומת.",
   "landing.trustPoint2": "שדה שלא מולא מוצג כ״לא צוין״ — לא כמספר גנרי ולא כברירת מחדל מייפה.",
   "landing.trustPoint3": "המחיר, אם פורסם, הוא המחיר שבעל השטח קבע. אם לא פורסם — אפשר לבקש הצעת מחיר ישירה.",
@@ -67,7 +88,9 @@ const he: Dict = {
   "landing.audienceAdvertiser": "למשרדי פרסום ולמפרסמים ישירים: מקום אחד לבדוק זמינות אמיתית לפני שמרימים טלפון.",
   "landing.audienceOwner": "לבעלי שטח עצמאיים ולחברות שילוט: ערוץ ישיר לפניות, בלי לוותר על נתח לגורם מתווך.",
 
-  "landing.footerCta": "מוכנים להתחיל?",
+  // "Ready to get started?" asks nothing. This asks the one question the
+  // headline promised to answer, which is also the reason to click.
+  "landing.footerCta": "מה פנוי אצלכם בעיר?",
   "landing.footerLogin": "יש לכם כבר חשבון?",
 
   "legal.terms": "תקנון",
@@ -80,7 +103,7 @@ const he: Dict = {
   "legal.acceptAnd": "ול",
   "legal.acceptRequired": "יש לאשר את התקנון ומדיניות הפרטיות כדי להירשם.",
   "footer.rights": "כל הזכויות שמורות",
-  "footer.tagline": "שוק שטחי הפרסום חוץ בישראל",
+  "footer.tagline": "שטחי פרסום חוץ בישראל, על מפה אחת",
   "nav.explore": "מפה",
   "nav.brief": "התאמת שטחים",
   "nav.dashboard": "אזור אישי",
