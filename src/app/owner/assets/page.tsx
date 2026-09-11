@@ -2,11 +2,11 @@ import Link from "next/link";
 import { requireRole } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
+import { priceLine } from "@/lib/price";
 import { ownerNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
-import { Card, EmptyState, LinkButton, Num } from "@/components/ui";
+import { Card, EmptyState, LinkButton, Num, Price } from "@/components/ui";
 import { AvailabilityBadge, StatusPill, VerificationBadge } from "@/components/badges";
-import { CURRENCY } from "@/lib/constants";
 import { availabilityFor } from "@/lib/availability";
 import { AssetStatusToggle } from "@/components/owner/AssetStatusToggle";
 import { DeleteAssetButton } from "@/components/owner/DeleteAssetButton";
@@ -74,11 +74,12 @@ export default async function OwnerAssets() {
                 </div>
                 <div className="text-sm text-ink-600 text-end">
                   <p>
-                    {asset.priceMonthly != null ? (
-                      <Num>{`${CURRENCY}${asset.priceMonthly.toLocaleString("he-IL")} / חודש`}</Num>
-                    ) : (
-                      t("asset.priceNotPublished")
-                    )}
+                    <Price
+                      amount={priceLine(asset).amount}
+                      per={priceLine(asset).per ?? undefined}
+                      from
+                      fallback={t("asset.priceNotPublished")}
+                    />
                   </p>
                   <p className="text-xs text-ink-500 mt-1">
                     <Num>{asset._count.inquiries}</Num> {t("dash.requests")} · <Num>{asset._count.bookings}</Num>{" "}

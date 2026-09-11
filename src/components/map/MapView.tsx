@@ -6,12 +6,12 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapAsset } from "@/server/assets";
 import {
   AVAILABILITY_COLORS,
-  CURRENCY,
   DEFAULT_MAP_CENTER,
   ISRAEL_BOUNDS,
   type AvailabilityState,
 } from "@/lib/constants";
 import { AVAILABILITY_GLYPH, t } from "@/lib/labels";
+import { priceLine } from "@/lib/price";
 
 export type Bounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
 
@@ -66,14 +66,12 @@ function popupHtml(props: Record<string, unknown>): string {
   const type = t(`type.${String(props.assetType)}`);
   const state = String(props.availability) as AvailabilityState;
 
-  const monthly = props.priceMonthly as number | null;
-  const weekly = props.priceWeekly as number | null;
-  const price =
-    monthly != null
-      ? `${t("asset.priceFrom")}${CURRENCY}${monthly.toLocaleString("he-IL")} / חודש`
-      : weekly != null
-        ? `${t("asset.priceFrom")}${CURRENCY}${weekly.toLocaleString("he-IL")} / שבוע`
-        : t("asset.priceNotPublished");
+  // The popup is an HTML string, so it cannot render <Price>. It calls the
+  // same pure function <Price>'s callers do, which is why that function exists.
+  const price = priceLine({
+    priceMonthly: props.priceMonthly as number | null,
+    priceWeekly: props.priceWeekly as number | null,
+  }).text;
 
   const verified = props.verified
     ? `<span style="color:#1b37ad">✓ ${escapeHtml(t("verify.VERIFIED"))}</span>`

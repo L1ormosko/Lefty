@@ -133,6 +133,10 @@ const he: Dict = {
   "common.to": "עד",
   "common.results": "תוצאות",
   "common.error": "אירעה שגיאה. נסו שוב.",
+  // The period a rate is quoted per. These were hardcoded Hebrew inside five
+  // components, which is the one thing this file exists to prevent.
+  "common.perMonth": "חודש",
+  "common.perWeek": "שבוע",
   "common.demoData": "נתוני הדגמה",
   "common.demoDataNote": "רשומה זו נוצרה לצורכי פיתוח והדגמה ואינה מלאי מסחרי מאומת.",
 

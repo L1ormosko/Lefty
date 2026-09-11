@@ -5,7 +5,7 @@ import { getPublicAsset, assetAvailability } from "@/server/assets";
 import { getCurrentUser } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
-import { CURRENCY } from "@/lib/constants";
+import { priceLine } from "@/lib/price";
 import { formatDate, formatRange, todayUtc } from "@/lib/dates";
 import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
 import { Card, ImagePlaceholder, Num, Price, buttonClass } from "@/components/ui";
@@ -59,12 +59,7 @@ export default async function AssetPage({ params }: Params) {
   const primary = asset.images[0];
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 
-  const priceLine =
-    asset.priceMonthly != null
-      ? `${t("asset.priceFrom")}${CURRENCY}${asset.priceMonthly.toLocaleString("he-IL")} / חודש`
-      : asset.priceWeekly != null
-        ? `${t("asset.priceFrom")}${CURRENCY}${asset.priceWeekly.toLocaleString("he-IL")} / שבוע`
-        : null;
+  const headlinePrice = priceLine(asset);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
@@ -257,7 +252,9 @@ export default async function AssetPage({ params }: Params) {
                 }
               />
             </dl>
-            {priceLine && <p className="mt-3 text-xs text-ink-500">{t("asset.priceEstimateNote")}</p>}
+            {headlinePrice.amount != null && (
+              <p className="mt-3 text-xs text-ink-500">{t("asset.priceEstimateNote")}</p>
+            )}
           </Card>
 
           {/* Availability windows */}
@@ -321,7 +318,7 @@ export default async function AssetPage({ params }: Params) {
           <RequestPanel
             assetId={asset.id}
             title={asset.title}
-            priceLine={priceLine}
+            priceLine={headlinePrice.amount != null ? headlinePrice.text : null}
             minimumBookingDays={asset.minimumBookingDays}
             instantBookable={asset.instantBookable}
             availability={availability}
@@ -345,7 +342,7 @@ export default async function AssetPage({ params }: Params) {
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-ink-900 truncate">
-              {priceLine ?? t("asset.priceNotPublished")}
+              {headlinePrice.text}
             </p>
           </div>
           {/* A shorter label than the panel's own heading: the full

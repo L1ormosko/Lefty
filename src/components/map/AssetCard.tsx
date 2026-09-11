@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import type { MapAsset } from "@/server/assets";
-import { CURRENCY } from "@/lib/constants";
 import { t } from "@/lib/labels";
+import { priceLine } from "@/lib/price";
 import { formatDate } from "@/lib/dates";
 import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
-import { ImagePlaceholder, Num, cx } from "@/components/ui";
+import { ImagePlaceholder, Num, Price, cx } from "@/components/ui";
 
 export function AssetCard({
   asset,
@@ -17,12 +17,7 @@ export function AssetCard({
   selected?: boolean;
   onSelect?: (id: string) => void;
 }) {
-  const priceLabel =
-    asset.priceMonthly != null
-      ? `${t("asset.priceFrom")}${CURRENCY}${asset.priceMonthly.toLocaleString("he-IL")} / חודש`
-      : asset.priceWeekly != null
-        ? `${t("asset.priceFrom")}${CURRENCY}${asset.priceWeekly.toLocaleString("he-IL")} / שבוע`
-        : t("asset.priceNotPublished");
+  const price = priceLine(asset);
 
   return (
     <article
@@ -66,7 +61,12 @@ export function AssetCard({
             {asset.isDemo && <DemoBadge />}
           </div>
           <p className="mt-2 text-sm font-medium text-ink-900">
-            <Num>{priceLabel}</Num>
+            <Price
+              amount={price.amount}
+              per={price.per ?? undefined}
+              from
+              fallback={t("asset.priceNotPublished")}
+            />
           </p>
         </div>
       </button>
