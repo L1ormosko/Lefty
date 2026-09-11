@@ -7,7 +7,15 @@ import { DEFAULT_MAP_CENTER, ISRAEL_BOUNDS } from "@/lib/constants";
 import { t } from "@/lib/labels";
 import { Num } from "@/components/ui";
 
-/** Click the map to place the asset. The marker is also draggable. */
+/**
+ * Click the map to place the asset. The marker is also draggable.
+ *
+ * The component writes the chosen point into its own hidden latitude/longitude
+ * inputs, so a plain form submit already carries the coordinates. `onChange` is
+ * therefore optional: the wizard was passing an empty function to satisfy a
+ * required prop, which read as if the callback mattered when nothing consumed
+ * it. Optional is the honest description of the contract.
+ */
 export function LocationPicker({
   latitude,
   longitude,
@@ -15,7 +23,7 @@ export function LocationPicker({
 }: {
   latitude?: number;
   longitude?: number;
-  onChange: (lat: number, lng: number) => void;
+  onChange?: (lat: number, lng: number) => void;
 }) {
   const container = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -53,13 +61,13 @@ export function LocationPicker({
           marker.current.on("dragend", () => {
             const pos = marker.current!.getLngLat();
             setPoint({ lat: pos.lat, lng: pos.lng });
-            cb.current(pos.lat, pos.lng);
+            cb.current?.(pos.lat, pos.lng);
           });
         } else {
           marker.current.setLngLat([lng, lat]);
         }
         setPoint({ lat, lng });
-        cb.current(lat, lng);
+        cb.current?.(lat, lng);
       }
 
       if (latitude != null && longitude != null) place(latitude, longitude);

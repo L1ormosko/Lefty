@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   addAvailabilityPeriodAction,
@@ -195,11 +195,9 @@ function LocationStep({ asset, assetId, onSaved }: { asset: WizardAsset | null; 
       {state?.ok === false && (state.fields?.latitude || state.fields?.longitude) && (
         <Alert>{state.fields.latitude ?? state.fields.longitude}</Alert>
       )}
-      <LocationPicker
-        latitude={asset?.latitude}
-        longitude={asset?.longitude}
-        onChange={() => {}}
-      />
+      {/* No onChange: the picker writes its own hidden lat/lng inputs, which
+          is what this form submits. */}
+      <LocationPicker latitude={asset?.latitude} longitude={asset?.longitude} />
       <StepFooter pending={pending} />
     </form>
   );
@@ -343,6 +341,28 @@ function AvailabilityStep({
   );
   const [list, setList] = useState(periods);
 
+  /*
+   * Show the window that was just added.
+   *
+   * This step used to print "saved - reload the page to see the updated list".
+   * Reloading is the one thing an owner must not do here: assetId and step live
+   * in this component's state with no persistence, so a reload drops them back
+   * to step one of a half-built asset. The cheaper failure was just as real -
+   * with no visible confirmation, the obvious move is to submit the same window
+   * again.
+   *
+   * Keyed on the created period's id so it runs once per successful add rather
+   * than on every re-render while the same state object is current. Clearing
+   * the inputs is not done here: React 19 resets an uncontrolled form after its
+   * action resolves, and an explicit reset() on top of that is dead code.
+   */
+  const addedId = state?.ok ? state.period?.id : undefined;
+  useEffect(() => {
+    if (!state?.ok || !state.period) return;
+    const period = state.period;
+    setList((prev) => (prev.some((p) => p.id === period.id) ? prev : [...prev, period]));
+  }, [addedId, state]);
+
   return (
     <div className="space-y-4">
       <h2 className="font-semibold text-ink-900">{t("wizard.availability")}</h2>
@@ -399,7 +419,11 @@ function AvailabilityStep({
             {t("common.next")}
           </Button>
         </div>
-        {state?.ok && <p className="text-sm text-ok-700">נשמר. רעננו את הדף כדי לראות את הרשימה המעודכנת.</p>}
+        {state?.ok && state.period && (
+          <p className="text-sm text-ok-700">
+            נוסף חלון זמינות <Num>{formatRange(state.period.startDate, state.period.endDate)}</Num>.
+          </p>
+        )}
       </form>
     </div>
   );

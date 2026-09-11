@@ -17,8 +17,19 @@ import { toUtcDate } from "@/lib/dates";
 import { t } from "@/lib/labels";
 import type { AssetType, Illumination, LocationTag, PermitStatus } from "@prisma/client";
 
+/**
+ * `period` is returned only by addAvailabilityPeriodAction, so the wizard can
+ * show the window it just created instead of telling the owner to reload. The
+ * old copy did exactly that, and reloading mid-wizard drops the in-memory
+ * assetId/step and sends them back to step one of a half-built asset.
+ */
 export type AssetActionState =
-  | { ok: true; assetId: string; message?: string }
+  | {
+      ok: true;
+      assetId: string;
+      message?: string;
+      period?: { id: string; startDate: Date; endDate: Date; note: string | null };
+    }
   | { ok: false; error?: string; fields?: Record<string, string> }
   | undefined;
 
@@ -167,16 +178,17 @@ export async function addAvailabilityPeriodAction(
     if (!parsed.success) return { ok: false, fields: fieldErrors(parsed.error) };
     const asset = await loadOwnedAsset(String(formData.get("assetId")), user);
 
-    await prisma.availabilityPeriod.create({
+    const period = await prisma.availabilityPeriod.create({
       data: {
         assetId: asset.id,
         startDate: toUtcDate(parsed.data.startDate),
         endDate: toUtcDate(parsed.data.endDate),
         note: parsed.data.note || null,
       },
+      select: { id: true, startDate: true, endDate: true, note: true },
     });
     revalidatePath(`/owner/assets/${asset.id}`);
-    return { ok: true, assetId: asset.id };
+    return { ok: true, assetId: asset.id, period };
   } catch (err) {
     return { ok: false, error: toUserMessage(err) };
   }

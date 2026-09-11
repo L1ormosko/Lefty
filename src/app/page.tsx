@@ -64,7 +64,7 @@ export default async function LandingPage() {
               <span className="inline-block text-xs font-medium text-brand-700 bg-brand-50 border border-brand-500/30 rounded px-2 py-1 mb-4">
                 {t("landing.eyebrow")}
               </span>
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight text-ink-900 text-balance">
+              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-ink-900 text-balance">
                 {t("landing.headline")}
               </h1>
               <p className="mt-4 text-base sm:text-lg text-ink-600 max-w-xl leading-relaxed">
@@ -121,7 +121,7 @@ export default async function LandingPage() {
         {/* Two sides */}
         <section className="bg-ink-50 border-b border-ink-200">
           <div className="mx-auto max-w-3xl px-4 py-14 text-center">
-            <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-ink-900">
+            <h2 className="text-2xl sm:text-3xl font-semibold text-ink-900">
               {t("landing.sidesTitle")}
             </h2>
             <p className="mt-4 text-ink-600 leading-relaxed">{t("landing.sidesBody")}</p>
@@ -131,7 +131,7 @@ export default async function LandingPage() {
         {/* How it works */}
         <section className="bg-ink-50">
           <div className="mx-auto max-w-5xl px-4 pb-16">
-            <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-ink-900 text-center mb-8">
+            <h2 className="text-2xl sm:text-3xl font-semibold text-ink-900 text-center mb-8">
               {t("landing.howTitle")}
             </h2>
             <div className="grid md:grid-cols-2 gap-6">
@@ -158,7 +158,7 @@ export default async function LandingPage() {
         {/* What the map shows */}
         <section className="bg-white border-y border-ink-200">
           <div className="mx-auto max-w-5xl px-4 py-16">
-            <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-ink-900 mb-8">
+            <h2 className="text-2xl sm:text-3xl font-semibold text-ink-900 mb-8">
               {t("landing.mapTitle")}
             </h2>
             <ul className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
@@ -181,7 +181,7 @@ export default async function LandingPage() {
         <section className="bg-ink-50">
           <div className="mx-auto max-w-5xl px-4 py-16 grid lg:grid-cols-[0.9fr_1.1fr] gap-10 lg:gap-14">
             <div>
-              <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-ink-900 text-balance">
+              <h2 className="text-2xl sm:text-3xl font-semibold text-ink-900 text-balance">
                 {t("landing.trustTitle")}
               </h2>
               <p className="mt-4 text-ink-600 leading-relaxed">{t("landing.trustIntro")}</p>
@@ -224,7 +224,7 @@ export default async function LandingPage() {
         {/* Closing CTA */}
         <section className="bg-ink-900">
           <div className="mx-auto max-w-3xl px-4 py-16 text-center">
-            <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white">
+            <h2 className="text-2xl sm:text-3xl font-semibold text-white">
               {t("landing.footerCta")}
             </h2>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">

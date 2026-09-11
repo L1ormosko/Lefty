@@ -2,12 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-sans: "Heebo", "Segoe UI", "Arial Hebrew", Arial, sans-serif;
-}
+/*
+ * --font-sans is deliberately NOT declared here. next/font puts it on <html>
+ * via the class in layout.tsx, and :root IS <html> - declaring it in both
+ * places sets the same custom property on the same element at the same
+ * specificity, leaving the winner to stylesheet injection order, which is not
+ * the same in development and production. See src/app/fonts/index.ts.
+ */
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* Hebrew leading for anything that does not carry an explicit text-* class.
+     The size scale in tailwind.config.ts covers everything that does; this is
+     the inherited default, which Tailwind's preflight otherwise leaves at 1.5. */
+  line-height: 1.75;
   /* The site header is sticky and 3.5rem tall, so anything scrolled to - a
      focused input, an anchor target, a field a form error jumped to - lands
      underneath it and cannot be tapped. Reserve its height, plus a little

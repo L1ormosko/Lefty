@@ -38,6 +38,22 @@ test("a media owner can publish an asset through the wizard", async ({ page }) =
   await page.locator("#startDate").fill(iso(start));
   await page.locator("#endDate").fill(iso(end));
   await page.getByRole("button", { name: "הוספת חלון" }).click();
+
+  // The window must appear in the LIST straight away. This step used to print
+  // "saved - reload the page to see the updated list", which is the one thing
+  // an owner must not do here: assetId and step live in component state, so a
+  // reload drops them back to step one of a half-built asset. With no visible
+  // confirmation the obvious move is to submit the same window again.
+  //
+  // Asserted on the list rows rather than on the success message: an earlier
+  // version of this test checked the message and the date, and both are true
+  // whether or not the list updates - it passed with the fix reverted.
+  const windowRows = page
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("button", { name: "מחיקה" }) });
+  await expect(windowRows).toHaveCount(1, { timeout: 15_000 });
+  await expect(windowRows.first()).toContainText(iso(start).split("-").reverse().join("/"));
+
   await page.getByRole("button", { name: "המשך" }).click();
 
   // Step 6: images. Publishing now requires at least one photo.

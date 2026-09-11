@@ -37,6 +37,27 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-sans)", "Arial", "sans-serif"],
       },
+      /*
+       * Hebrew-tuned line heights, set on the size scale rather than as one
+       * rule on body, so a component can still opt out with a leading-* class.
+       *
+       * Hebrew letterforms are boxier and have no ascender/descender rhythm to
+       * open the line up, so Tailwind's default 1.5 reads cramped for the long
+       * paragraphs on the landing and legal pages. Headings go the other way:
+       * a 1.75 Hebrew headline falls apart into separate lines, so they are
+       * tighter than the default, not looser.
+       */
+      fontSize: {
+        xs: ["0.75rem", { lineHeight: "1.65" }],
+        sm: ["0.875rem", { lineHeight: "1.7" }],
+        base: ["1rem", { lineHeight: "1.75" }],
+        lg: ["1.125rem", { lineHeight: "1.6" }],
+        xl: ["1.25rem", { lineHeight: "1.45" }],
+        "2xl": ["1.5rem", { lineHeight: "1.35" }],
+        "3xl": ["1.875rem", { lineHeight: "1.3" }],
+        "4xl": ["2.25rem", { lineHeight: "1.2" }],
+        "5xl": ["3rem", { lineHeight: "1.15" }],
+      },
       borderRadius: { DEFAULT: "6px", md: "8px", lg: "10px" },
       boxShadow: {
         card: "0 1px 2px rgba(25,29,38,.06), 0 1px 3px rgba(25,29,38,.08)",
