@@ -10,6 +10,7 @@ import { MapView, type Bounds, type Viewport } from "./MapView";
 import { FilterPanel } from "./FilterPanel";
 import { AssetCard } from "./AssetCard";
 import { FilterChips, chipText } from "./FilterChips";
+import { clampFraction, nextSheet, snapTo, type Sheet } from "./sheet";
 import {
   EMPTY_FILTERS,
   describeFilters,
@@ -23,8 +24,6 @@ type Props = {
   initialAssets: MapAsset[];
   cities: { city: string; count: number }[];
 };
-
-type Sheet = "collapsed" | "half" | "full";
 
 export function Discover({ initialAssets, cities }: Props) {
   const searchParams = useSearchParams();
@@ -41,6 +40,20 @@ export function Discover({ initialAssets, cities }: Props) {
   // Which asset the pointer (or keyboard focus) is on, in either direction.
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet>("collapsed");
+  // Live height while a finger is on the handle; null the rest of the time,
+  // when the sheet sits on one of its three resting heights.
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const drag = useRef<{
+    startY: number;
+    startHeight: number;
+    height: number;
+    lastY: number;
+    lastTime: number;
+    velocity: number;
+    moved: boolean;
+  } | null>(null);
+  const draggedRef = useRef(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState(filters.q);
   const bounds = useRef<Bounds | null>(null);
@@ -227,7 +240,69 @@ export function Discover({ initialAssets, cities }: Props) {
   // one, not a list: the point is the smallest step back into results.
   const relax = useMemo(() => suggestRelaxation(filters), [filters]);
 
+  // Resting heights as classes rather than inline style, so the sheet has its
+  // height on the server's first paint instead of collapsing to its content
+  // and jumping. These three must agree with snapPoints() in sheet.ts, which
+  // is what the drag snaps against.
   const sheetHeight = { collapsed: "h-[92px]", half: "h-[52dvh]", full: "h-[88dvh]" }[sheet];
+
+  /* ---------------------------------------------------------------- *
+   * Dragging the sheet
+   * ---------------------------------------------------------------- */
+
+  const viewportHeight = useCallback(
+    () => sheetRef.current?.parentElement?.clientHeight || window.innerHeight,
+    []
+  );
+
+  const startDrag = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const height = sheetRef.current?.getBoundingClientRect().height ?? 0;
+    drag.current = {
+      startY: e.clientY,
+      startHeight: height,
+      height,
+      lastY: e.clientY,
+      lastTime: e.timeStamp,
+      velocity: 0,
+      moved: false,
+    };
+    // Capture, so a fast drag that leaves the handle still reaches us.
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const moveDrag = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const d = drag.current;
+      if (!d) return;
+      const viewport = viewportHeight();
+      // Up is positive: the sheet grows upward from the bottom of the screen.
+      const travelled = d.startY - e.clientY;
+      // A few pixels of slop, so a tap with an unsteady thumb is still a tap.
+      if (Math.abs(travelled) > 4) d.moved = true;
+
+      const elapsed = (e.timeStamp - d.lastTime) / 1000;
+      if (elapsed > 0) d.velocity = (d.lastY - e.clientY) / viewport / elapsed;
+      d.lastY = e.clientY;
+      d.lastTime = e.timeStamp;
+
+      d.height = clampFraction((d.startHeight + travelled) / viewport, viewport) * viewport;
+      setDragHeight(d.height);
+    },
+    [viewportHeight]
+  );
+
+  const endDrag = useCallback(() => {
+    const d = drag.current;
+    drag.current = null;
+    setDragHeight(null);
+    if (!d) return;
+    if (!d.moved) return; // A tap; the click handler answers it.
+    // Suppress the click that follows the release, or the sheet would snap and
+    // then immediately cycle to the next height.
+    draggedRef.current = true;
+    const viewport = viewportHeight();
+    setSheet(snapTo(d.height / viewport, d.velocity, viewport));
+  }, [viewportHeight]);
 
   const resultsList = (surface: "desktop" | "mobile") => (
     <div data-results={surface} className="space-y-2 p-3">
@@ -429,15 +504,33 @@ export function Discover({ initialAssets, cities }: Props) {
 
         {/* Mobile bottom sheet */}
         <div
+          ref={sheetRef}
           className={cx(
-            "lg:hidden absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-panel border-t border-ink-200 flex flex-col transition-[height] duration-200",
-            sheetHeight
+            "lg:hidden absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-panel border-t border-ink-200 flex flex-col",
+            // No transition mid-drag: the sheet has to sit under the finger,
+            // and a 200ms ease turns a drag into a rubber band.
+            dragHeight == null && "transition-[height] duration-200",
+            dragHeight == null && sheetHeight
           )}
+          style={dragHeight == null ? undefined : { height: `${dragHeight}px` }}
         >
           <button
             type="button"
-            className="pt-2 pb-1 flex flex-col items-center gap-1 shrink-0"
-            onClick={() => setSheet(sheet === "collapsed" ? "half" : sheet === "half" ? "full" : "collapsed")}
+            className="pt-2 pb-1 flex flex-col items-center gap-1 shrink-0 touch-none"
+            onPointerDown={startDrag}
+            onPointerMove={moveDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            // Keyboard and assistive tech reach the sheet through the same
+            // control: a drag is not a thing you can do with a keyboard, so
+            // tapping must always remain a way to open it.
+            onClick={() => {
+              if (draggedRef.current) {
+                draggedRef.current = false;
+                return;
+              }
+              setSheet(nextSheet(sheet));
+            }}
             aria-label={t("map.list")}
             aria-expanded={sheet !== "collapsed"}
           >

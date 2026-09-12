@@ -33,6 +33,53 @@ test("the map remembers where you were looking", async ({ page }) => {
   expect(page.url()).toBe(moved);
 });
 
+test("the results sheet can be dragged open, and still opens on a tap", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(!isMobile, "the sheet only exists on the phone layout");
+
+  await page.goto("/explore");
+  await page.waitForTimeout(3000);
+
+  const sheet = page.locator("div.rounded-t-2xl").last();
+  const height = async () => (await sheet.boundingBox())?.height ?? 0;
+  const collapsed = await height();
+  expect(collapsed).toBeLessThan(120);
+
+  const handle = page.getByRole("button", { name: "רשימה" });
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("no handle");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+
+  // Deliberately slow: a fast drag is a flick, and a flick is credited with
+  // momentum that carries the sheet past the nearest height on purpose. This
+  // one is meant to land where the finger left it.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(x, y - i * 35);
+    await page.waitForTimeout(70);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+
+  const viewport = (await page.viewportSize())!.height;
+  const opened = await height();
+  expect(opened).toBeGreaterThan(collapsed * 3);
+
+  // Landed on the middle height - and stayed there. The release must not also
+  // register as a tap, which would cycle it straight on to full.
+  expect(opened / viewport).toBeGreaterThan(0.45);
+  expect(opened / viewport).toBeLessThan(0.6);
+
+  // Tapping is still a way in, for anyone who never tries the drag.
+  await handle.tap();
+  await page.waitForTimeout(400);
+  expect(await height()).toBeGreaterThan(opened);
+});
+
 test("an applied filter is visible as a chip and can be removed on its own", async ({ page }) => {
   await page.goto("/explore");
   await openResults(page);
