@@ -153,6 +153,14 @@ const he: Dict = {
   "map.inventoryNote": "מוצגים רק שטחים שקיימים במאגר VELTO.",
   "map.list": "רשימה",
   "map.tilesUnavailable": "רקע המפה אינו נטען כרגע. הסימונים והחיפוש פעילים.",
+  "map.activeFilters": "סינון פעיל",
+  "map.removeFilter": "הסרת המסנן",
+  // Zero results with a filter on is a different situation from zero results
+  // on an empty search, and it deserves a different sentence and a different
+  // button. The generic one told everybody to clear everything.
+  "map.noMatchTitle": "אין שטח שעונה על כל התנאים",
+  "map.noMatchHint": "אפשר להסיר תנאי אחד ולראות מה נפתח.",
+  "map.relaxFilter": "הסרת {filter}",
 
   "filter.city": "עיר",
   "filter.allCities": "כל הערים",

@@ -15,11 +15,23 @@ import { priceLine } from "@/lib/price";
 
 export type Bounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
 
+/** Where the camera is, as opposed to what it can see. */
+export type Viewport = { lng: number; lat: number; zoom: number };
+
 type Props = {
   assets: MapAsset[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  onBoundsChange?: (b: Bounds) => void;
+  /** The card the cursor is on, mirrored onto its pin. */
+  hoveredId?: string | null;
+  /** Fires as the cursor moves over pins, so the matching card can answer. */
+  onHover?: (id: string | null) => void;
+  /**
+   * Fired on moveend. Carries the camera as well as the box, so a caller that
+   * wants to remember where the user was looking does not need a second
+   * listener and a second debounce to find out.
+   */
+  onBoundsChange?: (b: Bounds, view: Viewport) => void;
   initialView?: { lng: number; lat: number; zoom: number };
   interactive?: boolean;
   className?: string;
@@ -96,6 +108,8 @@ export function MapView({
   assets,
   selectedId,
   onSelect,
+  hoveredId = null,
+  onHover,
   onBoundsChange,
   initialView = DEFAULT_MAP_CENTER,
   interactive = true,
@@ -110,11 +124,18 @@ export function MapView({
   const [tilesFailed, setTilesFailed] = useState(false);
   const assetsRef = useRef(assets);
   const selectedRef = useRef(selectedId);
+  const hoveredRef = useRef(hoveredId);
   const selectCb = useRef(onSelect);
+  const hoverCb = useRef(onHover);
   const boundsCb = useRef(onBoundsChange);
+  // What is currently painted, so each flag can be cleared by id.
+  const paintedSelection = useRef<string | null>(null);
+  const paintedHover = useRef<string | null>(null);
   assetsRef.current = assets;
   selectedRef.current = selectedId;
+  hoveredRef.current = hoveredId;
   selectCb.current = onSelect;
+  hoverCb.current = onHover;
   boundsCb.current = onBoundsChange;
 
   function applyData() {
@@ -122,13 +143,33 @@ export function MapView({
     src?.setData(toGeoJSON(assetsRef.current));
   }
 
-  function applySelection() {
+  /**
+   * Paint one flag, by id.
+   *
+   * This used to be `removeFeatureState({ source })` with no id, which wipes
+   * the state of *every* feature. With only `selected` in play that was merely
+   * wasteful; with `hovered` alongside it, re-selecting would silently erase
+   * the hover and the pin under the cursor would drop back to its resting size
+   * mid-hover.
+   */
+  function paint(key: "selected" | "hovered", next: string | null, painted: { current: string | null }) {
     const m = map.current;
     if (!m || !ready.current) return;
-    m.removeFeatureState({ source: SOURCE });
-    if (selectedRef.current) {
-      m.setFeatureState({ source: SOURCE, id: selectedRef.current }, { selected: true });
+    if (painted.current && painted.current !== next) {
+      m.removeFeatureState({ source: SOURCE, id: painted.current }, key);
     }
+    // Always re-set: setData drops feature state, so this is also how the flag
+    // survives a refetch.
+    if (next) m.setFeatureState({ source: SOURCE, id: next }, { [key]: true });
+    painted.current = next;
+  }
+
+  function applySelection() {
+    paint("selected", selectedRef.current, paintedSelection);
+  }
+
+  function applyHover() {
+    paint("hovered", hoveredRef.current, paintedHover);
   }
 
   useEffect(() => {
@@ -137,14 +178,23 @@ export function MapView({
 
     function emitBounds() {
       const m = map.current;
-      if (!m || !boundsCb.current) return;
+      // `ready` is cleared before the map is destroyed: MapLibre emits a final
+      // moveend during teardown, and a listener that answers it is reporting a
+      // camera for a component that is already on its way out - which, once
+      // the parent started writing that camera to the URL, cancelled the very
+      // navigation that unmounted us.
+      if (!m || !ready.current || !boundsCb.current) return;
       const b = m.getBounds();
-      boundsCb.current({
-        minLat: b.getSouth(),
-        maxLat: b.getNorth(),
-        minLng: b.getWest(),
-        maxLng: b.getEast(),
-      });
+      const c = m.getCenter();
+      boundsCb.current(
+        {
+          minLat: b.getSouth(),
+          maxLat: b.getNorth(),
+          minLng: b.getWest(),
+          maxLng: b.getEast(),
+        },
+        { lng: c.lng, lat: c.lat, zoom: m.getZoom() }
+      );
     }
 
     (async () => {
@@ -222,8 +272,25 @@ export function MapView({
           filter: ["!", ["has", "point_count"]],
           paint: {
             "circle-color": ["get", "color"],
-            "circle-radius": ["case", ["boolean", ["feature-state", "selected"], false], 11, 7],
-            "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 4, 2],
+            // Hover is treated more lightly than selection on purpose: it grows
+            // the pin but never takes the dark ring, so a passing cursor cannot
+            // be mistaken for the asset the user actually chose.
+            "circle-radius": [
+              "case",
+              ["boolean", ["feature-state", "selected"], false],
+              11,
+              ["boolean", ["feature-state", "hovered"], false],
+              9,
+              7,
+            ],
+            "circle-stroke-width": [
+              "case",
+              ["boolean", ["feature-state", "selected"], false],
+              4,
+              ["boolean", ["feature-state", "hovered"], false],
+              3,
+              2,
+            ],
             "circle-stroke-color": [
               "case",
               ["boolean", ["feature-state", "selected"], false],
@@ -235,6 +302,7 @@ export function MapView({
 
         ready.current = true;
         applySelection();
+        applyHover();
         renderClusterLabels();
         emitBounds();
       });
@@ -304,6 +372,19 @@ export function MapView({
             m.getCanvas().style.cursor = "";
           });
         }
+
+        // Pin -> card. On "mousemove", not "mouseenter": sliding straight from
+        // one pin to a neighbouring one never leaves the layer, so an enter
+        // handler would keep reporting the first pin. Hover is a pointer
+        // affordance, so it is not wired on touch, where it would only fire as
+        // a phantom on tap.
+        if (window.matchMedia("(hover: hover)").matches) {
+          m.on("mousemove", "points", (e) => {
+            const id = e.features?.[0]?.properties?.id as string | undefined;
+            if (id && id !== hoveredRef.current) hoverCb.current?.(id);
+          });
+          m.on("mouseleave", "points", () => hoverCb.current?.(null));
+        }
         m.on("moveend", emitBounds);
       }
     })();
@@ -345,6 +426,8 @@ export function MapView({
 
     return () => {
       cancelled = true;
+      // Before anything is torn down, so nothing the teardown emits is acted on.
+      ready.current = false;
       resizeObserver.current?.disconnect();
       resizeObserver.current = null;
       for (const marker of clusterLabels.current.values()) marker.remove();
@@ -353,7 +436,6 @@ export function MapView({
       popup.current = null;
       map.current?.remove();
       map.current = null;
-      ready.current = false;
     };
     // Mounts once; data and selection are pushed by the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -362,7 +444,14 @@ export function MapView({
   useEffect(() => {
     applyData();
     applySelection();
+    applyHover();
   }, [assets]);
+
+  // Card -> pin. Cheap enough to run on every pointer move over the list: it
+  // is two feature-state writes, no data round-trip and no camera movement.
+  useEffect(() => {
+    applyHover();
+  }, [hoveredId]);
 
   // "View all Israel" and similar callers ask the map to move by event, so the
   // parent does not need a ref to the map instance.

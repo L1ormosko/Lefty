@@ -1,15 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { MapAsset } from "@/server/assets";
 import { DEFAULT_MAP_CENTER, ISRAEL_VIEW } from "@/lib/constants";
 import { t } from "@/lib/labels";
 import { Button, EmptyState, Num, cx, inputClass } from "@/components/ui";
-import { MapView, type Bounds } from "./MapView";
+import { MapView, type Bounds, type Viewport } from "./MapView";
 import { FilterPanel } from "./FilterPanel";
 import { AssetCard } from "./AssetCard";
-import { EMPTY_FILTERS, activeFilterCount, filtersFromParams, filtersToParams, type Filters } from "./filters";
+import { FilterChips, chipText } from "./FilterChips";
+import {
+  EMPTY_FILTERS,
+  describeFilters,
+  filtersFromParams,
+  filtersToParams,
+  suggestRelaxation,
+  type Filters,
+} from "./filters";
 
 type Props = {
   initialAssets: MapAsset[];
@@ -19,7 +27,6 @@ type Props = {
 type Sheet = "collapsed" | "half" | "full";
 
 export function Discover({ initialAssets, cities }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   // Never hardcode the route here: this component renders at /explore, and
   // writing filters back to "/" navigated the user off the map onto the
@@ -31,10 +38,25 @@ export function Discover({ initialAssets, cities }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Which asset the pointer (or keyboard focus) is on, in either direction.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet>("collapsed");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState(filters.q);
   const bounds = useRef<Bounds | null>(null);
+  const view = useRef<Viewport | null>(null);
+
+  // Where the map opens. Read once, from the URL, because the map mounts once:
+  // a shared link has to land on the same view its sender was looking at, and
+  // after that the camera belongs to the user, not to the query string.
+  const [initialView] = useState(() => {
+    const p = new URLSearchParams(searchParams);
+    const lat = Number(p.get("lat"));
+    const lng = Number(p.get("lng"));
+    const zoom = Number(p.get("z"));
+    const ok = [lat, lng, zoom].every((n) => Number.isFinite(n)) && p.has("lat") && p.has("lng") && p.has("z");
+    return ok ? { lat, lng, zoom } : DEFAULT_MAP_CENTER;
+  });
   const firstRun = useRef(true);
   const inFlight = useRef<AbortController | null>(null);
   const panTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -73,6 +95,55 @@ export function Discover({ initialAssets, cities }: Props) {
     }
   }, []);
 
+  /**
+   * The whole URL, filters and camera together.
+   *
+   * One function because there is one query string: when the filter effect and
+   * the pan handler each wrote their own half, whichever fired second dropped
+   * the other's parameters.
+   */
+  const urlFor = useCallback(
+    (f: Filters) => {
+      const p = filtersToParams(f);
+      const v = view.current;
+      if (v) {
+        // Four decimals is about ten metres - enough to come back to the same
+        // street corner, short enough to leave the URL readable.
+        p.set("z", v.zoom.toFixed(2));
+        p.set("lat", v.lat.toFixed(4));
+        p.set("lng", v.lng.toFixed(4));
+      }
+      const qs = p.toString();
+      return qs ? `${pathname}?${qs}` : pathname;
+    },
+    [pathname]
+  );
+
+  /**
+   * Write the URL without navigating.
+   *
+   * `router.replace` was doing this, and it is a route navigation: a card
+   * clicked through to /assets/x lost the navigation to a replace that fired
+   * from the pan timer milliseconds later, landing the user back on the map.
+   * Nothing here needs the router - the results come from /api/assets and the
+   * URL exists so the search can be shared and reopened.
+   */
+  const writeUrl = useCallback(
+    (f: Filters) => {
+      // Only ever rewrite *this* page's URL. Clicking a card through to
+      // /assets/x resizes the map container on its way out, MapLibre answers a
+      // resize with a moveend, and the camera write that followed replaced the
+      // brand-new /assets/x URL with the map's - bouncing the user straight
+      // back. The navigation has already happened by then, so the pathname is
+      // the tell.
+      if (window.location.pathname !== pathname) return;
+      const next = urlFor(f);
+      if (next === window.location.pathname + window.location.search) return;
+      window.history.replaceState(null, "", next);
+    },
+    [pathname, urlFor]
+  );
+
   // Debounced refetch + URL sync whenever the filters change.
   useEffect(() => {
     if (firstRun.current) {
@@ -80,12 +151,23 @@ export function Discover({ initialAssets, cities }: Props) {
       return;
     }
     const id = setTimeout(() => {
-      const qs = filtersToParams(filters).toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      writeUrl(filters);
       void fetchAssets(filters);
     }, 350);
     return () => clearTimeout(id);
-  }, [filters, fetchAssets, router, pathname]);
+  }, [filters, fetchAssets, writeUrl]);
+
+  // The pan timer outlives this component unless it is cancelled: click a card
+  // through to /assets/x within 300ms of the map settling and the timer fires
+  // after the navigation, replacing the URL with /explore and pulling the user
+  // straight back to the map. Harmless while it only refetched; not harmless
+  // now that it writes the URL.
+  useEffect(() => {
+    return () => {
+      if (panTimer.current) clearTimeout(panTimer.current);
+      inFlight.current?.abort();
+    };
+  }, []);
 
   const patch = useCallback((p: Partial<Filters>) => setFilters((f) => ({ ...f, ...p })), []);
   const reset = useCallback(() => {
@@ -93,16 +175,35 @@ export function Discover({ initialAssets, cities }: Props) {
     setFilters(EMPTY_FILTERS);
   }, []);
 
+  // The search box holds `q` in its own state so typing stays responsive, so a
+  // patch that clears `q` has to clear the box too - otherwise the chip
+  // vanishes and the text is still sitting there, apparently still in effect.
+  const clearFilter = useCallback(
+    (p: Partial<Filters>) => {
+      if ("q" in p) setSearch(p.q ?? "");
+      patch(p);
+    },
+    [patch]
+  );
+
   const onBoundsChange = useCallback(
-    (b: Bounds) => {
+    (b: Bounds, v: Viewport) => {
       const first = bounds.current == null;
       bounds.current = b;
+      view.current = v;
       if (first) return;
-      // Inertial panning emits several moveend events; refetch once it settles.
+      // The URL is written here and now, not from the timer below. moveend
+      // already fires once per gesture - after inertia finishes - so there is
+      // nothing to debounce, and a deferred write is a write that can land
+      // after the user has clicked a card through to /assets/x, where it
+      // cancels their navigation and drops them back on the map.
+      writeUrl(filters);
+      // The refetch stays debounced: that one is a request, and a flicked map
+      // emits enough moveends to be worth collapsing.
       if (panTimer.current) clearTimeout(panTimer.current);
       panTimer.current = setTimeout(() => void fetchAssets(filters), 300);
     },
-    [fetchAssets, filters]
+    [fetchAssets, filters, writeUrl]
   );
 
   const selectAsset = useCallback((id: string | null) => {
@@ -120,28 +221,68 @@ export function Discover({ initialAssets, cities }: Props) {
     }
   }, []);
 
-  const activeCount = useMemo(() => activeFilterCount(filters), [filters]);
+  const chips = useMemo(() => describeFilters(filters), [filters]);
+  const activeCount = chips.length;
+  // Which single filter to offer dropping when nothing matched. Deliberately
+  // one, not a list: the point is the smallest step back into results.
+  const relax = useMemo(() => suggestRelaxation(filters), [filters]);
 
   const sheetHeight = { collapsed: "h-[92px]", half: "h-[52dvh]", full: "h-[88dvh]" }[sheet];
 
   const resultsList = (surface: "desktop" | "mobile") => (
     <div data-results={surface} className="space-y-2 p-3">
+      <FilterChips chips={chips} onClear={clearFilter} onClearAll={reset} className="pb-1" />
+
       {assets.length === 0 && !loading ? (
-        <EmptyState
-          title={t("map.noResults")}
-          hint={t("map.noResultsHint")}
-          action={
-            activeCount > 0 ? (
-              <Button variant="secondary" size="sm" onClick={reset}>
-                {t("map.clearFilters")}
-              </Button>
-            ) : undefined
-          }
-        />
+        activeCount > 0 ? (
+          // Nothing matched *the filters* - a different situation from an empty
+          // area, and it gets a way out that is one step rather than all of them.
+          <EmptyState
+            title={t("map.noMatchTitle")}
+            hint={t("map.noMatchHint")}
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {relax && (
+                  <Button size="sm" onClick={() => clearFilter(relax.clear)}>
+                    {t("map.relaxFilter", { filter: chipText(relax) })}
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={reset}>
+                  {t("map.clearFilters")}
+                </Button>
+              </div>
+            }
+          />
+        ) : (
+          <EmptyState title={t("map.noResults")} hint={t("map.noResultsHint")} />
+        )
       ) : (
         assets.map((a) => (
-          <div key={a.id} data-asset={a.id}>
-            <AssetCard asset={a} selected={a.id === selectedId} onSelect={selectAsset} />
+          <div
+            key={a.id}
+            data-asset={a.id}
+            // Focus as well as hover: tabbing through the results is a first
+            // path, not a consolation, and it should light the same pin.
+            // Deliberately no scrollIntoView here - the list moving under a
+            // passing cursor is the thing that makes linked lists unusable.
+            //
+            // Pointer events rather than mouse events, and only for a real
+            // mouse: a tap on a touch screen emits a compatibility mouseenter
+            // that is never followed by a mouseleave, so the tapped card kept
+            // a highlight that nothing could clear.
+            onPointerEnter={(e) => e.pointerType === "mouse" && setHoveredId(a.id)}
+            onPointerLeave={(e) =>
+              e.pointerType === "mouse" && setHoveredId((id) => (id === a.id ? null : id))
+            }
+            onFocus={() => setHoveredId(a.id)}
+            onBlur={() => setHoveredId((id) => (id === a.id ? null : id))}
+          >
+            <AssetCard
+              asset={a}
+              selected={a.id === selectedId}
+              hovered={a.id === hoveredId}
+              onSelect={selectAsset}
+            />
           </div>
         ))
       )}
@@ -153,7 +294,9 @@ export function Discover({ initialAssets, cities }: Props) {
     // has a real height instead of collapsing in a flex chain.
     <div className="flex flex-col lg:flex-row h-[calc(100dvh_-_6.5rem)] lg:h-[calc(100dvh_-_7rem)] min-h-0">
       {/* Desktop filter rail */}
-      <aside className="hidden lg:flex w-[320px] shrink-0 border-e border-ink-200 bg-white flex-col">
+      {/* Both rails are fluid: fixed 320+380 left a 1280px laptop with barely
+          half the width for the map, which is the product. */}
+      <aside className="hidden lg:flex w-[clamp(260px,20vw,340px)] shrink-0 border-e border-ink-200 bg-white flex-col">
         <div className="p-4 border-b border-ink-200">
           <label htmlFor="search" className="sr-only">
             {t("map.searchPlaceholder")}
@@ -186,8 +329,10 @@ export function Discover({ initialAssets, cities }: Props) {
             assets={assets}
             selectedId={selectedId}
             onSelect={selectAsset}
+            hoveredId={hoveredId}
+            onHover={setHoveredId}
             onBoundsChange={onBoundsChange}
-            initialView={DEFAULT_MAP_CENTER}
+            initialView={initialView}
           />
 
           {/* Context strip: what the map is showing right now. */}
@@ -225,7 +370,11 @@ export function Discover({ initialAssets, cities }: Props) {
           )}
 
           {/* Mobile: floating search + filter button, then a compact context row */}
-          <div className="lg:hidden absolute top-3 inset-x-3 flex flex-col gap-2">
+          {/* The trailing padding is a lane for the map's own controls: the
+              geolocate button sits in the top-left corner, which in an RTL
+              layout is exactly where a full-width row ends - the filter button
+              and its count badge were sitting underneath it. */}
+          <div className="lg:hidden absolute top-3 inset-x-3 pe-11 flex flex-col gap-2">
             <div className="flex gap-2">
             <input
               aria-label={t("map.searchPlaceholder")}
@@ -274,7 +423,7 @@ export function Discover({ initialAssets, cities }: Props) {
         </div>
 
         {/* Desktop results column */}
-        <div className="hidden lg:block w-[380px] shrink-0 border-s border-ink-200 bg-ink-50 overflow-y-auto">
+        <div className="hidden lg:block w-[clamp(320px,26vw,420px)] shrink-0 border-s border-ink-200 bg-ink-50 overflow-y-auto">
           {resultsList("desktop")}
         </div>
 

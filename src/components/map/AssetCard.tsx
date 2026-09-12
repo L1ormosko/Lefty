@@ -11,10 +11,13 @@ import { ImagePlaceholder, Num, Price, cx } from "@/components/ui";
 export function AssetCard({
   asset,
   selected,
+  hovered,
   onSelect,
 }: {
   asset: MapAsset;
   selected?: boolean;
+  /** The matching pin is under the cursor. Deliberately weaker than `selected`. */
+  hovered?: boolean;
   onSelect?: (id: string) => void;
 }) {
   const price = priceLine(asset);
@@ -23,7 +26,11 @@ export function AssetCard({
     <article
       className={cx(
         "bg-white border rounded-lg overflow-hidden transition-colors",
-        selected ? "border-brand-500 ring-1 ring-brand-500" : "border-ink-200 hover:border-ink-300"
+        selected
+          ? "border-brand-500 ring-1 ring-brand-500"
+          : hovered
+            ? "border-brand-300 bg-brand-50/50"
+            : "border-ink-200 hover:border-ink-300"
       )}
     >
       <button
