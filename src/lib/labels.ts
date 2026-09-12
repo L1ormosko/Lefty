@@ -585,6 +585,33 @@ const he: Dict = {
   "plan.adminTitle": "מנוי בעל שטחים",
   "plan.adminNote": "ללא שורת מנוי — החשבון אינו מוגבל.",
 
+  // The creative preview. The disclaimer is not fine print - it is the first
+  // thing said, because a convincing picture of a sign is exactly the kind of
+  // thing that gets forwarded to a client as if it were a photograph.
+  "mockup.title": "הדמיית המודעה על השטח",
+  "mockup.disclaimer": "הדמיה בלבד — לא צילום של הפרסום בפועל.",
+  "mockup.explain":
+    "בחרו קובץ מהמחשב כדי לראות איך המודעה יושבת על השטח. הקובץ נשאר בדפדפן שלכם ואינו נשלח לשום מקום.",
+  "mockup.choose": "בחירת קובץ מודעה",
+  "mockup.clear": "הסרת ההדמיה",
+  "mockup.fileTooBig": "הקובץ גדול מדי להדמיה בדפדפן.",
+  "mockup.notAnImage": "יש לבחור קובץ תמונה.",
+  "mockup.limitations":
+    "ההדמיה מניחה משטח שטוח, ואינה מתחשבת בתאורה, בהשתקפויות או בעצמים שעוברים לפני השטח.",
+
+  // Admin side.
+  "mockup.markTitle": "סימון פאת השלט",
+  "mockup.markHint": "סמנו ארבע פינות, עם כיוון השעון, החל מהפינה הימנית-עליונה של פאת השלט.",
+  "mockup.markReset": "התחלה מחדש",
+  "mockup.markSave": "שמירת הסימון",
+  "mockup.markClear": "מחיקת הסימון",
+  "mockup.marked": "מסומן",
+  "mockup.unmarked": "לא מסומן",
+  "mockup.corner": "פינה {n}",
+  "mockup.saved": "הסימון נשמר.",
+  "mockup.cleared": "הסימון נמחק.",
+  "mockup.invalid": "הסימון אינו תקין. יש לסמן ארבע פינות בסדר, לפי כיוון השעון.",
+
   "notif.empty": "אין התראות חדשות.",
   "notif.markRead": "סימון כנקרא",
 };

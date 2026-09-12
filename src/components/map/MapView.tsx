@@ -473,7 +473,11 @@ export function MapView({
   }, [selectedId, assets]);
 
   return (
-    <>
+    // The wrapper exists so the notice below has something to be positioned
+    // against. As a bare sibling it anchored to whatever ancestor happened to
+    // be positioned, which on the asset page put "map tiles unavailable" on
+    // top of a completely unrelated panel further down.
+    <div className="relative h-full w-full">
       <div
         ref={container}
         className={className ?? "h-full w-full"}
@@ -488,6 +492,6 @@ export function MapView({
           {t("map.tilesUnavailable")}
         </p>
       )}
-    </>
+    </div>
   );
 }

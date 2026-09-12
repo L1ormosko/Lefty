@@ -102,3 +102,23 @@ are listed in `.env.example`.
   concurrent double-approval race), authorization, auth, and the map query.
 - `npm run test:e2e` — Playwright. Advertiser, media owner and admin journeys on
   desktop and mobile viewports.
+
+## Pure modules
+
+Vitest runs with `environment: "node"` and no jsdom, so React components cannot
+be unit-tested here. Rather than add a DOM environment, logic that deserves
+tests is kept out of components:
+
+| Module | Decides |
+|---|---|
+| `lib/availability.ts` | availability from periods minus approved bookings |
+| `lib/price.ts` | how a price is worded, in one place |
+| `lib/home-stage.ts` | which home screen each side gets |
+| `lib/listing-readiness.ts` | what a listing is still missing |
+| `lib/plan.ts` | what an owner's subscription permits |
+| `lib/mockup.ts` | the projective transform for the creative preview |
+| `components/map/filters.ts` | the filter chips and what to relax |
+| `components/map/sheet.ts` | where a dragged sheet comes to rest |
+
+Components stay thin over these, and the browser behaviour on top is covered by
+Playwright rather than by mounting components.

@@ -299,6 +299,17 @@ model MediaAssetImage {
   sizeBytes Int?
   isPrimary Boolean  @default(false)
   sortOrder Int      @default(0)
+
+  /// The four corners of the sign's face in this photo, clockwise from its
+  /// top-left, as fractions of the photo's width and height.
+  ///
+  /// Marked once by an admin; it is what lets an advertiser preview their own
+  /// artwork on the sign. Null means this photo has no marked face, and the
+  /// preview is then not offered at all rather than guessed at - see
+  /// lib/mockup.ts. Normalised rather than pixels because the same photo is
+  /// displayed at a dozen different sizes.
+  surfaceQuad Json?
+
   createdAt DateTime @default(now())
 
   asset MediaAsset          @relation(fields: [assetId], references: [id], onDelete: Cascade)

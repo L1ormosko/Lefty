@@ -366,3 +366,66 @@ The contract-expiry views (`src/server/expiring.ts`) are the same data seen from
 two sides: the owner's renewal pipeline and the advertiser's "frees up soon".
 Both are derived from APPROVED bookings. Note what is **not** claimed - whether
 the current advertiser will renew. The end date is a fact; the renewal is not.
+
+## A listing subscription, not a commission
+
+VELTO's first revenue is a per-owner limit on how many listings can be public
+at once, and the reason it is not a percentage of each deal is in the data.
+`Booking.priceEstimate` is computed once from the owner's published list price,
+is never updated, and is labelled "not a binding offer" everywhere it appears.
+The last event VELTO observes is the owner pressing Approve — what is actually
+signed, invoiced and paid happens off the platform. There is no number here
+that anyone could honestly take a percentage of, and billing against a figure
+we know to be an estimate would be inventing revenue data, which is the same
+sin as inventing audience data.
+
+Two rules constrain the whole feature, and both are in `lib/plan.ts`:
+
+**No plan row means unlimited.** Every media owner on the platform today
+predates billing. Adding a table must not silently put a cap on them.
+
+**A lapse never takes live inventory down.** An advertiser who found a
+billboard yesterday has to find it today. An unpaid invoice is between VELTO
+and the owner; making the buyer pay for it would make the map unreliable, and
+the map being reliable is the entire product. So a lapse blocks *adding* to
+what is public — the two places an asset becomes ACTIVE — and nothing else.
+Deactivating is always permitted: a subscription that could trap inventory in
+the public map would be worse than no subscription.
+
+The lapse is derived on every read rather than stored. This deployment has no
+scheduler, and a `lapsed` column that only flips when a cron happens to run is
+a column that is wrong during exactly the window that matters.
+
+VELTO issues no invoices and moves no money. An Israeli tax invoice must be
+issued from approved bookkeeping software, so `OwnerPlan.invoiceRef` is a
+reference to a document that exists somewhere else, recorded by an admin by
+hand. The owner's panel says so in as many words.
+
+## The creative mockup is CSS, and it says what it is
+
+An advertiser can preview their own artwork on a photograph of a real sign.
+Three things make this safe to build.
+
+**It is a projective transform, not a 3D model.** A billboard in a street photo
+is a rectangle seen at an angle, so the artwork's parallel edges have to
+converge the way the sign's do. Canvas 2D cannot do this — `setTransform` is
+affine, and produces a skewed parallelogram that reads as a sticker. CSS
+`matrix3d` can, because it is a full 4×4 homogeneous matrix and the browser
+divides by w when it rasterises. The cost of the whole feature is one CSS
+string per preview and four numbers per photo: no model, no rendered
+composite, nothing uploaded. Gaussian splats (15–250MB per asset against a
+~3MB budget) and AI-generated scenes were both considered and rejected; the
+latter also runs into California AB 723, effective 1 January 2026.
+
+**The artwork never leaves the browser.** It is read as an object URL, drawn
+under the transform, and revoked when replaced. Unreleased campaign creative is
+the most confidential thing an advertiser holds, and the safest way to hold it
+is not to. An end-to-end test watches for any non-GET request while a file is
+chosen.
+
+**Without a marked face there is no preview.** An admin marks the sign's four
+corners on one photo; a photo nobody has marked does not get the feature,
+rather than getting a guessed rectangle with an ad on it that does not fit the
+sign. The label above the picture — before it, not under it — reads
+"הדמיה בלבד — לא צילום של הפרסום בפועל", and the limitations are stated:
+a flat overlay, no relighting, no reflections, nothing passing in front.

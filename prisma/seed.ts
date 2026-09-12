@@ -380,6 +380,23 @@ async function main() {
           sizeBytes: bytes.length,
           isPrimary: true,
           sortOrder: 0,
+          // A marked face on the first listing only, so the creative preview
+          // is discoverable without an admin having to mark one first. The
+          // numbers match where demoImage() draws the sign's panel, and the
+          // slight vertical difference between the two sides is what makes it
+          // read as a sign seen at an angle rather than a flat sticker.
+          //
+          // This is demo data on a row already flagged isDemo; a real listing
+          // gets its face marked by an admin looking at an actual photograph.
+          surfaceQuad:
+            i === 0
+              ? [
+                  { x: 0.22, y: 0.28 },
+                  { x: 0.78, y: 0.33 },
+                  { x: 0.78, y: 0.64 },
+                  { x: 0.22, y: 0.72 },
+                ]
+              : undefined,
         },
       }),
       prisma.mediaAssetImageBlob.create({

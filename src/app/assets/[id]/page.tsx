@@ -12,6 +12,8 @@ import { Card, ImagePlaceholder, Num, Price, buttonClass } from "@/components/ui
 import { AssetMiniMap } from "@/components/map/AssetMiniMap";
 import { RequestPanel } from "@/components/request/RequestPanel";
 import { SaveAssetButton } from "@/components/SaveAssetButton";
+import { CreativeMockup } from "@/components/assets/CreativeMockup";
+import { isUsableQuad, parseQuad } from "@/lib/mockup";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -57,6 +59,17 @@ export default async function AssetPage({ params }: Params) {
 
   const availability = assetAvailability(asset);
   const primary = asset.images[0];
+
+  // The first photo with a face marked on it. Most photos will never have one
+  // - a close-up of the frame, a wide shot of the junction - so this picks
+  // rather than assuming the primary image is the one to stand artwork on.
+  const mockupPhoto = (() => {
+    for (const image of asset.images) {
+      const quad = parseQuad(image.surfaceQuad);
+      if (quad && isUsableQuad(quad)) return { url: image.url, quad };
+    }
+    return null;
+  })();
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 
   const headlinePrice = priceLine(asset);
@@ -137,6 +150,11 @@ export default async function AssetPage({ params }: Params) {
               ))}
             </div>
           )}
+
+          {/* The creative preview, only where someone has marked a face to put
+              it on. No marked quad means no honest place for the artwork, and
+              a guessed rectangle would show an ad that does not fit the sign. */}
+          {mockupPhoto && <CreativeMockup photoUrl={mockupPhoto.url} quad={mockupPhoto.quad} />}
 
           {/* Location */}
           <Card className="p-5">

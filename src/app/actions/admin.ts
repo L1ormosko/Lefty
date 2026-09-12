@@ -6,6 +6,8 @@ import { requireRole } from "@/server/auth";
 import { toUserMessage } from "@/server/errors";
 import { notify } from "@/server/notifications";
 import { t } from "@/lib/labels";
+import { isUsableQuad, parseQuad } from "@/lib/mockup";
+import { Prisma } from "@prisma/client";
 import type { ActionState } from "./inquiries";
 
 /** Admin verification decision. Reasons are stored, not just a flag. */
@@ -136,6 +138,61 @@ export async function setOwnerPlanAction(_prev: ActionState, formData: FormData)
     revalidatePath("/admin/users");
     revalidatePath("/owner/assets");
     return { ok: true, message: t("plan.saved") };
+  } catch (err) {
+    return { ok: false, error: toUserMessage(err) };
+  }
+}
+
+/**
+ * Mark (or clear) the face of the sign in one photo.
+ *
+ * Admin-only on purpose. The quad decides where an advertiser's artwork lands
+ * in a preview they may well show a client, and a sloppy one produces a
+ * picture that misrepresents the site - the same class of harm as a wrong
+ * price. An owner marking their own is a later decision, with review attached.
+ */
+export async function setImageQuadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    await requireRole("ADMIN");
+    const imageId = String(formData.get("imageId") ?? "");
+    const image = await prisma.mediaAssetImage.findUnique({
+      where: { id: imageId },
+      select: { id: true, assetId: true },
+    });
+    if (!image) return { ok: false, error: "התמונה לא נמצאה." };
+
+    const raw = String(formData.get("quad") ?? "").trim();
+    if (!raw) {
+      await prisma.mediaAssetImage.update({
+        where: { id: image.id },
+        data: { surfaceQuad: Prisma.DbNull },
+      });
+      revalidatePath(`/assets/${image.assetId}`);
+      revalidatePath("/admin/assets");
+      return { ok: true, message: t("mockup.cleared") };
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { ok: false, error: t("mockup.invalid") };
+    }
+
+    const quad = parseQuad(parsed);
+    // Both checks matter and they catch different mistakes: parseQuad rejects
+    // values that are not four points, isUsableQuad rejects four points that
+    // do not enclose a face - a mis-click, or corners clicked out of order,
+    // which renders artwork folded through itself.
+    if (!quad || !isUsableQuad(quad)) return { ok: false, error: t("mockup.invalid") };
+
+    await prisma.mediaAssetImage.update({
+      where: { id: image.id },
+      data: { surfaceQuad: quad },
+    });
+    revalidatePath(`/assets/${image.assetId}`);
+    revalidatePath("/admin/assets");
+    return { ok: true, message: t("mockup.saved") };
   } catch (err) {
     return { ok: false, error: toUserMessage(err) };
   }

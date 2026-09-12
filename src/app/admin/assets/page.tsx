@@ -7,6 +7,8 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { Card, EmptyState, LinkButton, Num, cx } from "@/components/ui";
 import { DemoBadge, StatusPill, VerificationBadge } from "@/components/badges";
 import { VerifyAssetForm } from "@/components/admin/VerifyAssetForm";
+import { MarkSurfaceForm } from "@/components/admin/MarkSurfaceForm";
+import { parseQuad } from "@/lib/mockup";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +60,14 @@ export default async function AdminAssets({
     include: {
       owner: { select: { id: true, name: true, email: true } },
       company: { select: { name: true } },
+      // The photo an advertiser would stand artwork on. Only the primary one
+      // is offered for marking: the admin is reviewing a listing, not editing
+      // a gallery, and the primary photo is the one the preview uses.
+      images: {
+        orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
+        take: 1,
+        select: { id: true, url: true, surfaceQuad: true },
+      },
     },
   });
 
@@ -127,6 +137,13 @@ export default async function AdminAssets({
               </div>
               <div className="mt-3 pt-3 border-t border-ink-100">
                 <VerifyAssetForm assetId={asset.id} status={asset.status} note={asset.reviewNote} />
+                {asset.images[0] && (
+                  <MarkSurfaceForm
+                    imageId={asset.images[0].id}
+                    photoUrl={asset.images[0].url}
+                    initialQuad={parseQuad(asset.images[0].surfaceQuad)}
+                  />
+                )}
               </div>
             </Card>
           ))}
