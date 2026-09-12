@@ -16,7 +16,7 @@
 import { PrismaClient, type AssetType, type Illumination, type LocationTag } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
-import { demoImage } from "./demo-image";
+import { demoImage, demoSurfaceQuad } from "./demo-image";
 import { demoSeedEnabled, requireSeedPassword } from "./seed-config";
 
 const prisma = new PrismaClient();
@@ -380,23 +380,20 @@ async function main() {
           sizeBytes: bytes.length,
           isPrimary: true,
           sortOrder: 0,
-          // A marked face on the first listing only, so the creative preview
-          // is discoverable without an admin having to mark one first. The
-          // numbers match where demoImage() draws the sign's panel, and the
-          // slight vertical difference between the two sides is what makes it
-          // read as a sign seen at an angle rather than a flat sticker.
+          // Every demo listing gets its face marked, not just one.
           //
-          // This is demo data on a row already flagged isDemo; a real listing
-          // gets its face marked by an admin looking at an actual photograph.
-          surfaceQuad:
-            i === 0
-              ? [
-                  { x: 0.22, y: 0.28 },
-                  { x: 0.78, y: 0.33 },
-                  { x: 0.78, y: 0.64 },
-                  { x: 0.22, y: 0.72 },
-                ]
-              : undefined,
+          // It was one, and that one sorted last of fifteen on /explore, so
+          // anybody opening the first listing found no preview and reasonably
+          // concluded the feature had not shipped. The e2e test walked every
+          // listing until it found the marked one, so it passed while the
+          // feature was effectively invisible - a test that proved the code
+          // worked without proving it could be reached.
+          //
+          // The coordinates come from the same constants demoImage() draws
+          // with, so the face cannot drift away from the sign in the picture.
+          // These are demo rows, already flagged isDemo; a real listing gets
+          // its face marked by an admin looking at an actual photograph.
+          surfaceQuad: demoSurfaceQuad(s.assetType),
         },
       }),
       prisma.mediaAssetImageBlob.create({

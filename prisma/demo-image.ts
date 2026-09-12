@@ -34,8 +34,62 @@ const SHAPES: Record<AssetType, string> = {
   OTHER: '<rect x="20" y="28" width="60" height="44" rx="2"/>',
 };
 
+/**
+ * The display face of each shape, in the same 0-100 box as SHAPES above.
+ *
+ * Usually the first rectangle of the silhouette; for a bus stop it is the ad
+ * panel rather than the shelter roof. Kept next to the shapes on purpose - the
+ * creative preview stands artwork on these coordinates, and a face that has
+ * drifted from the drawing would put an ad beside the sign instead of on it.
+ */
+const FACES: Record<AssetType, { x: number; y: number; w: number; h: number }> = {
+  BILLBOARD: { x: 14, y: 26, w: 72, h: 34 },
+  DIGITAL_BILLBOARD: { x: 14, y: 24, w: 72, h: 38 },
+  WALL: { x: 10, y: 20, w: 80, h: 60 },
+  TOTEM: { x: 36, y: 12, w: 28, h: 70 },
+  BUS_STOP: { x: 40, y: 46, w: 34, h: 32 },
+  STREET_FURNITURE: { x: 24, y: 34, w: 52, h: 40 },
+  BANNER: { x: 10, y: 34, w: 80, h: 24 },
+  OTHER: { x: 20, y: 28, w: 60, h: 44 },
+};
+
 const WIDTH = 1200;
 const HEIGHT = 675;
+
+// The transform applied to the silhouette group in the SVG below. Declared
+// here so the quad and the drawing are computed from the same two numbers.
+const SHAPE_SCALE = 3.8;
+const SHAPE_TX = WIDTH / 2 - 190;
+const SHAPE_TY = HEIGHT / 2 - 220;
+
+/**
+ * Where the sign's face sits in a demo photo, as fractions of the image.
+ *
+ * Clockwise from the top-left, which is the order lib/mockup.ts expects.
+ *
+ * These are true rectangles, because the schematic is drawn face-on. The
+ * transform is therefore affine here, and that is the honest result: giving a
+ * flat drawing a fake angle would be inventing perspective that is not in the
+ * picture. A real photograph gets a real quad, marked by an admin.
+ */
+export function demoSurfaceQuad(assetType: AssetType) {
+  const face = FACES[assetType] ?? FACES.OTHER;
+  const px = (v: number) => (SHAPE_TX + v * SHAPE_SCALE) / WIDTH;
+  const py = (v: number) => (SHAPE_TY + v * SHAPE_SCALE) / HEIGHT;
+  const round = (n: number) => Number(n.toFixed(4));
+
+  const left = round(px(face.x));
+  const right = round(px(face.x + face.w));
+  const top = round(py(face.y));
+  const bottom = round(py(face.y + face.h));
+
+  return [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom },
+  ];
+}
 
 function escapeXml(value: string): string {
   return value
@@ -57,7 +111,7 @@ export async function demoImage(params: { assetType: AssetType; label: string })
     ${Array.from({ length: 15 }, (_, i) => `<line x1="0" y1="${i * 48}" x2="${WIDTH}" y2="${i * 48}"/>`).join("")}
     ${Array.from({ length: 26 }, (_, i) => `<line x1="${i * 48}" y1="0" x2="${i * 48}" y2="${HEIGHT}"/>`).join("")}
   </g>
-  <g transform="translate(${WIDTH / 2 - 190} ${HEIGHT / 2 - 220}) scale(3.8)" fill="${BRAND}" fill-opacity="0.18"
+  <g transform="translate(${SHAPE_TX} ${SHAPE_TY}) scale(${SHAPE_SCALE})" fill="${BRAND}" fill-opacity="0.18"
      stroke="${BRAND}" stroke-width="1.4" stroke-linejoin="round">
     ${shape}
   </g>

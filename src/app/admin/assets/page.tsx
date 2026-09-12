@@ -111,7 +111,11 @@ export default async function AdminAssets({
       ) : (
         <div className="space-y-3">
           {assets.map((asset) => (
-            <Card key={asset.id} className="p-4">
+            // data-admin-asset scopes a test (or a person reading the DOM) to
+            // one listing's row: the marking controls repeat per card, and a
+            // page-wide selector picks whichever happens to be first.
+            <div key={asset.id} data-admin-asset={asset.id}>
+            <Card className="p-4">
               <div className="flex flex-wrap gap-2 items-start">
                 <div className="min-w-0 flex-1">
                   <Link href={`/assets/${asset.id}`} className="font-medium text-ink-900 hover:underline">
@@ -146,6 +150,7 @@ export default async function AdminAssets({
                 )}
               </div>
             </Card>
+            </div>
           ))}
         </div>
       )}

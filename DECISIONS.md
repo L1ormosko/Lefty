@@ -426,6 +426,16 @@ chosen.
 **Without a marked face there is no preview.** An admin marks the sign's four
 corners on one photo; a photo nobody has marked does not get the feature,
 rather than getting a guessed rectangle with an ad on it that does not fit the
-sign. The label above the picture — before it, not under it — reads
+sign. The demo listings are all marked from the same constants their schematic
+is drawn with (`demoSurfaceQuad`), so the face cannot drift away from the sign
+in the picture.
+
+That last point was learned the hard way. The seed originally marked one
+listing of fifteen, and that one sorted last on `/explore` — so anybody opening
+the first listing found no preview and reasonably concluded the feature had not
+shipped. The end-to-end test walked every listing until it found the marked
+one, so it passed the whole time: it proved the code worked without proving the
+feature could be reached. The test now opens the first listing a visitor would
+actually click and asserts the panel is there. The label above the picture — before it, not under it — reads
 "הדמיה בלבד — לא צילום של הפרסום בפועל", and the limitations are stated:
 a flat overlay, no relighting, no reflections, nothing passing in front.
