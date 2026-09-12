@@ -140,6 +140,7 @@ model User {
   notifications       Notification[]
   passwordResetTokens PasswordResetToken[]
   inquiryMessages     InquiryMessage[]
+  plan                OwnerPlan?
 
   @@index([role])
   @@index([companyId])
@@ -191,6 +192,39 @@ model Company {
 
   users  User[]
   assets MediaAsset[]
+}
+
+/// A media owner's subscription, recorded by hand.
+///
+/// VELTO issues no invoices and takes no payments: an Israeli tax invoice must
+/// come out of approved bookkeeping software, so this row only *references* a
+/// document that was issued elsewhere. Nothing here is a charge.
+///
+/// The absence of a row means unlimited - every owner on the platform today
+/// predates billing, and a schema change must not quietly put a cap on them.
+model OwnerPlan {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  /// How many listings this owner may keep public at once.
+  activeListingLimit Int
+
+  /// Paid up to this date. Null means paid with no end recorded.
+  ///
+  /// A lapse is derived by comparing this to the clock at read time - there is
+  /// no scheduler in this deployment, and a subscription state that only
+  /// updates when a cron happens to run is a subscription state that lies.
+  paidThrough DateTime?
+
+  /// The invoice issued outside VELTO, for reconciliation. Free text: it is a
+  /// human reference, not a key into anything.
+  invoiceRef String?
+  note       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model MediaAsset {

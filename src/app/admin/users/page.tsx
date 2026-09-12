@@ -7,6 +7,7 @@ import { Card, EmptyState, Num } from "@/components/ui";
 import { StatusPill } from "@/components/badges";
 import { formatDate } from "@/lib/dates";
 import { UserActiveToggle } from "@/components/admin/UserActiveToggle";
+import { OwnerPlanForm } from "@/components/admin/OwnerPlanForm";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export default async function AdminUsers() {
     take: 200,
     include: {
       company: { select: { name: true } },
+      plan: { select: { activeListingLimit: true, paidThrough: true, invoiceRef: true } },
       _count: { select: { assets: true, inquiries: true, bookings: true } },
     },
   });
@@ -28,7 +30,10 @@ export default async function AdminUsers() {
       ) : (
         <div className="space-y-2">
           {users.map((u) => (
-            <Card key={u.id} className="p-4 flex flex-wrap items-center gap-3">
+            // data-user mirrors data-asset on the map results: a stable hook
+            // for a row whose text is otherwise all user-supplied.
+            <div key={u.id} data-user={u.email}>
+            <Card className="p-4 flex flex-wrap items-center gap-3">
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-ink-900">{u.name}</p>
                 <p className="text-sm text-ink-500" dir="ltr">
@@ -51,7 +56,18 @@ export default async function AdminUsers() {
                 </span>
                 <UserActiveToggle userId={u.id} isActive={u.isActive} />
               </div>
+              {/* Subscriptions are a seller-side thing; an advertiser row has
+                  no plan to record and should not carry the control. */}
+              {u.role === "MEDIA_OWNER" && (
+                <OwnerPlanForm
+                  userId={u.id}
+                  limit={u.plan?.activeListingLimit ?? null}
+                  paidThrough={u.plan?.paidThrough?.toISOString().slice(0, 10) ?? null}
+                  invoiceRef={u.plan?.invoiceRef ?? null}
+                />
+              )}
             </Card>
+            </div>
           ))}
         </div>
       )}

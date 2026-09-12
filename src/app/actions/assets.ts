@@ -13,6 +13,7 @@ import {
   fieldErrors,
 } from "@/lib/validation";
 import { toUserMessage, ValidationError } from "@/server/errors";
+import { ownerPlanStatus } from "@/server/plan";
 import { toUtcDate } from "@/lib/dates";
 import { t } from "@/lib/labels";
 import type { AssetType, Illumination, LocationTag, PermitStatus } from "@prisma/client";
@@ -211,6 +212,24 @@ export async function deleteAvailabilityPeriodAction(periodId: string): Promise<
   }
 }
 
+/**
+ * The subscription gate, in the two places something becomes public.
+ *
+ * Only here. A lapse or a full plan never takes a live listing down - see the
+ * note in lib/plan.ts - so nothing in the deactivation path consults this, and
+ * an owner who is over their limit can still edit, unpublish and republish
+ * what they already have... up to the limit.
+ */
+async function requirePublishingRoom(userId: string) {
+  const status = await ownerPlanStatus(userId);
+  if (status.canPublish) return;
+  throw new ValidationError(
+    status.block === "lapsed"
+      ? t("plan.blockedLapsed")
+      : t("plan.blockedLimit", { limit: status.limit ?? 0 })
+  );
+}
+
 /** Publish: the asset becomes public and enters the admin verification queue. */
 export async function publishAssetAction(_prev: AssetActionState, formData: FormData): Promise<AssetActionState> {
   try {
@@ -226,6 +245,8 @@ export async function publishAssetAction(_prev: AssetActionState, formData: Form
     if (missing.length) {
       throw new ValidationError(`חסרים פרטים לפני פרסום: ${missing.join(", ")}`);
     }
+
+    await requirePublishingRoom(user.id);
 
     await prisma.mediaAsset.update({
       where: { id: asset.id },
@@ -244,6 +265,11 @@ export async function setAssetStatusAction(assetId: string, status: "ACTIVE" | "
   try {
     const user = await requireUser();
     const asset = await loadOwnedAsset(assetId, user);
+    // Only the way up is gated. Switching a listing off is always allowed, and
+    // has to be: the subscription must never trap inventory in the public map.
+    if (status === "ACTIVE" && asset.status !== "ACTIVE") {
+      await requirePublishingRoom(asset.ownerId);
+    }
     await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status } });
     revalidatePath("/owner/assets");
     revalidatePath("/explore");

@@ -557,6 +557,34 @@ const he: Dict = {
     "הקובץ מכיל את כל נתוני המשתמשים וגיבוב של סיסמאותיהם. שמרו אותו במקום מוגן, " +
     "ואל תשאירו אותו בתיקיית ההורדות.",
 
+  // Subscription. Deliberately plain: this is a bill, and a bill dressed up in
+  // product language reads as an attempt to hide something.
+  "plan.title": "המנוי שלכם",
+  "plan.unlimited": "ללא הגבלת שטחים",
+  "plan.unlimitedNote": "החשבון הזה אינו מוגבל במספר השטחים שניתן לפרסם.",
+  "plan.usage": "{used} מתוך {limit} שטחים מפורסמים",
+  "plan.remaining": "נותר מקום ל-{count} שטחים נוספים.",
+  "plan.full": "הגעתם למכסת השטחים המפורסמים.",
+  "plan.paidThrough": "בתוקף עד {date}",
+  "plan.expiringSoon": "המנוי מסתיים ב-{date}. חידוש מונע חסימה של פרסום שטחים חדשים.",
+  "plan.lapsed": "תוקף המנוי פג ב-{date}.",
+  // The promise that matters, said where an owner will be worried about it.
+  "plan.liveStaySafe": "השטחים שכבר מפורסמים נשארים במפה. מה שנחסם הוא פרסום שטח חדש בלבד.",
+  "plan.invoiceRef": "אסמכתת חשבונית",
+  "plan.invoiceNote": "החשבונית מונפקת מחוץ למערכת. VELTO אינה גובה תשלום ואינה מנפיקה חשבוניות.",
+  "plan.contact": "לחידוש או לשינוי המכסה — פנו אלינו.",
+  "plan.blockedLapsed": "תוקף המנוי פג, ולכן לא ניתן לפרסם שטח נוסף. השטחים המפורסמים שלכם נשארים במפה.",
+  "plan.blockedLimit": "הגעתם למכסה של {limit} שטחים מפורסמים. אפשר להסיר פרסום של שטח קיים, או להרחיב את המנוי.",
+  "plan.none": "אין מנוי",
+  "plan.limitField": "מכסת שטחים מפורסמים",
+  "plan.paidThroughField": "בתוקף עד",
+  "plan.save": "שמירת המנוי",
+  "plan.remove": "ביטול המנוי",
+  "plan.saved": "המנוי עודכן.",
+  "plan.removed": "המנוי בוטל. החשבון חזר להיות ללא הגבלה.",
+  "plan.adminTitle": "מנוי בעל שטחים",
+  "plan.adminNote": "ללא שורת מנוי — החשבון אינו מוגבל.",
+
   "notif.empty": "אין התראות חדשות.",
   "notif.markRead": "סימון כנקרא",
 };

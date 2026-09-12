@@ -10,11 +10,16 @@ import { AvailabilityBadge, StatusPill, VerificationBadge } from "@/components/b
 import { availabilityFor } from "@/lib/availability";
 import { AssetStatusToggle } from "@/components/owner/AssetStatusToggle";
 import { DeleteAssetButton } from "@/components/owner/DeleteAssetButton";
+import { PlanPanel } from "@/components/owner/PlanPanel";
+import { ownerPlanRow, ownerPlanStatus } from "@/server/plan";
 
 export const dynamic = "force-dynamic";
 
 export default async function OwnerAssets() {
   const user = await requireRole("MEDIA_OWNER");
+  // The subscription belongs on the page about listings, because the limit is
+  // a limit on listings. It renders nothing for an owner with no plan row.
+  const [planStatus, plan] = await Promise.all([ownerPlanStatus(user.id), ownerPlanRow(user.id)]);
   const assets = await prisma.mediaAsset.findMany({
     where: { ownerId: user.id },
     orderBy: { updatedAt: "desc" },
@@ -32,6 +37,8 @@ export default async function OwnerAssets() {
       current="/owner/assets"
       action={<LinkButton href="/owner/assets/new">{t("dash.addAsset")}</LinkButton>}
     >
+      <PlanPanel status={planStatus} plan={plan} />
+
       {assets.length === 0 ? (
         <EmptyState
           title={t("dash.noAssets")}
