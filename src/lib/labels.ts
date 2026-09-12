@@ -431,6 +431,64 @@ const he: Dict = {
   "dash.noSaved": "שמרו כאן שטחים מעניינים כדי להשוות ביניהם מאוחר יותר.",
   "dash.noAssets": "עדיין לא הוספתם שטחי פרסום.",
   "dash.noAssetsHint": "הוסיפו את השטח הראשון שלכם כדי לקבל פניות ממפרסמים.",
+  /*
+   * The two sides, in their own words.
+   *
+   * Until now a logged-in page said "Overview" to both a person selling
+   * billboard space and a person buying it, and both landed on four identical
+   * stat tiles. The landing page speaks to each audience separately and that
+   * voice stopped at the login screen. These are the strings that carry it in.
+   *
+   * The owner reads operationally - what is waiting, what is unfinished. The
+   * advertiser reads as a buyer - what came back, what is running. Neither
+   * side is ever told a number the database cannot produce: no earnings, no
+   * views, no "listings like yours".
+   */
+  "owner.homeTitle": "לוח הבקרה שלכם",
+  "owner.homeLead": "מה מחכה לכם היום, ומה מצב המלאי.",
+  "owner.tasksTitle": "מה מחכה לכם",
+  "owner.inventoryTitle": "המלאי שלכם",
+  "owner.firstStepsTitle": "שלושה צעדים לשטח הראשון",
+  "owner.firstStepsLead":
+    "שטח שמפרסם יכול לראות, לתמחר ולבדוק תאריכים — בלי להרים אליכם טלפון.",
+  "owner.step1": "הוסיפו את השטח: מיקום, תמונה ומחיר.",
+  "owner.step2": "הגדירו חלון זמינות — בלעדיו השטח מוצג כתפוס.",
+  "owner.step3": "פרסמו. VELTO תאמת את השטח לפני שהוא מסומן כמאומת.",
+  "owner.waitingTitle": "השטחים באוויר",
+  "owner.waitingLead":
+    "עדיין לא הגיעו פניות. כשמפרסם יפנה — זה יופיע כאן, ותקבלו התראה.",
+  "owner.pipelineValue": "צפי מהזמנות שממתינות לאישורכם",
+  "task.inquiries-to-answer": "פניות שממתינות למענה שלכם",
+  "task.bookings-to-decide": "הזמנות שממתינות להחלטה",
+  "task.listings-incomplete": "שטחים שחסר בהם מידע שקונה מחפש",
+  "task.contracts-ending": "חוזים שמסתיימים בקרוב",
+
+  "adv.homeTitle": "הקמפיינים שלכם",
+  "adv.homeLead": "מה חזר אליכם, ומה רץ עכשיו.",
+  "adv.tasksTitle": "מה מחכה לכם",
+  "adv.campaignsTitle": "הפעילות שלכם",
+  "adv.firstStepsTitle": "איך מוצאים שטח",
+  "adv.firstStepsLead": "תארו קמפיין וקבלו רשימה מדורגת, או חפשו ישירות על המפה.",
+  "adv.step1": "תארו את הקמפיין — עיר, תאריכים ותקציב.",
+  "adv.step2": "השוו שטחים, ושמרו את מה שמעניין.",
+  "adv.step3": "שלחו בקשת זמינות ישירות לבעל השטח.",
+  "adv.waitingTitle": "שמרתם שטחים — לא שלחתם עדיין בקשה",
+  "adv.waitingLead": "בקשת זמינות היא הדרך לדעת אם השטח פנוי בתאריכים שלכם, ובכמה.",
+  "task.replies-to-read": "בעלי שטח שהשיבו לכם",
+  "task.bookings-approved": "הזמנות שאושרו",
+  "task.saved-freeing-soon": "שטחים ששמרתם ומתפנים בקרוב",
+
+  "readiness.incomplete": "חסר מידע",
+  "readiness.ready": "מוכן לפרסום",
+  "readiness.strong": "מלא",
+  "readiness.photo": "תמונה",
+  "readiness.price": "מחיר",
+  "readiness.availability": "חלון זמינות",
+  "readiness.dimensions": "מידות",
+  "readiness.description": "תיאור",
+  "readiness.surroundings": "מה יש מסביב",
+  "readiness.missingTitle": "מה קונה לא יכול לראות",
+
   "dash.respond": "מענה למפרסם",
   "dash.approve": "אישור",
   "dash.reject": "דחייה",

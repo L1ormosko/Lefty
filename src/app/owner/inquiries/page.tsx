@@ -21,6 +21,10 @@ export default async function OwnerInquiries() {
     },
   });
   const pending = inquiries.filter((i) => i.status === "PENDING").length;
+  // Whether this owner has anything listed at all decides which empty state is
+  // honest. Without it the page told an owner with five live billboards to
+  // "add your first space", which is both wrong and slightly insulting.
+  const assetCount = await prisma.mediaAsset.count({ where: { ownerId: user.id } });
 
   return (
     <DashboardShell
@@ -31,8 +35,16 @@ export default async function OwnerInquiries() {
       {inquiries.length === 0 ? (
         <EmptyState
           title={t("dash.noRequests")}
-          hint={t("dash.noAssetsHint")}
-          action={<LinkButton href="/owner/assets/new">{t("dash.addAsset")}</LinkButton>}
+          hint={assetCount === 0 ? t("dash.noAssetsHint") : t("owner.waitingLead")}
+          action={
+            assetCount === 0 ? (
+              <LinkButton href="/owner/assets/new">{t("dash.addAsset")}</LinkButton>
+            ) : (
+              <LinkButton href="/owner/assets" variant="secondary">
+                {t("dash.myAssets")}
+              </LinkButton>
+            )
+          }
         />
       ) : (
         <div className="space-y-3">
