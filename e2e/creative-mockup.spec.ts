@@ -80,7 +80,11 @@ test("the artwork lands on the sign's face", async ({ page }) => {
   expect(geometry!.x + geometry!.w).toBeLessThan(0.9);
   expect(geometry!.y).toBeGreaterThan(0.1);
   expect(geometry!.y + geometry!.h).toBeLessThan(0.9);
-  expect(geometry!.w * geometry!.h).toBeGreaterThan(0.01);
+  // Deliberately a loose floor. Now that artwork is fitted rather than
+  // stretched, a 2:1 file on a 0.4:1 totem correctly occupies a thin band -
+  // the earlier threshold assumed the artwork always filled the whole face,
+  // which is exactly the behaviour this release removed.
+  expect(geometry!.w * geometry!.h).toBeGreaterThan(0.002);
 
   // The artwork stayed in the browser. This is the promise the panel makes in
   // so many words, and it is why the feature is safe to offer at all:
@@ -135,4 +139,53 @@ test("an admin can clear a face, which removes the preview, and mark it again", 
   // And the preview is back.
   await page.goto(href!);
   await expect(page.locator("[data-mockup]")).toHaveCount(1);
+});
+
+test("a square file is not stretched to the shape of the sign", async ({ page }) => {
+  // The defect this pins: the artwork used to be mapped onto the whole face,
+  // so a square file on a 3:1 billboard rendered three times too wide - a
+  // picture of an ad that will never exist.
+  await openFirstListing(page);
+
+  // The listing states the sign's real proportions before anything is chosen.
+  await expect(page.getByText(/מידות השטח: .* יחס/)).toBeVisible();
+
+  const square = "/tmp/velto-e2e-square.png";
+  await sharp(
+    Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600">
+         <rect width="600" height="600" fill="#e11d48"/>
+       </svg>`
+    )
+  )
+    .png()
+    .toFile(square);
+
+  await page.locator("#mockup-file").setInputFiles(square);
+  await page.waitForTimeout(1200);
+
+  const rendered = await page.evaluate(() => {
+    const panel = document.querySelector("[data-mockup]")!;
+    const art = [...panel.querySelectorAll("img")].find((i) => i.style.transform);
+    if (!art) return null;
+    const box = art.getBoundingClientRect();
+    return box.width / box.height;
+  });
+
+  expect(rendered, "the artwork did not render").not.toBeNull();
+  // Square in, square out - whatever shape the sign is.
+  expect(rendered!).toBeGreaterThan(0.9);
+  expect(rendered!).toBeLessThan(1.1);
+
+  // And the mismatch is explained rather than silently absorbed.
+  await expect(page.getByText(/הקובץ שבחרתם ביחס/)).toBeVisible();
+});
+
+test("no Street View panel without a Google key", async ({ page }) => {
+  // The panel is behind NEXT_PUBLIC_GOOGLE_MAPS_EMBED_KEY, which is unset
+  // here. A dead frame saying "unavailable" would be the empty promise this
+  // project does not ship.
+  test.skip(!!process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_KEY, "a key is configured");
+  await openFirstListing(page);
+  await expect(page.locator("[data-streetview]")).toHaveCount(0);
 });

@@ -596,6 +596,17 @@ const he: Dict = {
   "mockup.clear": "הסרת ההדמיה",
   "mockup.fileTooBig": "הקובץ גדול מדי להדמיה בדפדפן.",
   "mockup.notAnImage": "יש לבחור קובץ תמונה.",
+  // Said at the point of upload, because a wide shot cannot be asked for
+  // after the fact - the owner has left the site by then.
+  "wizard.imagesHint": "העלו גם צילום רחב אחד שמראה את השטח בסביבתו, לא רק תקריב. מפרסם שרואה את השטח ברחוב מבין מה הוא קונה — ועל הצילום הזה נבנית ההדמיה של המודעה שלו.",
+
+  "mockup.faceSize": "מידות השטח: {w}×{h} ס״מ · יחס {ratio}",
+  "mockup.faceSizeUnknown": "מידות השטח לא צוינו, ולכן הקובץ נמתח לפאה. היחס שיוצג אינו בהכרח היחס האמיתי.",
+  "mockup.ratioOk": "הקובץ תואם את יחס השטח.",
+  "mockup.ratioOff": "השטח ביחס {face}, הקובץ שבחרתם ביחס {file}. בהדמיה הוא ממורכז עם שוליים — כך הוא באמת ייראה על השטח.",
+  "mockup.viewClose": "מבט על השטח",
+  "mockup.viewContext": "מבט נוסף",
+  "mockup.views": "בחירת תמונה",
   "mockup.limitations":
     "ההדמיה מניחה משטח שטוח, ואינה מתחשבת בתאורה, בהשתקפויות או בעצמים שעוברים לפני השטח.",
 
@@ -611,6 +622,11 @@ const he: Dict = {
   "mockup.saved": "הסימון נשמר.",
   "mockup.cleared": "הסימון נמחק.",
   "mockup.invalid": "הסימון אינו תקין. יש לסמן ארבע פינות בסדר, לפי כיוון השעון.",
+
+  // Street View. Deliberately its own panel: Google's terms forbid altering
+  // their imagery, and an ad painted onto it would be exactly that.
+  "street.title": "הרחוב עצמו",
+  "street.note": "תצוגת Street View של גוגל בכתובת השטח. התמונה עשויה להיות מתאריך אחר ואינה כוללת את המודעה — ההדמיה יושבת על צילום השטח למעלה.",
 
   "notif.empty": "אין התראות חדשות.",
   "notif.markRead": "סימון כנקרא",

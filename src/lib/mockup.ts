@@ -139,6 +139,55 @@ export function applyHomography(m: number[], x: number, y: number): Point {
   };
 }
 
+/**
+ * The sign's real proportions, from the listing's own measurements.
+ *
+ * Null when the owner did not give dimensions. That is a real state - one
+ * seeded listing is like this - and it is not guessed at: without the physical
+ * size there is no way to know what shape the face really is, so the artwork
+ * is stretched to fill it and the screen says so.
+ */
+export function faceRatio(asset: { widthCm?: number | null; heightCm?: number | null }): number | null {
+  const { widthCm, heightCm } = asset;
+  if (!widthCm || !heightCm || widthCm <= 0 || heightCm <= 0) return null;
+  return widthCm / heightCm;
+}
+
+/**
+ * Where the artwork sits inside the sign's face, in the face's own unit space.
+ *
+ * The face is a rectangle of known real proportions seen at an angle, so the
+ * comparison has to happen in the face's own coordinates, not on screen: a
+ * quad photographed at an angle is foreshortened, and measuring its on-screen
+ * shape would give the wrong answer for exactly the signs where it matters.
+ *
+ * Returns the unit rectangle [u0, v0, u1, v1] the artwork occupies. Filling
+ * the whole face is [0, 0, 1, 1].
+ */
+export function fitRect(face: number | null, creative: number): [number, number, number, number] {
+  // No declared dimensions: fill, and let the caller say why.
+  if (face == null || !Number.isFinite(creative) || creative <= 0) return [0, 0, 1, 1];
+
+  if (creative > face) {
+    // The artwork is wider than the sign - bars above and below.
+    const height = face / creative;
+    const inset = (1 - height) / 2;
+    return [0, inset, 1, inset + height];
+  }
+  // Narrower - bars at the sides.
+  const width = creative / face;
+  const inset = (1 - width) / 2;
+  return [inset, 0, inset + width, 1];
+}
+
+/** Does the artwork match the sign closely enough not to be worth mentioning? */
+export function ratioMatches(face: number | null, creative: number): boolean {
+  if (face == null) return false;
+  // A percent or so of difference is invisible once rendered, and nagging
+  // about it would train people to ignore the warning that matters.
+  return Math.abs(face - creative) / face < 0.01;
+}
+
 export type MockupInput = {
   quad: Quad;
   /** Displayed size of the photograph, in CSS pixels. */
@@ -147,6 +196,11 @@ export type MockupInput = {
   /** Natural size of the advertiser's artwork, in pixels. */
   creativeWidth: number;
   creativeHeight: number;
+  /**
+   * The sign's real width/height ratio. Null means the owner published no
+   * dimensions, and the artwork is stretched to the face rather than fitted.
+   */
+  faceRatio?: number | null;
 };
 
 /**
@@ -159,7 +213,27 @@ export type MockupInput = {
 export function mockupHomography(input: MockupInput): number[] {
   const { quad, photoWidth, photoHeight, creativeWidth, creativeHeight } = input;
   const px = quad.map((p) => ({ x: p.x * photoWidth, y: p.y * photoHeight })) as Quad;
-  const m = unitSquareTo(px[0], px[1], px[2], px[3]);
+  const face = unitSquareTo(px[0], px[1], px[2], px[3]);
+
+  // Fit the artwork inside the face at its own proportions rather than
+  // stretching it to the corners. A square file on a 3:1 billboard used to
+  // render three times too wide - a picture of an ad that will never exist,
+  // which is the same kind of lie as a wrong price.
+  const [u0, v0, u1, v1] = fitRect(
+    input.faceRatio ?? null,
+    creativeHeight > 0 ? creativeWidth / creativeHeight : 1
+  );
+
+  // The inset rectangle, pushed through the face's own transform. Doing it
+  // this way keeps the perspective: the artwork is inset within the plane of
+  // the sign, not within the flat screen rectangle around it.
+  const target = [
+    applyHomography(face, u0, v0),
+    applyHomography(face, u1, v0),
+    applyHomography(face, u1, v1),
+    applyHomography(face, u0, v1),
+  ] as Quad;
+  const m = unitSquareTo(target[0], target[1], target[2], target[3]);
 
   const sw = creativeWidth || 1;
   const sh = creativeHeight || 1;

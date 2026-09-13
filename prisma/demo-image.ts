@@ -21,26 +21,64 @@ const INK = "#191d26";
 const BRAND = "#1f45d6";
 const PAPER = "#eef1f7";
 
-/** Rough silhouette per type, in a 0-100 box, so the shapes are distinguishable. */
-const SHAPES: Record<AssetType, string> = {
-  BILLBOARD: '<rect x="14" y="26" width="72" height="34" rx="1.5"/><rect x="46" y="60" width="8" height="26"/>',
-  DIGITAL_BILLBOARD:
-    '<rect x="14" y="24" width="72" height="38" rx="3"/><rect x="46" y="62" width="8" height="24"/>',
-  WALL: '<rect x="10" y="20" width="80" height="60" rx="1"/>',
-  TOTEM: '<rect x="36" y="12" width="28" height="70" rx="4"/>',
-  BUS_STOP: '<rect x="16" y="26" width="68" height="6" rx="1"/><rect x="18" y="32" width="6" height="46"/><rect x="76" y="32" width="6" height="46"/><rect x="40" y="46" width="34" height="32" rx="1"/>',
-  STREET_FURNITURE: '<rect x="24" y="34" width="52" height="40" rx="3"/><rect x="30" y="74" width="6" height="10"/><rect x="64" y="74" width="6" height="10"/>',
-  BANNER: '<rect x="10" y="34" width="80" height="24" rx="2"/><circle cx="10" cy="46" r="3"/><circle cx="90" cy="46" r="3"/>',
-  OTHER: '<rect x="20" y="28" width="60" height="44" rx="2"/>',
-};
+/**
+ * The parts of each silhouette that are not the display face: the post a
+ * billboard stands on, a shelter's roof and legs, a banner's fixings.
+ *
+ * Drawn relative to the face rather than at fixed coordinates, so that when
+ * the face is restretched to a listing's real proportions the structure still
+ * meets it - a post that stops short of the sign it holds up is worse than no
+ * post at all.
+ */
+function structureFor(assetType: AssetType, f: { x: number; y: number; w: number; h: number }): string {
+  const cx = f.x + f.w / 2;
+  const bottom = f.y + f.h;
+  const ground = 86;
+  const post = (width: number) =>
+    bottom >= ground
+      ? ""
+      : `<rect x="${cx - width / 2}" y="${bottom}" width="${width}" height="${ground - bottom}"/>`;
+
+  switch (assetType) {
+    case "BILLBOARD":
+    case "DIGITAL_BILLBOARD":
+      return post(8);
+    case "BUS_STOP":
+      // A roof above the panel, and legs down each side of the shelter.
+      return (
+        `<rect x="${f.x - 6}" y="${Math.max(6, f.y - 20)}" width="${f.w + 12}" height="6" rx="1"/>` +
+        `<rect x="${f.x - 4}" y="${Math.max(12, f.y - 14)}" width="6" height="${ground - Math.max(12, f.y - 14)}"/>` +
+        `<rect x="${f.x + f.w - 2}" y="${Math.max(12, f.y - 14)}" width="6" height="${ground - Math.max(12, f.y - 14)}"/>`
+      );
+    case "STREET_FURNITURE":
+      return bottom >= ground
+        ? ""
+        : `<rect x="${f.x + 6}" y="${bottom}" width="6" height="${ground - bottom}"/>` +
+          `<rect x="${f.x + f.w - 12}" y="${bottom}" width="6" height="${ground - bottom}"/>`;
+    case "BANNER":
+      // Fixings at each end, at the face's own mid-height.
+      return (
+        `<circle cx="${f.x}" cy="${f.y + f.h / 2}" r="3"/>` +
+        `<circle cx="${f.x + f.w}" cy="${f.y + f.h / 2}" r="3"/>`
+      );
+    default:
+      // A wall, a totem and "other" are the face and nothing else.
+      return "";
+  }
+}
 
 /**
- * The display face of each shape, in the same 0-100 box as SHAPES above.
+ * The display face of each type, in a 0-100 box shared with structureFor().
  *
  * Usually the first rectangle of the silhouette; for a bus stop it is the ad
  * panel rather than the shelter roof. Kept next to the shapes on purpose - the
  * creative preview stands artwork on these coordinates, and a face that has
  * drifted from the drawing would put an ad beside the sign instead of on it.
+ *
+ * These are the fallback proportions, for a listing that published no
+ * dimensions. A listing that did gets its face redrawn to its real shape -
+ * see faceFor() - because a 900x300 billboard drawn at 72x34 is a picture of
+ * a sign that is not the one being sold.
  */
 const FACES: Record<AssetType, { x: number; y: number; w: number; h: number }> = {
   BILLBOARD: { x: 14, y: 26, w: 72, h: 34 },
@@ -63,6 +101,44 @@ const SHAPE_TX = WIDTH / 2 - 190;
 const SHAPE_TY = HEIGHT / 2 - 220;
 
 /**
+ * The face this listing's picture should be drawn with.
+ *
+ * Keeps the generic silhouette's centre and area, and restretches it to the
+ * listing's real width/height ratio - so a 3:1 billboard is drawn 3:1 and a
+ * 0.4:1 totem is drawn tall and narrow, both inside the same frame.
+ *
+ * Without dimensions it returns the type's generic shape unchanged. Nothing
+ * is inferred from the asset type: a "billboard" is not assumed to be 3:1.
+ */
+export function faceFor(
+  assetType: AssetType,
+  dimensions?: { widthCm?: number | null; heightCm?: number | null }
+): { x: number; y: number; w: number; h: number } {
+  const base = FACES[assetType] ?? FACES.OTHER;
+  const widthCm = dimensions?.widthCm;
+  const heightCm = dimensions?.heightCm;
+  if (!widthCm || !heightCm || widthCm <= 0 || heightCm <= 0) return base;
+
+  const ratio = widthCm / heightCm;
+  const cx = base.x + base.w / 2;
+  const cy = base.y + base.h / 2;
+  // Same area as the generic shape, so every type still fills the frame to a
+  // similar degree and no listing's picture looks like a mistake.
+  const area = base.w * base.h;
+  let w = Math.sqrt(area * ratio);
+  let h = w / ratio;
+
+  // Keep it inside the drawing box with a small margin, whatever the ratio.
+  const maxW = 88;
+  const maxH = 80;
+  const scale = Math.min(1, maxW / w, maxH / h);
+  w *= scale;
+  h *= scale;
+
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+/**
  * Where the sign's face sits in a demo photo, as fractions of the image.
  *
  * Clockwise from the top-left, which is the order lib/mockup.ts expects.
@@ -72,8 +148,11 @@ const SHAPE_TY = HEIGHT / 2 - 220;
  * flat drawing a fake angle would be inventing perspective that is not in the
  * picture. A real photograph gets a real quad, marked by an admin.
  */
-export function demoSurfaceQuad(assetType: AssetType) {
-  const face = FACES[assetType] ?? FACES.OTHER;
+export function demoSurfaceQuad(
+  assetType: AssetType,
+  dimensions?: { widthCm?: number | null; heightCm?: number | null }
+) {
+  const face = faceFor(assetType, dimensions);
   const px = (v: number) => (SHAPE_TX + v * SHAPE_SCALE) / WIDTH;
   const py = (v: number) => (SHAPE_TY + v * SHAPE_SCALE) / HEIGHT;
   const round = (n: number) => Number(n.toFixed(4));
@@ -100,8 +179,18 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
-export async function demoImage(params: { assetType: AssetType; label: string }): Promise<Buffer> {
-  const shape = SHAPES[params.assetType] ?? SHAPES.OTHER;
+export async function demoImage(params: {
+  assetType: AssetType;
+  label: string;
+  /** The listing's real size, so the drawn sign is the shape being sold. */
+  widthCm?: number | null;
+  heightCm?: number | null;
+}): Promise<Buffer> {
+  const face = faceFor(params.assetType, params);
+  const rounding = params.assetType === "TOTEM" ? 4 : 1.5;
+  const shape =
+    structureFor(params.assetType, face) +
+    `<rect x="${face.x}" y="${face.y}" width="${face.w}" height="${face.h}" rx="${rounding}"/>`;
   // Long titles would overflow the plate; the badge is the part that matters.
   const label = escapeXml(params.label.slice(0, 44));
 

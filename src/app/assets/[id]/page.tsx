@@ -13,7 +13,8 @@ import { AssetMiniMap } from "@/components/map/AssetMiniMap";
 import { RequestPanel } from "@/components/request/RequestPanel";
 import { SaveAssetButton } from "@/components/SaveAssetButton";
 import { CreativeMockup } from "@/components/assets/CreativeMockup";
-import { isUsableQuad, parseQuad } from "@/lib/mockup";
+import { faceRatio, isUsableQuad, parseQuad } from "@/lib/mockup";
+import { StreetViewPanel } from "@/components/assets/StreetViewPanel";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -60,16 +61,15 @@ export default async function AssetPage({ params }: Params) {
   const availability = assetAvailability(asset);
   const primary = asset.images[0];
 
-  // The first photo with a face marked on it. Most photos will never have one
-  // - a close-up of the frame, a wide shot of the junction - so this picks
-  // rather than assuming the primary image is the one to stand artwork on.
-  const mockupPhoto = (() => {
-    for (const image of asset.images) {
-      const quad = parseQuad(image.surfaceQuad);
-      if (quad && isUsableQuad(quad)) return { url: image.url, quad };
-    }
-    return null;
-  })();
+  // Every photo with a face marked on it, in order. Usually one - a close-up
+  // of the sign - but an owner who also uploaded a wide shot of the street
+  // gives the advertiser the second thing they actually want to know: how the
+  // ad sits in its surroundings. Both are real photographs of the site.
+  const mockupPhotos = asset.images
+    .map((image) => ({ id: image.id, url: image.url, quad: parseQuad(image.surfaceQuad) }))
+    .filter((p): p is { id: string; url: string; quad: NonNullable<typeof p.quad> } =>
+      p.quad != null && isUsableQuad(p.quad)
+    );
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 
   const headlinePrice = priceLine(asset);
@@ -154,7 +154,21 @@ export default async function AssetPage({ params }: Params) {
           {/* The creative preview, only where someone has marked a face to put
               it on. No marked quad means no honest place for the artwork, and
               a guessed rectangle would show an ad that does not fit the sign. */}
-          {mockupPhoto && <CreativeMockup photoUrl={mockupPhoto.url} quad={mockupPhoto.quad} />}
+          {mockupPhotos.length > 0 && (
+            <CreativeMockup
+              photos={mockupPhotos}
+              faceRatio={faceRatio(asset)}
+              widthCm={asset.widthCm}
+              heightCm={asset.heightCm}
+            />
+          )}
+
+          {/* Google's own imagery of the address, untouched and in its own
+              panel. Their terms forbid altering Street View images - an ad
+              painted onto one would be exactly that - so the preview above
+              stays on the site's real photograph and this answers "what is
+              actually there" separately. */}
+          <StreetViewPanel latitude={asset.latitude} longitude={asset.longitude} />
 
           {/* Location */}
           <Card className="p-5">

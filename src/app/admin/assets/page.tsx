@@ -60,12 +60,12 @@ export default async function AdminAssets({
     include: {
       owner: { select: { id: true, name: true, email: true } },
       company: { select: { name: true } },
-      // The photo an advertiser would stand artwork on. Only the primary one
-      // is offered for marking: the admin is reviewing a listing, not editing
-      // a gallery, and the primary photo is the one the preview uses.
+      // Every photo, because every photo can carry a marked face. The
+      // advertiser's preview offers each marked one as a separate view - a
+      // close-up of the sign, and a wide shot of it in the street - so
+      // marking only the primary would cap the feature at one viewpoint.
       images: {
         orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
-        take: 1,
         select: { id: true, url: true, surfaceQuad: true },
       },
     },
@@ -141,13 +141,14 @@ export default async function AdminAssets({
               </div>
               <div className="mt-3 pt-3 border-t border-ink-100">
                 <VerifyAssetForm assetId={asset.id} status={asset.status} note={asset.reviewNote} />
-                {asset.images[0] && (
+                {asset.images.map((image) => (
                   <MarkSurfaceForm
-                    imageId={asset.images[0].id}
-                    photoUrl={asset.images[0].url}
-                    initialQuad={parseQuad(asset.images[0].surfaceQuad)}
+                    key={image.id}
+                    imageId={image.id}
+                    photoUrl={image.url}
+                    initialQuad={parseQuad(image.surfaceQuad)}
                   />
-                )}
+                ))}
               </div>
             </Card>
             </div>

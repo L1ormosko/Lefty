@@ -368,7 +368,14 @@ async function main() {
     // be fabricating inventory. Written through the same table and encoder the
     // real upload route uses, so there is no second storage path to maintain.
     const imageId = randomUUID();
-    const bytes = await demoImage({ assetType: s.assetType, label: asset.title });
+    const bytes = await demoImage({
+      assetType: s.assetType,
+      label: asset.title,
+      // The picture is drawn at the listing's real proportions, so a 3:1
+      // billboard does not appear as a 2:1 one.
+      widthCm: s.w ?? null,
+      heightCm: s.h ?? null,
+    });
     await prisma.$transaction([
       prisma.mediaAssetImage.create({
         data: {
@@ -393,7 +400,7 @@ async function main() {
           // with, so the face cannot drift away from the sign in the picture.
           // These are demo rows, already flagged isDemo; a real listing gets
           // its face marked by an admin looking at an actual photograph.
-          surfaceQuad: demoSurfaceQuad(s.assetType),
+          surfaceQuad: demoSurfaceQuad(s.assetType, { widthCm: s.w ?? null, heightCm: s.h ?? null }),
         },
       }),
       prisma.mediaAssetImageBlob.create({

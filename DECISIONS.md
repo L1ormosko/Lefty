@@ -439,3 +439,41 @@ feature could be reached. The test now opens the first listing a visitor would
 actually click and asserts the panel is there. The label above the picture — before it, not under it — reads
 "הדמיה בלבד — לא צילום של הפרסום בפועל", and the limitations are stated:
 a flat overlay, no relighting, no reflections, nothing passing in front.
+
+## The sign's real size decides how the artwork sits
+
+The creative preview mapped the advertiser's whole file onto the marked face,
+which stretched it to whatever shape the sign was. A square logo on a 900x300
+billboard rendered three times too wide - a picture of an advert that will
+never exist, which is the same class of untruth as a wrong price, and the
+listing's own `widthCm`/`heightCm` were sitting unused two fields away.
+
+The fit now happens in the face's own coordinate space, using the physical
+ratio from the listing rather than the quad's shape on screen. That distinction
+matters: a sign photographed at an angle is foreshortened, so its on-screen
+quad is not its real proportions, and comparing against it would give the wrong
+answer for exactly the signs where perspective was the point.
+
+A listing with no published dimensions fills the face as before - and says so.
+There is no way to know a face's shape without its size, and "billboards are
+usually 3:1" is a guess, which is the thing this product does not do.
+
+The demo schematics are drawn from the same numbers, so a 3:1 billboard is
+drawn 3:1 and a 0.4:1 totem tall and narrow. A picture of a sign in
+proportions other than the ones being sold is a small lie told in advance.
+
+## Street View sits beside the mockup, never underneath it
+
+Asked to show how an advert looks "at the address", the tempting answer is to
+paint it onto Street View. Google's terms forbid altering their imagery, and
+call out alterations that misrepresent what the camera captured - which is
+exactly what an advert composited onto their photograph of a street would be.
+The exposure would be the operator's, not Google's.
+
+So the surroundings come from two honest places instead. The advert is
+previewed on photographs the owner supplied, and because `surfaceQuad` is per
+image, an owner who uploads both a close-up and a wide street shot gives the
+advertiser two real viewpoints of the same sign. Separately, an embedded and
+unmodified Street View panel answers "what is actually on this corner",
+carrying Google's own attribution, behind a key that leaves the panel absent
+when it is not set.

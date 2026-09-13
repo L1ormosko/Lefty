@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyHomography,
+  faceRatio,
+  fitRect,
   isUsableQuad,
+  ratioMatches,
   mockupHomography,
   mockupMatrix3d,
   parseQuad,
@@ -140,5 +143,125 @@ describe("the transform itself", () => {
     expect(v[7]).toBeCloseTo(m[7], 6);
     expect(v[2]).toBe(0);
     expect(v[10]).toBe(1);
+  });
+});
+
+describe("fitting the artwork to the sign's real proportions", () => {
+  const photo = { photoWidth: 1000, photoHeight: 600 };
+  /**
+   * A 3:1 billboard seen square on: 600x200 screen pixels, which is 3:1.
+   *
+   * The quad's on-screen shape has to agree with the declared dimensions for
+   * a face-on photo, or the fixture is describing a sign that cannot exist -
+   * and then nothing rendered from it means anything.
+   */
+  const WIDE: Quad = [
+    { x: 0.1, y: 0.3 },
+    { x: 0.7, y: 0.3 },
+    { x: 0.7, y: 0.6333 },
+    { x: 0.1, y: 0.6333 },
+  ];
+
+  it("reads the ratio from the listing, and refuses to invent one", () => {
+    expect(faceRatio({ widthCm: 900, heightCm: 300 })).toBe(3);
+    expect(faceRatio({ widthCm: 120, heightCm: 300 })).toBe(0.4);
+    expect(faceRatio({ widthCm: null, heightCm: 300 })).toBeNull();
+    expect(faceRatio({ widthCm: 900, heightCm: null })).toBeNull();
+    expect(faceRatio({ widthCm: 0, heightCm: 300 })).toBeNull();
+  });
+
+  it("puts bars at the sides of a square file on a wide sign", () => {
+    // The bug this replaces: a 1:1 file on a 3:1 billboard rendered three
+    // times too wide - an advertiser shown an ad that will never exist.
+    //
+    // A square fitted into a sign three times wider than it is tall keeps the
+    // full height and takes a third of the width, so the bars are vertical.
+    const [u0, v0, u1, v1] = fitRect(3, 1);
+    expect(v0).toBe(0);
+    expect(v1).toBe(1);
+    expect(u1 - u0).toBeCloseTo(1 / 3, 6);
+    expect(u0).toBeCloseTo(1 / 3, 6);
+  });
+
+  it("puts bars above and below a wide file on a tall sign", () => {
+    // A 3:1 banner file on a 0.4:1 totem: full width, a thin band of height.
+    const [u0, v0, u1, v1] = fitRect(0.4, 3);
+    expect(u0).toBe(0);
+    expect(u1).toBe(1);
+    expect(v1 - v0).toBeCloseTo(0.4 / 3, 6);
+  });
+
+  it("fills the face exactly when the proportions agree", () => {
+    expect(fitRect(3, 3)).toEqual([0, 0, 1, 1]);
+  });
+
+  it("fills the face when the sign has no published dimensions", () => {
+    // Honest fallback: without the physical size there is no way to know the
+    // face's shape. The panel says so rather than the code guessing.
+    expect(fitRect(null, 1)).toEqual([0, 0, 1, 1]);
+    expect(ratioMatches(null, 1)).toBe(false);
+  });
+
+  it("keeps the artwork inside the face rather than overflowing it", () => {
+    // A square file on the wide sign: the rendered corners must sit within
+    // the marked face, not spill over the frame around it.
+    const m = mockupHomography({
+      quad: WIDE,
+      ...photo,
+      creativeWidth: 500,
+      creativeHeight: 500,
+      faceRatio: 3,
+    });
+    const corners = [
+      applyHomography(m, 0, 0),
+      applyHomography(m, 500, 0),
+      applyHomography(m, 500, 500),
+      applyHomography(m, 0, 500),
+    ];
+    for (const c of corners) {
+      expect(c.x).toBeGreaterThanOrEqual(WIDE[0].x * photo.photoWidth - 0.01);
+      expect(c.x).toBeLessThanOrEqual(WIDE[1].x * photo.photoWidth + 0.01);
+      expect(c.y).toBeGreaterThanOrEqual(WIDE[0].y * photo.photoHeight - 0.01);
+      expect(c.y).toBeLessThanOrEqual(WIDE[2].y * photo.photoHeight + 0.01);
+    }
+  });
+
+  it("renders a square file square, not stretched to the sign", () => {
+    // The whole point, measured: equal sides in, equal sides out.
+    const m = mockupHomography({
+      quad: WIDE,
+      ...photo,
+      creativeWidth: 500,
+      creativeHeight: 500,
+      faceRatio: 3,
+    });
+    const topLeft = applyHomography(m, 0, 0);
+    const topRight = applyHomography(m, 500, 0);
+    const bottomLeft = applyHomography(m, 0, 500);
+    const width = Math.abs(topRight.x - topLeft.x);
+    const height = Math.abs(bottomLeft.y - topLeft.y);
+    expect(width / height).toBeCloseTo(1, 3);
+  });
+
+  it("still stretches when dimensions are unknown, which is the documented fallback", () => {
+    const m = mockupHomography({
+      quad: WIDE,
+      ...photo,
+      creativeWidth: 500,
+      creativeHeight: 500,
+      faceRatio: null,
+    });
+    const topLeft = applyHomography(m, 0, 0);
+    const topRight = applyHomography(m, 500, 0);
+    const bottomLeft = applyHomography(m, 0, 500);
+    const ratio =
+      Math.abs(topRight.x - topLeft.x) / Math.abs(bottomLeft.y - topLeft.y);
+    // Filled to the face, so the square comes out at the face's own shape.
+    expect(ratio).toBeCloseTo(3, 1);
+  });
+
+  it("does not nag about a difference nobody can see", () => {
+    expect(ratioMatches(3, 3.01)).toBe(true);
+    expect(ratioMatches(3, 2.5)).toBe(false);
   });
 });
