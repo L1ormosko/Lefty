@@ -36,17 +36,33 @@ test("filtering narrows the results and keeps the user on the map", async ({ pag
   await page.goto("/explore");
   await openResults(page);
   await expect(cardsOf(page).first()).toBeVisible({ timeout: 20_000 });
-  const before = await cardsOf(page).count();
-  expect(before).toBeGreaterThan(0);
+  expect(await cardsOf(page).count()).toBeGreaterThan(0);
 
-  await selectFirstCity(page);
+  const label = await selectFirstCity(page);
 
   await expect(page).toHaveURL(/\/explore\?.*city=/);
 
   await openResults(page);
   await expect(cardsOf(page).first()).toBeVisible({ timeout: 20_000 });
-  // The seeded inventory spans several cities, so one city is a strict subset.
-  await expect.poll(() => cardsOf(page).count(), { timeout: 10_000 }).toBeLessThan(before);
+
+  // Every result is in the chosen city.
+  //
+  // This used to assert "fewer results than before", which is not actually the
+  // property under test and fails whenever it happens not to hold: the
+  // unfiltered list is bounded by the map viewport, which is centred on the
+  // pilot city, so once enough listings exist there the two counts are equal
+  // and a correct filter looks broken. The city label carries a count -
+  // "באר שבע (10)" - so compare on the name alone.
+  const city = label.replace(/\s*\(\d+\)\s*$/, "").trim();
+  await expect
+    .poll(
+      async () => {
+        const texts = await cardsOf(page).allInnerTexts();
+        return texts.length > 0 && texts.every((t) => t.includes(city));
+      },
+      { timeout: 10_000 }
+    )
+    .toBe(true);
 });
 
 test("a filtered URL can be reloaded and shared", async ({ page }) => {
