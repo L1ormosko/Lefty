@@ -3,6 +3,8 @@ import { DEV_PASSWORD, login, openResults, register, uniqueEmail } from "./helpe
 
 /** Advertiser journey: register → map → filter → asset → request → dashboard. */
 test("an advertiser can discover an asset and send a request", async ({ page }) => {
+  // Registering grants the free trial, so a brand-new account can browse in
+  // full from its first minute - which is the whole point of the trial.
   const email = uniqueEmail("advertiser");
   await register(page, "ADVERTISER", email);
 
@@ -46,14 +48,43 @@ test("an advertiser can discover an asset and send a request", async ({ page }) 
   await expect(page.locator("article").first()).toBeVisible();
 });
 
-test("an anonymous visitor is asked to sign in before requesting", async ({ page }) => {
+test("an anonymous visitor sees that inventory exists, but not the detail", async ({ page }) => {
+  // The map is no longer open to everyone. It is not shut either: a visitor
+  // still sees how much inventory is where, because a marketplace nobody can
+  // look into cannot attract the side that pays for it. What they do not get
+  // is the exact spot, the price, the free dates or the owner's details.
+  await page.goto("/explore");
+  await openResults(page);
+
+  const card = page.locator("[data-results]:visible [data-asset]").first();
+  await expect(card).toBeVisible({ timeout: 20_000 });
+
+  // The pitch, not a locked door.
+  // Scoped to what is on screen: the results list renders for both layouts,
+  // so an unscoped .first() can match the hidden desktop copy on a phone.
+  await expect(
+    page.getByText("פתיחת חשבון והתחלת הניסיון").locator("visible=true").first()
+  ).toBeVisible();
+
+  // And nothing saleable reached the browser at all - not hidden with CSS,
+  // absent from the response.
+  const payload = await page.evaluate(async () => {
+    const res = await fetch("/api/assets?limit=50");
+    return res.text();
+  });
+  expect(payload).toContain('"restricted":true');
+  expect(payload).not.toMatch(/"priceMonthly":\d/);
+  expect(payload).not.toMatch(/"address":"[^"]+"/);
+});
+
+test("an anonymous visitor opening a listing is offered the trial", async ({ page }) => {
   await page.goto("/explore");
   await openResults(page);
   const card = page.locator("[data-results]:visible [data-asset]").first();
   await expect(card).toBeVisible({ timeout: 20_000 });
   await card.getByRole("link", { name: /בדיקת זמינות/ }).click();
   await page.waitForURL(/\/assets\//);
-  await expect(page.getByText("יש להתחבר כדי להמשיך.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "הדף הזה נפתח עם חשבון" })).toBeVisible();
 });
 
 test("an advertiser cannot reach the media owner area", async ({ page }) => {

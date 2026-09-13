@@ -477,3 +477,38 @@ advertiser two real viewpoints of the same sign. Separately, an embedded and
 unmodified Street View panel answers "what is actually on this corner",
 carrying Google's own attribution, behind a key that leaves the panel absent
 when it is not set.
+
+## The map goes vague, not dark
+
+Access to the inventory is what VELTO sells, so it sits behind an account: a
+seven-day trial at registration, then a monthly subscription with a six-month
+minimum term. Both sides pay - an advertiser for seeing the inventory, a media
+owner for how much of it they may publish - and both live on one `Subscription`
+row, because a company can be both.
+
+What a visitor without access sees is the design decision worth recording. The
+map does not go dark. They still see how many spaces exist and roughly where
+they cluster, because a marketplace nobody can look into cannot attract the
+side that pays to be in it. What they stop seeing is the exact position, the
+price, the free dates, the street address and the owner's details - which is
+precisely the part being sold.
+
+The redaction happens on the server, in `redactForRestricted`, and is applied
+in both places inventory reaches a browser: `/api/assets` and the
+server-rendered first paint of `/explore`. Hiding a price with a CSS class or a
+conditional in a component would leave the real number in the network tab; a
+price that reaches the browser has been given away whatever the page paints.
+The blurred position is produced by rounding rather than by adding noise, so
+the same sign cannot be sampled repeatedly and averaged back to its true point.
+
+Nothing here charges anyone. `paidThrough` is set by hand against an invoice
+raised in approved bookkeeping software, exactly as the owner listing cap
+already was. `committedUntil` records the agreed term because it is a fact
+about the agreement, not because the application enforces it: collecting an
+unpaid commitment is a matter between the parties, and a web application that
+pretended otherwise would be lying about its own powers.
+
+Trials are granted in the same statement that creates the user. Granting one
+afterwards leaves a window in which a half-failed signup produces an account
+with no access at all, and the person most likely to land in that window is the
+one who just spent five minutes signing up.

@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Discover } from "@/components/map/Discover";
-import { citiesWithInventory, queryMapAssets } from "@/server/assets";
+import { citiesWithInventory, queryMapAssets, redactForRestricted } from "@/server/assets";
+import { getCurrentUser } from "@/server/auth";
+import { viewerAccess } from "@/server/subscription";
 import { mapQuerySchema } from "@/lib/validation";
 import { t } from "@/lib/labels";
 
@@ -25,7 +27,15 @@ export default async function ExplorePage({
   const query = parsed.success ? parsed.data : mapQuerySchema.parse({});
 
   // First paint is server-rendered: the map has inventory before any client fetch.
-  const [assets, cities] = await Promise.all([queryMapAssets(query), citiesWithInventory()]);
+  const [rows, cities, viewer] = await Promise.all([
+    queryMapAssets(query),
+    citiesWithInventory(),
+    viewerAccess(await getCurrentUser()),
+  ]);
+  // Redacted here too, not only in /api/assets. The first paint is HTML, and
+  // an unredacted price in the server-rendered markup is just as readable as
+  // one in a JSON response.
+  const assets = viewer.full ? rows : rows.map(redactForRestricted);
 
   return (
     <main className="flex-1 flex flex-col min-h-0">
@@ -34,7 +44,7 @@ export default async function ExplorePage({
         <p className="hidden md:block text-sm text-ink-500 truncate">{t("home.sub")}</p>
       </div>
       <Suspense fallback={<div className="p-8 text-ink-500">{t("common.loading")}</div>}>
-        <Discover initialAssets={assets} cities={cities} />
+        <Discover initialAssets={assets} cities={cities} access={viewer} />
       </Suspense>
     </main>
   );

@@ -15,6 +15,8 @@ import { SaveAssetButton } from "@/components/SaveAssetButton";
 import { CreativeMockup } from "@/components/assets/CreativeMockup";
 import { faceRatio, isUsableQuad, parseQuad } from "@/lib/mockup";
 import { StreetViewPanel } from "@/components/assets/StreetViewPanel";
+import { AccessNotice } from "@/components/access/AccessNotice";
+import { viewerAccess } from "@/server/subscription";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -50,6 +52,33 @@ export default async function AssetPage({ params }: Params) {
   const user = await getCurrentUser();
   const asset = await getPublicAsset(id, user);
   if (!asset) notFound();
+
+  // A listing page is the thing VELTO sells: address, price, free dates,
+  // contact and the creative preview. Without access the page still exists -
+  // it says what kind of sign and which city, so the link is shareable and
+  // indexable - but it stops short of the detail.
+  const viewer = await viewerAccess(user);
+  if (!viewer.full) {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-4 py-6">
+        <nav className="mb-4 text-sm">
+          <Link href="/explore" className="text-brand-600 hover:underline">
+            → {t("asset.backToMap")}
+          </Link>
+        </nav>
+        <Card className="p-5">
+          <p className="text-sm text-ink-500">
+            {t(`type.${asset.assetType}`)} · {asset.city}
+          </p>
+          <h1 className="mt-1 text-xl font-semibold text-ink-900">
+            {t("access.restrictedAsset")}
+          </h1>
+          <p className="mt-2 text-sm text-ink-700">{t("access.restrictedAssetNote")}</p>
+          <AccessNotice access={viewer} className="mt-4" />
+        </Card>
+      </main>
+    );
+  }
 
   const saved = user
     ? (await prisma.savedAsset.findUnique({

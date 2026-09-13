@@ -71,3 +71,14 @@ export async function openResults(page: Page) {
     await sheetToggle.click();
   }
 }
+
+/**
+ * Sign in as a browsing advertiser.
+ *
+ * The map is no longer fully public: without a live trial or subscription the
+ * listings come back blurred and priceless. Specs that are about *browsing*
+ * rather than about access need an account, and the seeded advertiser has one.
+ */
+export async function browseAsAdvertiser(page: Page) {
+  await login(page, "advertiser@velto.dev", DEV_PASSWORD);
+}

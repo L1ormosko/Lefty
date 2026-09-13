@@ -11,6 +11,8 @@ import { FilterPanel } from "./FilterPanel";
 import { AssetCard } from "./AssetCard";
 import { FilterChips, chipText } from "./FilterChips";
 import { clampFraction, nextSheet, snapTo, type Sheet } from "./sheet";
+import type { Access } from "@/lib/subscription";
+import { AccessNotice } from "@/components/access/AccessNotice";
 import {
   EMPTY_FILTERS,
   describeFilters,
@@ -23,9 +25,11 @@ import {
 type Props = {
   initialAssets: MapAsset[];
   cities: { city: string; count: number }[];
+  /** What this viewer may see. Restricted viewers get blurred, priceless rows. */
+  access: Access;
 };
 
-export function Discover({ initialAssets, cities }: Props) {
+export function Discover({ initialAssets, cities, access }: Props) {
   const searchParams = useSearchParams();
   // Never hardcode the route here: this component renders at /explore, and
   // writing filters back to "/" navigated the user off the map onto the
@@ -306,6 +310,8 @@ export function Discover({ initialAssets, cities }: Props) {
 
   const resultsList = (surface: "desktop" | "mobile") => (
     <div data-results={surface} className="space-y-2 p-3">
+      <AccessNotice access={access} className="mb-2" />
+
       <FilterChips chips={chips} onClear={clearFilter} onClearAll={reset} className="pb-1" />
 
       {assets.length === 0 && !loading ? (

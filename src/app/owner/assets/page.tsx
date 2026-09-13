@@ -11,7 +11,7 @@ import { availabilityFor } from "@/lib/availability";
 import { AssetStatusToggle } from "@/components/owner/AssetStatusToggle";
 import { DeleteAssetButton } from "@/components/owner/DeleteAssetButton";
 import { PlanPanel } from "@/components/owner/PlanPanel";
-import { ownerPlanRow, ownerPlanStatus } from "@/server/plan";
+import { ownerPlanRow, ownerPlanStatus } from "@/server/subscription";
 
 export const dynamic = "force-dynamic";
 

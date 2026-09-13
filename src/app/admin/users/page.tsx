@@ -18,7 +18,9 @@ export default async function AdminUsers() {
     take: 200,
     include: {
       company: { select: { name: true } },
-      plan: { select: { activeListingLimit: true, paidThrough: true, invoiceRef: true } },
+      subscription: {
+        select: { activeListingLimit: true, paidThrough: true, invoiceRef: true, trialEndsAt: true },
+      },
       _count: { select: { assets: true, inquiries: true, bookings: true } },
     },
   });
@@ -61,9 +63,9 @@ export default async function AdminUsers() {
               {u.role === "MEDIA_OWNER" && (
                 <OwnerPlanForm
                   userId={u.id}
-                  limit={u.plan?.activeListingLimit ?? null}
-                  paidThrough={u.plan?.paidThrough?.toISOString().slice(0, 10) ?? null}
-                  invoiceRef={u.plan?.invoiceRef ?? null}
+                  limit={u.subscription?.activeListingLimit ?? null}
+                  paidThrough={u.subscription?.paidThrough?.toISOString().slice(0, 10) ?? null}
+                  invoiceRef={u.subscription?.invoiceRef ?? null}
                 />
               )}
             </Card>

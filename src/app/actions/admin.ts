@@ -107,7 +107,7 @@ export async function setOwnerPlanAction(_prev: ActionState, formData: FormData)
     // to be a real, non-negative count.
     const rawLimit = String(formData.get("activeListingLimit") ?? "").trim();
     if (rawLimit === "") {
-      await prisma.ownerPlan.deleteMany({ where: { userId } });
+      await prisma.subscription.deleteMany({ where: { userId } });
       revalidatePath("/admin/users");
       revalidatePath("/owner/assets");
       return { ok: true, message: t("plan.removed") };
@@ -129,7 +129,7 @@ export async function setOwnerPlanAction(_prev: ActionState, formData: FormData)
     const invoiceRef = String(formData.get("invoiceRef") ?? "").trim().slice(0, 120) || null;
     const note = String(formData.get("note") ?? "").trim().slice(0, 500) || null;
 
-    await prisma.ownerPlan.upsert({
+    await prisma.subscription.upsert({
       where: { userId },
       create: { userId, activeListingLimit: limit, paidThrough, invoiceRef, note },
       update: { activeListingLimit: limit, paidThrough, invoiceRef, note },

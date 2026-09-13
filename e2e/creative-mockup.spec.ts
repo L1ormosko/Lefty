@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import sharp from "sharp";
-import { DEV_PASSWORD, login } from "./helpers";
+import { DEV_PASSWORD, login,  browseAsAdvertiser } from "./helpers";
 
 /**
  * Previewing artwork on a sign.
@@ -25,6 +25,7 @@ async function creativeFile() {
 
 /** The first listing a visitor would actually click. */
 async function openFirstListing(page: import("@playwright/test").Page) {
+  await browseAsAdvertiser(page);
   await page.goto("/explore");
   const card = page.locator('[data-results]:visible [data-asset] a[href^="/assets/"]').first();
   await expect(card).toBeVisible({ timeout: 20_000 });

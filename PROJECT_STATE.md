@@ -63,6 +63,12 @@ Playwright. One application, one database.
   advertiser's artwork never leaves their browser - no upload, nothing stored -
   and an e2e test watches for any non-GET request while a file is chosen.
 
+- Inventory is behind an account: seven days free at registration, then a paid
+  subscription. A visitor without access still sees how much inventory is where
+  - the map blurs rather than closing - but never the exact position, price,
+  dates, address or contact. The redaction is server-side in both the API and
+  the first paint, so nothing saleable reaches the browser at all.
+
 ## Tests
 226 Vitest tests (unit + integration) and 75 Playwright journeys across desktop
 and mobile viewports. All green.

@@ -628,6 +628,24 @@ const he: Dict = {
   "street.title": "הרחוב עצמו",
   "street.note": "תצוגת Street View של גוגל בכתובת השטח. התמונה עשויה להיות מתאריך אחר ואינה כוללת את המודעה — ההדמיה יושבת על צילום השטח למעלה.",
 
+  // Access. The tone matters: a restricted visitor is a prospect, not an
+  // intruder, and the copy says what they would get rather than what they
+  // are being denied.
+  "access.restrictedMap": "מוצגים אזורים בלבד",
+  "access.restrictedMapNote": "המיקום המדויק, המחיר, התאריכים הפנויים ופרטי בעל השטח נפתחים עם חשבון.",
+  "access.restrictedCard": "פרטי השטח נפתחים עם חשבון",
+  "access.restrictedAsset": "הדף הזה נפתח עם חשבון",
+  "access.restrictedAssetNote": "כתובת מדויקת, מחיר, חלונות זמינות, פרטי קשר והדמיית המודעה — כולם נפתחים אחרי הרשמה.",
+  "access.trialCta": "{days} ימי ניסיון בחינם",
+  "access.trialCtaNote": "בלי כרטיס אשראי. אחרי תקופת הניסיון — מנוי חודשי בהתחייבות ל-{months} חודשים.",
+  "access.startTrial": "פתיחת חשבון והתחלת הניסיון",
+  "access.haveAccount": "יש לכם כבר חשבון?",
+  "access.trialBanner": "תקופת ניסיון — נותרו {days} ימים.",
+  "access.trialEndingSoon": "תקופת הניסיון מסתיימת בעוד {days} ימים. לאחריה יוצגו אזורים בלבד, בלי מחירים ובלי פרטי קשר.",
+  "access.lapsed": "תקופת הגישה שלכם הסתיימה. כרגע מוצגים אזורים בלבד.",
+  "access.lapsedCta": "לחידוש — פנו אלינו.",
+  "access.adminNote": "גישת מנהל — נתונים מלאים.",
+
   "notif.empty": "אין התראות חדשות.",
   "notif.markRead": "סימון כנקרא",
 };

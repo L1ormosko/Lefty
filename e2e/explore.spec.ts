@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { openResults } from "./helpers";
+import { openResults, browseAsAdvertiser } from "./helpers";
 
 const cardsOf = (page: Page) => page.locator("[data-results]:visible [data-asset]");
 
@@ -33,6 +33,7 @@ async function selectFirstCity(page: Page): Promise<string> {
  * app just quietly ejected them. Assert the pathname, not only the results.
  */
 test("filtering narrows the results and keeps the user on the map", async ({ page }) => {
+  await browseAsAdvertiser(page);
   await page.goto("/explore");
   await openResults(page);
   await expect(cardsOf(page).first()).toBeVisible({ timeout: 20_000 });
@@ -68,6 +69,7 @@ test("filtering narrows the results and keeps the user on the map", async ({ pag
 test("a filtered URL can be reloaded and shared", async ({ page }) => {
   // Filters live in the query string so a result set survives a refresh and can
   // be pasted to a colleague.
+  await browseAsAdvertiser(page);
   await page.goto("/explore");
   await openResults(page);
   await expect(cardsOf(page).first()).toBeVisible({ timeout: 20_000 });

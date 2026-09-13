@@ -140,7 +140,7 @@ model User {
   notifications       Notification[]
   passwordResetTokens PasswordResetToken[]
   inquiryMessages     InquiryMessage[]
-  plan                OwnerPlan?
+  subscription        Subscription?
 
   @@index([role])
   @@index([companyId])
@@ -194,30 +194,53 @@ model Company {
   assets MediaAsset[]
 }
 
-/// A media owner's subscription, recorded by hand.
+/// A user's subscription, recorded by hand.
+///
+/// One row per account, both sides of the marketplace. An advertiser pays for
+/// access to the inventory; a media owner pays for how much of it they may
+/// publish. The two are different permissions on the same row rather than two
+/// tables, because a company can be both.
 ///
 /// VELTO issues no invoices and takes no payments: an Israeli tax invoice must
 /// come out of approved bookkeeping software, so this row only *references* a
-/// document that was issued elsewhere. Nothing here is a charge.
-///
-/// The absence of a row means unlimited - every owner on the platform today
-/// predates billing, and a schema change must not quietly put a cap on them.
-model OwnerPlan {
+/// document that was issued elsewhere. Nothing here is a charge, and no card
+/// details are stored or seen.
+model Subscription {
   id     String @id @default(cuid())
   userId String @unique
 
-  /// How many listings this owner may keep public at once.
-  activeListingLimit Int
-
-  /// Paid up to this date. Null means paid with no end recorded.
+  /// End of the free trial granted at registration. Null means none was given.
   ///
-  /// A lapse is derived by comparing this to the clock at read time - there is
-  /// no scheduler in this deployment, and a subscription state that only
-  /// updates when a cron happens to run is a subscription state that lies.
+  /// Every new account gets one; the length lives in lib/subscription.ts so
+  /// the number is stated once rather than scattered across the code.
+  trialEndsAt DateTime?
+
+  /// Paid up to this date. Null means no payment has been recorded.
+  ///
+  /// Both this and the trial are compared against the clock at read time -
+  /// there is no scheduler in this deployment, and a state that only updates
+  /// when a cron happens to run is a state that lies during exactly the window
+  /// that matters.
   paidThrough DateTime?
 
-  /// The invoice issued outside VELTO, for reconciliation. Free text: it is a
-  /// human reference, not a key into anything.
+  /// The end of the minimum term the customer agreed to.
+  ///
+  /// Recorded because it is a fact about the agreement, not because the app
+  /// enforces it: nothing here charges anyone, and access is decided by
+  /// paidThrough alone. Collection of an unpaid commitment is a matter between
+  /// the parties, not something a web application should pretend to settle.
+  committedUntil DateTime?
+
+  /// Agreed monthly amount in shekels, for reconciliation against invoices.
+  monthlyAmount Int?
+
+  /// How many listings this owner may keep public at once.
+  ///
+  /// Null means unlimited - which is every account that predates billing, and
+  /// every advertiser, who publishes nothing.
+  activeListingLimit Int?
+
+  /// The invoice issued outside VELTO. Free text: a human reference, not a key.
   invoiceRef String?
   note       String?
 

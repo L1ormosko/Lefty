@@ -12,6 +12,7 @@ import type { MapQuery } from "@/lib/validation";
 import { availabilityFor, estimatePrice, nextAvailableDate } from "@/lib/availability";
 import type { AvailabilityState } from "@/lib/constants";
 import { daysBetween, toUtcDate, todayUtc } from "@/lib/dates";
+import { coarse } from "@/lib/subscription";
 
 export type MapAsset = {
   id: string;
@@ -29,7 +30,45 @@ export type MapAsset = {
   imageUrl: string | null;
   availability: AvailabilityState;
   nextAvailable: string | null;
+  /**
+   * True when this row has been blurred for a viewer without access.
+   *
+   * The card reads this to label itself honestly rather than quietly showing
+   * a wrong address.
+   */
+  restricted?: boolean;
 };
+
+/**
+ * The same listing, with everything VELTO sells stripped out.
+ *
+ * Done here, on the server, and not with a CSS class or a conditional in a
+ * component: a price that reaches the browser has been given away, whatever
+ * the page chooses to paint. The network response for a visitor without
+ * access must not contain the exact position, the price, the dates or the
+ * street address, because that response is one devtools panel away from being
+ * read.
+ *
+ * What survives is deliberately enough to be useful: the type of sign, the
+ * city, whether it is digital, and a position rounded to a neighbourhood. A
+ * visitor can see that there are eleven spaces in Be'er Sheva and roughly
+ * where they cluster - which is the argument for signing up.
+ */
+export function redactForRestricted(asset: MapAsset): MapAsset {
+  return {
+    ...asset,
+    // The title often contains the street ("שלט חוצות - כניסה לעיר, דרך חברון").
+    title: asset.assetType ? `${asset.city}` : asset.title,
+    address: "",
+    latitude: coarse(asset.latitude),
+    longitude: coarse(asset.longitude),
+    priceMonthly: null,
+    priceWeekly: null,
+    nextAvailable: null,
+    imageUrl: null,
+    restricted: true,
+  };
+}
 
 function buildWhere(q: MapQuery): Prisma.MediaAssetWhereInput {
   const where: Prisma.MediaAssetWhereInput = { status: "ACTIVE" };

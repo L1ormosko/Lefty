@@ -21,7 +21,11 @@
  */
 
 export type OwnerPlan = {
-  activeListingLimit: number;
+  /**
+   * Null means unlimited. Advertisers publish nothing and carry no cap, and
+   * so does every account that predates billing.
+   */
+  activeListingLimit: number | null;
   paidThrough: Date | null;
 };
 
@@ -45,7 +49,7 @@ export function planStatus(
   activeCount: number,
   now: Date = new Date()
 ): PlanStatus {
-  if (!plan) {
+  if (!plan || plan.activeListingLimit == null) {
     return {
       limit: null,
       activeCount,

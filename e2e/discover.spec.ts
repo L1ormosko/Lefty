@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openResults } from "./helpers";
+import { openResults, browseAsAdvertiser } from "./helpers";
 
 /**
  * The map is the product's main surface, and these are the two things it used
@@ -7,6 +7,7 @@ import { openResults } from "./helpers";
  */
 
 test("the map remembers where you were looking", async ({ page }) => {
+  await browseAsAdvertiser(page);
   await page.goto("/explore");
   await page.locator(".maplibregl-canvas").waitFor();
   // Let the first render settle: the camera is only written once the user
@@ -39,6 +40,7 @@ test("the results sheet can be dragged open, and still opens on a tap", async ({
 }) => {
   test.skip(!isMobile, "the sheet only exists on the phone layout");
 
+  await browseAsAdvertiser(page);
   await page.goto("/explore");
   await page.waitForTimeout(3000);
 
@@ -81,6 +83,7 @@ test("the results sheet can be dragged open, and still opens on a tap", async ({
 });
 
 test("an applied filter is visible as a chip and can be removed on its own", async ({ page }) => {
+  await browseAsAdvertiser(page);
   await page.goto("/explore");
   await openResults(page);
 

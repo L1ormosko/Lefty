@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, makeAsset, makeUser, prisma } from "./factories";
-import { ownerPlanStatus } from "@/server/plan";
+import { ownerPlanStatus } from "@/server/subscription";
 
 /**
  * The subscription against a real database.
@@ -45,7 +45,7 @@ describe("counting what is published", () => {
   it("does not count another owner's listings against this one", async () => {
     const other = await makeUser("MEDIA_OWNER");
     await makeAsset(other.id, { status: "ACTIVE" });
-    await prisma.ownerPlan.create({ data: { userId: ownerId, activeListingLimit: 1 } });
+    await prisma.subscription.create({ data: { userId: ownerId, activeListingLimit: 1 } });
 
     const status = await ownerPlanStatus(ownerId);
     expect(status.activeCount).toBe(0);
@@ -55,7 +55,7 @@ describe("counting what is published", () => {
 
 describe("a plan that is full or lapsed", () => {
   it("stops the next listing once the limit is reached", async () => {
-    await prisma.ownerPlan.create({ data: { userId: ownerId, activeListingLimit: 1 } });
+    await prisma.subscription.create({ data: { userId: ownerId, activeListingLimit: 1 } });
     await makeAsset(ownerId, { status: "ACTIVE" });
 
     const status = await ownerPlanStatus(ownerId);
@@ -66,7 +66,7 @@ describe("a plan that is full or lapsed", () => {
   it("blocks on a date that has passed, with no job having run to notice", async () => {
     // The lapse is derived from the clock on read. Nothing scheduled anything;
     // the row was written once and is simply old.
-    await prisma.ownerPlan.create({
+    await prisma.subscription.create({
       data: { userId: ownerId, activeListingLimit: 5, paidThrough: days(-1) },
     });
 
@@ -78,7 +78,7 @@ describe("a plan that is full or lapsed", () => {
   it("leaves every live listing live", async () => {
     // The promise made to advertisers: inventory does not disappear from the
     // map because of a bill between VELTO and the owner.
-    await prisma.ownerPlan.create({
+    await prisma.subscription.create({
       data: { userId: ownerId, activeListingLimit: 1, paidThrough: days(-30) },
     });
     await makeAsset(ownerId, { status: "ACTIVE" });

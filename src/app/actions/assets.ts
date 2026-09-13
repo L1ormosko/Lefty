@@ -13,7 +13,7 @@ import {
   fieldErrors,
 } from "@/lib/validation";
 import { toUserMessage, ValidationError } from "@/server/errors";
-import { ownerPlanStatus } from "@/server/plan";
+import { ownerPlanStatus } from "@/server/subscription";
 import { toUtcDate } from "@/lib/dates";
 import { t } from "@/lib/labels";
 import type { AssetType, Illumination, LocationTag, PermitStatus } from "@prisma/client";

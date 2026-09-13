@@ -6,6 +6,7 @@ import { prisma } from "@/server/db";
 import { createPasswordResetToken, createSession, destroySession, hashPassword, login, resetPassword } from "@/server/auth";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema, fieldErrors } from "@/lib/validation";
 import { toUserMessage } from "@/server/errors";
+import { trialEnd } from "@/lib/subscription";
 import { t } from "@/lib/labels";
 import { rateLimit } from "@/server/rate-limit";
 import { sendEmail } from "@/server/email";
@@ -71,9 +72,19 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
         passwordHash: await hashPassword(password),
         phone: phone || null,
         role,
-        companyId: company?.id ?? null,
+        // `company: { connect }` rather than the `companyId` scalar. Prisma has
+        // two create shapes - all-scalars or all-relations - and the nested
+        // subscription below forces the relation form, which rejects a raw
+        // foreign key with "Unknown argument companyId".
+        company: company ? { connect: { id: company.id } } : undefined,
         // The registration form requires the checkbox, so this is always "now".
         termsAcceptedAt: new Date(),
+        // The free trial is created with the account, in the same statement.
+        // Granting it afterwards would leave a window in which a signup that
+        // half-failed produced a user with no access at all, and the person
+        // most likely to hit that window is the one who just gave us money's
+        // worth of attention.
+        subscription: { create: { trialEndsAt: trialEnd() } },
       },
     });
     await createSession(user.id);

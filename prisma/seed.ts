@@ -319,6 +319,16 @@ async function main() {
     },
   });
 
+  // The demo accounts are paid up, so signing in as them shows the product as
+  // a customer sees it. Without this every seeded login would land on the
+  // blurred map, which would look like a bug rather than the paywall.
+  const paidThrough = daysFromNow(365);
+  for (const u of [owner, owner2, advertiser]) {
+    await prisma.subscription.create({
+      data: { userId: u.id, paidThrough, note: "חשבון הדגמה" },
+    });
+  }
+
   const created: { id: string; title: string }[] = [];
   const all = [...BEER_SHEVA, ...REST_OF_ISRAEL];
   for (const [i, s] of all.entries()) {
