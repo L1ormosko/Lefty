@@ -4,7 +4,7 @@ import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState } from "@/components/ui";
-import { InquiryRow } from "@/components/lists";
+import { InquiryRow, RowList } from "@/components/lists";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
@@ -36,11 +36,11 @@ export default async function AdminInquiries({
         <EmptyState title={t("dash.noRequests")} />
       ) : (
         <>
-          <div className="space-y-3">
+          <RowList>
             {inquiries.map((inquiry) => (
               <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="owner" />
             ))}
-          </div>
+          </RowList>
           <Pager page={page} total={total} basePath="/admin/inquiries" />
         </>
       )}

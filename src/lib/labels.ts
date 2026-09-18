@@ -152,6 +152,9 @@ const he: Dict = {
   "map.backToBeerSheva": "חזרה לבאר שבע",
   "map.inventoryNote": "מוצגים רק שטחים שקיימים במאגר VELTO.",
   "map.list": "רשימה",
+  // The accessible name of the card's own surface, which selects the matching
+  // pin. The title inside it is a separate link to the listing.
+  "map.showOnMap": "הצגה במפה",
   "map.tilesUnavailable": "רקע המפה אינו נטען כרגע. הסימונים והחיפוש פעילים.",
   "map.activeFilters": "סינון פעיל",
   "map.removeFilter": "הסרת המסנן",
@@ -228,6 +231,7 @@ const he: Dict = {
   "asset.requestBooking": "בקשת הזמנה",
   "asset.noImages": "אין תמונה",
   "asset.noImagesLong": "בעל השטח טרם העלה תמונות.",
+  "asset.morePhotos": "תמונות נוספות",
   "asset.backToMap": "חזרה למפה",
 
   "verify.PENDING": "ממתין לאימות",

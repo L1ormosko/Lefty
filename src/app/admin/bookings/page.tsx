@@ -4,7 +4,7 @@ import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState } from "@/components/ui";
-import { BookingRow } from "@/components/lists";
+import { BookingRow, RowList } from "@/components/lists";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
@@ -35,11 +35,11 @@ export default async function AdminBookings({
         <EmptyState title={t("dash.noBookings")} />
       ) : (
         <>
-          <div className="space-y-3">
+          <RowList>
             {bookings.map((booking) => (
               <BookingRow key={booking.id} booking={booking} />
             ))}
-          </div>
+          </RowList>
           <Pager page={page} total={total} basePath="/admin/bookings" />
         </>
       )}

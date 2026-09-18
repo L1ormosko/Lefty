@@ -204,12 +204,14 @@ export default async function LandingPage() {
                 {t("landing.trustTitle")}
               </h2>
               <p className="mt-4 text-ink-600 leading-relaxed">{t("landing.trustIntro")}</p>
+              {/* The legend for the whole vocabulary, so every badge is loud:
+                  this section exists to show what the markers look like. */}
               <div className="mt-6 flex flex-wrap gap-2">
-                <VerificationBadge status="VERIFIED" />
-                <VerificationBadge status="PENDING" />
-                <AvailabilityBadge state="AVAILABLE" />
-                <AvailabilityBadge state="PARTIAL" />
-                <AvailabilityBadge state="OCCUPIED" />
+                <VerificationBadge status="VERIFIED" tone="loud" />
+                <VerificationBadge status="PENDING" tone="loud" />
+                <AvailabilityBadge state="AVAILABLE" tone="loud" />
+                <AvailabilityBadge state="PARTIAL" tone="loud" />
+                <AvailabilityBadge state="OCCUPIED" tone="loud" />
               </div>
             </div>
             <Card className="p-6">

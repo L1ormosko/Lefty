@@ -91,7 +91,11 @@ export function FilterPanel({
                   checked={filters.availability.includes(state)}
                   onChange={() => onChange({ availability: toggle(filters.availability, state) })}
                 />
-                <AvailabilityBadge state={state} size="sm" />
+                {/* Loud here whatever the state: these are the options in a
+                    list of choices, not a report on one listing, and a row
+                    that rendered quieter than its neighbours would read as
+                    disabled rather than as ordinary. */}
+                <AvailabilityBadge state={state} size="sm" tone="loud" />
               </label>
             ))}
           </div>

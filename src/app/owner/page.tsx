@@ -10,7 +10,7 @@ import { DashboardShell, Section } from "@/components/DashboardShell";
 import { Card, EmptyState, LinkButton, Num, StatTile } from "@/components/ui";
 import { TaskQueue } from "@/components/home/TaskQueue";
 import { FirstSteps } from "@/components/home/FirstSteps";
-import { InquiryRow } from "@/components/lists";
+import { InquiryRow, RowList } from "@/components/lists";
 import { formatDate, todayUtc } from "@/lib/dates";
 import { expiringForOwner } from "@/server/expiring";
 
@@ -175,11 +175,11 @@ export default async function OwnerOverview() {
           {recent.length === 0 ? (
             <EmptyState title={t("dash.noRequests")} />
           ) : (
-            <div className="space-y-3">
+            <RowList>
               {recent.map((inquiry) => (
                 <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="owner" />
               ))}
-            </div>
+            </RowList>
           )}
         </Section>
       )}

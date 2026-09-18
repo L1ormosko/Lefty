@@ -13,6 +13,7 @@ import { FilterChips, chipText } from "./FilterChips";
 import { clampFraction, nextSheet, snapTo, type Sheet } from "./sheet";
 import type { Access } from "@/lib/subscription";
 import { AccessNotice } from "@/components/access/AccessNotice";
+import { DemoNotice } from "@/components/badges";
 import {
   EMPTY_FILTERS,
   describeFilters,
@@ -320,23 +321,27 @@ export function Discover({ initialAssets, cities, access }: Props) {
   }, [viewportHeight]);
 
   const resultsList = (surface: "desktop" | "mobile") => (
-    <div data-results={surface} className="space-y-2 p-3">
+    <div data-results={surface} className="p-3">
       <AccessNotice access={access} className="mb-2" />
 
       {/* The map is bounded by the viewport and by a limit, so it can be
           showing part of an answer. A list that quietly stops is how someone
-          concludes a city has four billboards when it has twenty. */}
+          concludes a city has four billboards when it has twenty.
+
+          A line rather than a tinted panel: it is a caveat about the count
+          directly above it, and it used to be the loudest object in a column
+          whose job is to show listings. */}
       {truncated && total != null && (
-        <p
-          data-truncated
-          className="mb-2 rounded-md border border-warn-200 bg-warn-50 px-3 py-2 text-sm text-warn-800"
-        >
+        <p data-truncated className="mb-2 text-xs text-warn-800">
           {t("map.truncated", {
             shown: `\u2068${assets.length}\u2069`,
             total: `\u2068${total}\u2069`,
           })}
         </p>
       )}
+
+      {/* Said once for the list instead of on every card that is seeded. */}
+      <DemoNotice count={assets.filter((a) => a.isDemo).length} className="mb-2" />
 
       <FilterChips chips={chips} onClear={clearFilter} onClearAll={reset} className="pb-1" />
 
@@ -364,7 +369,12 @@ export function Discover({ initialAssets, cities, access }: Props) {
           <EmptyState title={t("map.noResults")} hint={t("map.noResultsHint")} />
         )
       ) : (
-        assets.map((a) => (
+        // A divided list, not a deck of cards. Sixteen separately bordered and
+        // shadowed rectangles is the single heaviest thing in the product; a
+        // hairline between rows separates them just as well and leaves the
+        // photographs as the only objects on the column.
+        <div className="divide-y divide-ink-100">
+        {assets.map((a) => (
           <div
             key={a.id}
             data-asset={a.id}
@@ -391,7 +401,8 @@ export function Discover({ initialAssets, cities, access }: Props) {
               onSelect={selectAsset}
             />
           </div>
-        ))
+        ))}
+        </div>
       )}
     </div>
   );
@@ -477,13 +488,26 @@ export function Discover({ initialAssets, cities, access }: Props) {
             </div>
           )}
 
-          {/* Mobile: floating search + filter button, then a compact context row */}
-          {/* The trailing padding is a lane for the map's own controls: the
-              geolocate button sits in the top-left corner, which in an RTL
-              layout is exactly where a full-width row ends - the filter button
-              and its count badge were sitting underneath it. */}
-          <div className="lg:hidden absolute top-3 inset-x-3 pe-11 flex flex-col gap-2">
-            <div className="flex gap-2">
+          {/*
+            Mobile chrome: one floating row, not four floating things.
+
+            This corner used to carry a search row, then a second row with a
+            "whole of Israel" button and a loading pill, on top of a map that
+            also has its own controls and a sheet over the bottom third. Four
+            separate objects lying on the thing the user came to look at.
+
+            What is left is the row you cannot work without - search and
+            filters. The zoom-out button moved down beside the map's own
+            controls, where it reads as a map control rather than as a second
+            toolbar, and the loading state moved into the sheet, which is the
+            thing whose contents are actually loading.
+
+            The trailing padding is a lane for the map's own controls: the
+            geolocate button sits in the top-left corner, which in an RTL
+            layout is exactly where a full-width row ends - the filter button
+            and its count badge were sitting underneath it.
+          */}
+          <div className="lg:hidden absolute top-3 inset-x-3 pe-11 flex gap-2">
             <input
               aria-label={t("map.searchPlaceholder")}
               className={cx(inputClass, "min-w-0 flex-1 shadow-card bg-white/95 backdrop-blur")}
@@ -507,27 +531,22 @@ export function Discover({ initialAssets, cities, access }: Props) {
                 </span>
               )}
             </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="shadow-card"
-                onClick={() => {
-                  bounds.current = null;
-                  setSelectedId(null);
-                  window.dispatchEvent(new CustomEvent("velto:fly", { detail: ISRAEL_VIEW }));
-                }}
-              >
-                {t("map.viewAllIsrael")}
-              </Button>
-              {loading && (
-                <span className="text-xs text-ink-600 bg-white/95 rounded px-2 py-1 shadow-card">
-                  {t("common.loading")}
-                </span>
-              )}
-            </div>
           </div>
+
+          {/* Sits just above the collapsed sheet, in the map's own control
+              lane. bottom-28 clears the 92px sheet with a little room. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="lg:hidden absolute bottom-28 start-3 shadow-card"
+            onClick={() => {
+              bounds.current = null;
+              setSelectedId(null);
+              window.dispatchEvent(new CustomEvent("velto:fly", { detail: ISRAEL_VIEW }));
+            }}
+          >
+            {t("map.viewAllIsrael")}
+          </Button>
         </div>
 
         {/* Desktop results column */}
@@ -547,6 +566,18 @@ export function Discover({ initialAssets, cities, access }: Props) {
           )}
           style={dragHeight == null ? undefined : { height: `${dragHeight}px` }}
         >
+          {/* The loading state, where the thing being loaded is. A two-pixel
+              rule along the top edge of the sheet replaces a floating pill
+              that said "טוען…" over the map. */}
+          <div
+            aria-hidden="true"
+            className={cx(
+              // Inset from the corners so a 2px bar does not have to follow a
+              // 16px radius.
+              "absolute inset-x-6 top-0 h-0.5 bg-brand-500 transition-opacity",
+              loading ? "opacity-100 animate-pulse" : "opacity-0"
+            )}
+          />
           <button
             type="button"
             className="pt-2 pb-1 flex flex-col items-center gap-1 shrink-0 touch-none"

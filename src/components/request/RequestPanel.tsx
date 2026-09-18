@@ -37,7 +37,7 @@ export function RequestPanel({
 
   if (state?.ok) {
     return (
-      <Card className="p-5">
+      <Card elevated className="p-5">
         <Alert kind="success">{state.message}</Alert>
         <p className="mt-3 text-sm text-ink-600">{t("request.submittedHint")}</p>
         <Link href="/dashboard/requests" className="mt-3 inline-block text-sm text-brand-600 hover:underline">
@@ -48,10 +48,13 @@ export function RequestPanel({
   }
 
   return (
-    <Card className="p-5">
+    <Card elevated className="p-5">
       <h2 className="font-semibold text-ink-900">{t("request.title")}</h2>
+      {/* Loud here whatever the state. Everywhere else availability is one
+          fact among many and stays quiet; in the panel where the dates are
+          chosen it is the decision. */}
       <div className="mt-2 flex items-center gap-2 flex-wrap">
-        <AvailabilityBadge state={availability} size="sm" />
+        <AvailabilityBadge state={availability} size="sm" tone="loud" />
       </div>
       <p className="mt-2 text-lg font-semibold text-ink-900">
         {priceLine ? <Num>{priceLine}</Num> : <span className="text-base font-normal text-ink-600">{t("asset.priceNotPublished")}</span>}

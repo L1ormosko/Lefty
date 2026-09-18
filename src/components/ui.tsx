@@ -83,26 +83,121 @@ export function LinkButton({
   );
 }
 
+/**
+ * A panel of content.
+ *
+ * Flat by default, and that is the whole point. Every card used to carry
+ * `shadow-card`, which meant a listing page was eight shadowed rectangles
+ * stacked on one another and a results list was sixteen. When everything is
+ * raised, nothing is: the eye gets no ranking and the screen reads as busy
+ * however little is actually on it.
+ *
+ * So elevation is now a claim about depth rather than decoration, and it is
+ * spent only on things that genuinely float above other content - the request
+ * panel pinned beside the listing, the controls lying on top of the map, the
+ * bottom sheet. Everything else is a bordered surface on the page.
+ */
 export function Card({
   className,
   interactive,
+  elevated,
   children,
 }: {
   className?: string;
   /** Adds hover lift. Only for a card that is itself a link or a target. */
   interactive?: boolean;
+  /** Genuinely floats above other content. Rare - see the note above. */
+  elevated?: boolean;
   children: ReactNode;
 }) {
   return (
     <div
       className={cx(
-        "bg-white rounded-lg border border-ink-200 shadow-card",
+        "bg-white rounded-lg border border-ink-200",
+        elevated && "shadow-card",
         interactive && "transition-shadow transition-colors hover:shadow-raised hover:border-ink-300",
         className
       )}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * A section of a long page: a heading and its content, with a hairline rule
+ * above it instead of a box around it.
+ *
+ * This is what replaced the stack of cards on the listing page. Separation by
+ * a rule reads as "the next thing" without adding a border, a radius and a
+ * shadow to say it - which is how a page of eight sections ends up looking
+ * like a page of eight competing objects.
+ *
+ * Not to be confused with `Section` in DashboardShell, which is the heading
+ * for a block inside a dashboard and deliberately carries no rule - the rows
+ * underneath it bring their own frame.
+ */
+export function PageSection({
+  title,
+  children,
+  className,
+}: {
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cx("border-t border-ink-200 pt-6", className)}>
+      <h2 className="font-semibold text-ink-900 mb-3">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * A section whose content is collapsed until asked for.
+ *
+ * The full specification table, the commercial breakdown and the owner's
+ * contact details are all things an advertiser wants *eventually* - they are
+ * not what they are looking at the page to decide. Native <details> so it
+ * works without JavaScript, is keyboard-operable for free, and is found by the
+ * browser's own in-page search when closed in every current engine.
+ *
+ * `open` for the cases where the content is short enough that hiding it buys
+ * nothing.
+ */
+export function Collapsible({
+  title,
+  summary,
+  open,
+  children,
+}: {
+  title: string;
+  /** A one-line preview of what is inside, shown on the closed row. */
+  summary?: ReactNode;
+  open?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details open={open} className="group border-t border-ink-200">
+      <summary className="flex items-center gap-3 py-4 cursor-pointer list-none min-h-11 [&::-webkit-details-marker]:hidden">
+        <span className="font-semibold text-ink-900">{title}</span>
+        {summary && <span className="text-sm text-ink-500 truncate min-w-0">{summary}</span>}
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="ms-auto size-4 shrink-0 text-ink-400 transition-transform group-open:rotate-180"
+          aria-hidden="true"
+        >
+          <path d="m5 7.5 5 5 5-5" />
+        </svg>
+      </summary>
+      <div className="pb-6">{children}</div>
+    </details>
   );
 }
 
@@ -226,12 +321,12 @@ export function StatTile({ label, value, href }: { label: string; value: number 
   return href ? (
     <Link
       href={href}
-      className="block bg-white rounded-lg border border-ink-200 p-4 shadow-card transition-shadow transition-colors hover:border-brand-300 hover:shadow-raised"
+      className="block bg-white rounded-lg border border-ink-200 p-4 transition-shadow transition-colors hover:border-brand-300 hover:shadow-raised"
     >
       {body}
     </Link>
   ) : (
-    <div className="bg-white rounded-lg border border-ink-200 p-4 shadow-card">{body}</div>
+    <div className="bg-white rounded-lg border border-ink-200 p-4">{body}</div>
   );
 }
 

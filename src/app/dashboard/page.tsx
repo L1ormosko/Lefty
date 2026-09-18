@@ -7,7 +7,7 @@ import { DashboardShell, Section } from "@/components/DashboardShell";
 import { Card, EmptyState, LinkButton, StatTile } from "@/components/ui";
 import { TaskQueue } from "@/components/home/TaskQueue";
 import { FirstSteps } from "@/components/home/FirstSteps";
-import { InquiryRow } from "@/components/lists";
+import { InquiryRow, RowList } from "@/components/lists";
 import { addDays, todayUtc } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -168,11 +168,11 @@ export default async function AdvertiserOverview() {
               action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>}
             />
           ) : (
-            <div className="space-y-3">
+            <RowList>
               {recent.map((inquiry) => (
                 <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="advertiser" />
               ))}
-            </div>
+            </RowList>
           )}
         </Section>
       )}

@@ -4,7 +4,7 @@ import { t } from "@/lib/labels";
 import { ownerNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState, LinkButton } from "@/components/ui";
-import { InquiryRow } from "@/components/lists";
+import { InquiryRow, RowList } from "@/components/lists";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 
@@ -62,7 +62,7 @@ export default async function OwnerInquiries({
         />
       ) : (
         <>
-          <div className="space-y-3">
+          <RowList>
             {inquiries.map((inquiry) => (
               <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="owner">
                 <LinkButton href={`/owner/inquiries/${inquiry.id}`} variant="secondary" size="sm">
@@ -70,7 +70,7 @@ export default async function OwnerInquiries({
                 </LinkButton>
               </InquiryRow>
             ))}
-          </div>
+          </RowList>
           <Pager page={page} total={total} basePath="/owner/inquiries" />
         </>
       )}

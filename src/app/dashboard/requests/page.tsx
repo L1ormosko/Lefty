@@ -4,7 +4,7 @@ import { t } from "@/lib/labels";
 import { advertiserNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState, LinkButton } from "@/components/ui";
-import { InquiryRow } from "@/components/lists";
+import { InquiryRow, RowList } from "@/components/lists";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +53,7 @@ export default async function MyRequests({
         />
       ) : (
         <>
-          <div className="space-y-3">
+          <RowList>
             {inquiries.map((inquiry) => (
               <InquiryRow key={inquiry.id} inquiry={inquiry} perspective="advertiser">
                 <LinkButton href={`/dashboard/requests/${inquiry.id}`} variant="secondary" size="sm">
@@ -61,7 +61,7 @@ export default async function MyRequests({
                 </LinkButton>
               </InquiryRow>
             ))}
-          </div>
+          </RowList>
           <Pager page={page} total={total} basePath="/dashboard/requests" />
         </>
       )}

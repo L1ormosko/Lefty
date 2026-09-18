@@ -7,8 +7,8 @@ import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { priceLine } from "@/lib/price";
 import { formatDate, formatRange, todayUtc } from "@/lib/dates";
-import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
-import { Card, ImagePlaceholder, Num, Price, buttonClass } from "@/components/ui";
+import { AvailabilityBadge, VerificationBadge } from "@/components/badges";
+import { Card, Collapsible, ImagePlaceholder, Num, PageSection, Price, buttonClass } from "@/components/ui";
 import { AssetMiniMap } from "@/components/map/AssetMiniMap";
 import { RequestPanel } from "@/components/request/RequestPanel";
 import { SaveAssetButton } from "@/components/SaveAssetButton";
@@ -37,11 +37,19 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
+/**
+ * One line of the specification.
+ *
+ * No rule under each row. Twenty specification lines with twenty hairlines is
+ * a table of contents for nothing - the label column already separates them,
+ * and the rules were the single densest thing on the page. The grid keeps the
+ * values aligned, which is what the rules were really doing.
+ */
 function Spec({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="py-2 flex items-baseline gap-3 border-b border-ink-100 last:border-0">
-      <dt className="text-sm text-ink-500 w-36 shrink-0">{label}</dt>
-      <dd className="text-sm text-ink-900">{value}</dd>
+    <div className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-0.5 py-1.5">
+      <dt className="text-sm text-ink-500">{label}</dt>
+      <dd className="text-sm text-ink-900 min-w-0">{value}</dd>
     </div>
   );
 }
@@ -125,97 +133,162 @@ export default async function AssetPage({ params }: Params) {
         </Link>
       </nav>
 
-      <div className="grid lg:grid-cols-[1fr_380px] gap-6 items-start">
-        <div className="space-y-6 min-w-0">
+      <div className="grid lg:grid-cols-[1fr_380px] gap-6 lg:gap-10 items-start">
+        {/*
+          A flat column, not a stack of cards.
+
+          This page used to be eight bordered, shadowed panels one under the
+          other, each claiming the same visual rank. An advertiser opening a
+          listing wants five things - what it looks like, what it is called,
+          where it is, what it costs, and whether they can have the dates -
+          and all five were competing with the illumination type and the
+          permit status for attention.
+
+          So: the five stay above the fold and unboxed, the rest moves behind
+          a disclosure, and the only object on the page that is allowed to
+          look like a floating panel is the request form, because that is the
+          thing the page is for.
+        */}
+        <div className="min-w-0">
           {/* Hero */}
-          <Card className="overflow-hidden">
+          <div className="overflow-hidden rounded-lg border border-ink-200">
             {primary ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={primary.url} alt={asset.title} className="aspect-[16/9] w-full object-cover" />
             ) : (
               <ImagePlaceholder label={t("asset.noImagesLong")} className="aspect-[16/9] w-full" />
             )}
-            <div className="p-5">
-              <div className="flex flex-wrap items-start gap-3">
-                <h1 className="text-xl sm:text-2xl font-semibold text-ink-900 flex-1 min-w-0">{asset.title}</h1>
-                <SaveAssetButton assetId={asset.id} initiallySaved={saved} signedIn={!!user} />
-              </div>
-              <p className="mt-1 text-sm text-ink-600">
-                {asset.city} · {asset.address}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {/* An unverified asset reports its availability as
-                    PENDING_VERIFICATION, which renders the identical words the
-                    verification badge beside it already says. Two adjacent
-                    badges reading "ממתין לאימות" looked like a rendering bug.
-                    The verification badge is the one that means it. */}
-                {availability !== "PENDING_VERIFICATION" && <AvailabilityBadge state={availability} />}
-                <VerificationBadge status={asset.verificationStatus} />
-                {asset.isDemo && <DemoBadge />}
-              </div>
-              {asset.verificationStatus === "PENDING" && (
-                <p className="mt-3 text-sm text-ink-600 bg-ink-50 border border-ink-200 rounded p-3">
-                  {t("verify.PENDING.help")}
-                </p>
-              )}
-              {/* A verification badge that names nobody and no date asks to be
-                  taken on faith. verifiedAt is already stored - saying when
-                  turns the badge into a checkable claim. */}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-start gap-3">
+            <h1 className="text-xl sm:text-2xl font-semibold text-ink-900 flex-1 min-w-0">{asset.title}</h1>
+            <SaveAssetButton assetId={asset.id} initiallySaved={saved} signedIn={!!user} />
+          </div>
+
+          {/*
+            Address, verification and availability on one line.
+
+            These were a paragraph and then a row of three bordered pills. Two
+            of the three were the ordinary case on every listing in the
+            product, and the third repeated the second: an unverified asset
+            reports its availability as PENDING_VERIFICATION, so the page
+            showed the words "ממתין לאימות" twice side by side, which read as
+            a rendering fault. The verification mark is the one that means it.
+          */}
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-600">
+            <span>
+              {asset.city} · {asset.address}
+            </span>
+            <span aria-hidden="true" className="text-ink-300">
+              ·
+            </span>
+            <VerificationBadge status={asset.verificationStatus} />
+            {availability !== "PENDING_VERIFICATION" && (
+              <>
+                <span aria-hidden="true" className="text-ink-300">
+                  ·
+                </span>
+                <AvailabilityBadge state={availability} />
+              </>
+            )}
+          </p>
+
+          {/*
+            The three caveats, as lines rather than as boxes.
+
+            Each of these used to be a tinted, bordered block, so a listing
+            that was both unverified and seeded opened with two coloured
+            warning panels above its own description. They are footnotes about
+            provenance, and they now read like footnotes - same words, same
+            order, no furniture.
+          */}
+          {(asset.verificationStatus === "PENDING" ||
+            (asset.verificationStatus === "VERIFIED" && asset.verifiedAt) ||
+            asset.isDemo) && (
+            <div className="mt-2 space-y-0.5 text-xs text-ink-500">
+              {asset.verificationStatus === "PENDING" && <p>{t("verify.PENDING.help")}</p>}
+              {/* A verification mark that names no date asks to be taken on
+                  faith. verifiedAt is already stored - saying when turns it
+                  into a checkable claim. */}
               {asset.verificationStatus === "VERIFIED" && asset.verifiedAt && (
-                <p className="mt-3 text-xs text-ink-500">
+                <p>
                   {t("verify.VERIFIED.when")} <Num>{formatDate(asset.verifiedAt)}</Num>
                 </p>
               )}
-              {asset.isDemo && (
-                <p className="mt-3 text-sm text-ink-600 bg-warn-50 border border-warn-200 rounded p-3">
-                  {t("common.demoDataNote")}
-                </p>
-              )}
-              {asset.description && (
-                <p className="mt-4 text-sm text-ink-800 leading-relaxed whitespace-pre-line">
-                  {asset.description}
-                </p>
-              )}
+              {asset.isDemo && <p>{t("common.demoDataNote")}</p>}
             </div>
-          </Card>
+          )}
 
+          {asset.description && (
+            <p className="mt-4 text-sm text-ink-800 leading-relaxed whitespace-pre-line">
+              {asset.description}
+            </p>
+          )}
+
+          {/* A thumbnail strip rather than a grid of squares: the extra
+              photographs are supporting evidence for the one above, not a
+              gallery in their own right. */}
           {asset.images.length > 1 && (
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {asset.images.slice(1).map((img) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={img.id}
-                  src={img.url}
-                  alt=""
-                  loading="lazy"
-                  className="aspect-square object-cover rounded border border-ink-200"
-                />
-              ))}
+            <div className="mt-4">
+              <h2 className="sr-only">{t("asset.morePhotos")}</h2>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {asset.images.slice(1).map((img) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={img.id}
+                    src={img.url}
+                    alt=""
+                    loading="lazy"
+                    className="h-20 w-28 shrink-0 object-cover rounded border border-ink-200"
+                  />
+                ))}
+              </div>
             </div>
           )}
 
-          {/* The creative preview, only where someone has marked a face to put
-              it on. No marked quad means no honest place for the artwork, and
-              a guessed rectangle would show an ad that does not fit the sign. */}
-          {mockupPhotos.length > 0 && (
-            <CreativeMockup
-              photos={mockupPhotos}
-              faceRatio={faceRatio(asset)}
-              widthCm={asset.widthCm}
-              heightCm={asset.heightCm}
-            />
-          )}
+          <div className="mt-8 space-y-6">
+            {/* The creative preview, only where someone has marked a face to put
+                it on. No marked quad means no honest place for the artwork, and
+                a guessed rectangle would show an ad that does not fit the sign. */}
+            {mockupPhotos.length > 0 && (
+              <CreativeMockup
+                photos={mockupPhotos}
+                faceRatio={faceRatio(asset)}
+                widthCm={asset.widthCm}
+                heightCm={asset.heightCm}
+              />
+            )}
 
-          {/* Google's own imagery of the address, untouched and in its own
-              panel. Their terms forbid altering Street View images - an ad
-              painted onto one would be exactly that - so the preview above
-              stays on the site's real photograph and this answers "what is
-              actually there" separately. */}
-          <StreetViewPanel latitude={asset.latitude} longitude={asset.longitude} />
+            {/* Google's own imagery of the address, untouched and in its own
+                panel. Their terms forbid altering Street View images - an ad
+                painted onto one would be exactly that - so the preview above
+                stays on the site's real photograph and this answers "what is
+                actually there" separately. */}
+            <StreetViewPanel latitude={asset.latitude} longitude={asset.longitude} />
+          </div>
+
+          {/* Availability windows: the one remaining question the hero does not
+              answer, so it stays open rather than folding away. */}
+          <PageSection title={t("asset.availabilityPeriods")} className="mt-8">
+            {futurePeriods.length === 0 ? (
+              <p className="text-sm text-ink-500">{t("asset.noPeriods")}</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {futurePeriods.map((p) => (
+                  <li key={p.id} className="text-sm text-ink-800 flex items-center gap-2">
+                    <span className="text-ok-500" aria-hidden="true">
+                      ●
+                    </span>
+                    <Num>{formatRange(p.startDate, p.endDate)}</Num>
+                    {p.note && <span className="text-ink-500">— {p.note}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </PageSection>
 
           {/* Location */}
-          <Card className="p-5">
-            <h2 className="font-semibold text-ink-900 mb-3">{t("asset.location")}</h2>
+          <PageSection title={t("asset.location")} className="mt-6">
             <p className="text-sm text-ink-700">
               {asset.address}, {asset.city}
               {asset.region ? ` · ${asset.region}` : ""}
@@ -227,11 +300,18 @@ export default async function AssetPage({ params }: Params) {
                 availability={availability}
               />
             </div>
-          </Card>
+          </PageSection>
 
-          {/* Specifications */}
-          <Card className="p-5">
-            <h2 className="font-semibold text-ink-900 mb-2">{t("asset.specs")}</h2>
+          {/* Specifications - folded, with the two facts most people open it
+              for shown on the closed row. */}
+          <Collapsible
+            title={t("asset.specs")}
+            summary={
+              asset.widthCm && asset.heightCm
+                ? `${t(`type.${asset.assetType}`)} · ${asset.widthCm}×${asset.heightCm} ס״מ`
+                : t(`type.${asset.assetType}`)
+            }
+          >
             <dl>
               <Spec label={t("asset.type")} value={t(`type.${asset.assetType}`)} />
               <Spec
@@ -280,11 +360,14 @@ export default async function AssetPage({ params }: Params) {
                 }
               />
             </dl>
-          </Card>
+          </Collapsible>
 
-          {/* Commercial */}
-          <Card className="p-5">
-            <h2 className="font-semibold text-ink-900 mb-2">{t("asset.commercial")}</h2>
+          {/* Commercial. The headline price is already at the top of the
+              request panel, so what is folded here is the breakdown. */}
+          <Collapsible
+            title={t("asset.commercial")}
+            summary={headlinePrice.amount != null ? headlinePrice.text : t("asset.priceNotPublished")}
+          >
             <dl>
               <Spec
                 label={t("asset.priceWeekly")}
@@ -330,31 +413,10 @@ export default async function AssetPage({ params }: Params) {
             {headlinePrice.amount != null && (
               <p className="mt-3 text-xs text-ink-500">{t("asset.priceEstimateNote")}</p>
             )}
-          </Card>
-
-          {/* Availability windows */}
-          <Card className="p-5">
-            <h2 className="font-semibold text-ink-900 mb-3">{t("asset.availabilityPeriods")}</h2>
-            {futurePeriods.length === 0 ? (
-              <p className="text-sm text-ink-500">{t("asset.noPeriods")}</p>
-            ) : (
-              <ul className="space-y-2">
-                {futurePeriods.map((p) => (
-                  <li key={p.id} className="text-sm text-ink-800 flex items-center gap-2">
-                    <span className="text-ok-500" aria-hidden="true">
-                      ●
-                    </span>
-                    <Num>{formatRange(p.startDate, p.endDate)}</Num>
-                    {p.note && <span className="text-ink-500">— {p.note}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+          </Collapsible>
 
           {/* Owner - company-level contact only, never a personal phone/email */}
-          <Card className="p-5">
-            <h2 className="font-semibold text-ink-900 mb-2">{t("asset.owner")}</h2>
+          <Collapsible title={t("asset.owner")} summary={asset.company?.name ?? t("common.notProvided")}>
             <p className="text-sm text-ink-800">{asset.company?.name ?? t("common.notProvided")}</p>
             <div className="mt-1 space-y-1">
               {asset.company?.contactEmail && (
@@ -385,7 +447,10 @@ export default async function AssetPage({ params }: Params) {
                 </a>
               )}
             </div>
-          </Card>
+          </Collapsible>
+          {/* Closes the last disclosure, so the column ends on a rule rather
+              than on an open edge. */}
+          <div className="border-t border-ink-200" />
         </div>
 
         {/* Request panel */}

@@ -4,7 +4,7 @@ import { t } from "@/lib/labels";
 import { ownerNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState } from "@/components/ui";
-import { BookingRow } from "@/components/lists";
+import { BookingRow, RowList } from "@/components/lists";
 import { BookingDecision } from "@/components/BookingDecision";
 import { CancelBookingButton } from "@/components/CancelBookingButton";
 import { isLiveBooking } from "@/lib/bookings";
@@ -43,7 +43,7 @@ export default async function OwnerBookings({
         <EmptyState title={t("dash.noBookings")} />
       ) : (
         <>
-          <div className="space-y-3">
+          <RowList>
             {bookings.map((booking) => (
               <BookingRow key={booking.id} booking={booking} perspective="owner">
                 {booking.status === "REQUESTED" && <BookingDecision bookingId={booking.id} />}
@@ -53,7 +53,7 @@ export default async function OwnerBookings({
                 {isLiveBooking(booking) && <CancelBookingButton bookingId={booking.id} />}
               </BookingRow>
             ))}
-          </div>
+          </RowList>
           <Pager page={page} total={total} basePath="/owner/bookings" />
         </>
       )}

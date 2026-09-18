@@ -1,10 +1,33 @@
 /** Shared row renderers for the dashboards. */
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { t } from "@/lib/labels";
 import { formatRange, formatDate } from "@/lib/dates";
 import { effectiveBookingStatus } from "@/lib/bookings";
-import { Card, Num, Price } from "./ui";
+import { Num, Price, cx } from "./ui";
 import { StatusPill, bookingTone } from "./badges";
+
+/**
+ * The container for a page of rows.
+ *
+ * Each row used to be its own bordered, shadowed card with a gap between it
+ * and the next, so a page of twenty-five requests was twenty-five separate
+ * objects - which is how a list that is really one thing ends up looking like
+ * a scattered pile. One frame with hairlines inside it says the same thing
+ * about grouping and draws a twenty-fifth as many lines.
+ */
+export function RowList({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cx(
+        "bg-white rounded-lg border border-ink-200 divide-y divide-ink-100 overflow-hidden",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
 
 export function InquiryRow({
   inquiry,
@@ -38,7 +61,7 @@ export function InquiryRow({
   children?: React.ReactNode;
 }) {
   return (
-    <Card className="p-4">
+    <div className="p-4">
       <div className="flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1">
           <Link href={`/assets/${inquiry.asset.id}`} className="font-medium text-ink-900 hover:underline">
@@ -76,8 +99,13 @@ export function InquiryRow({
         </div>
       </dl>
 
+      {/* A quote, not a box inside a box. This card already has a border; a
+          second bordered, tinted panel nested inside it is the shape that
+          makes a dashboard of twenty-five rows read as clutter. The side rule
+          says "this is quoted material" just as clearly, and matches the two
+          other quoted blocks further down. */}
       {inquiry.message && (
-        <p className="mt-3 text-sm text-ink-700 bg-ink-50 border border-ink-200 rounded p-3 whitespace-pre-line">
+        <p className="mt-3 border-s-2 border-ink-200 ps-3 text-sm text-ink-700 whitespace-pre-line">
           {inquiry.message}
         </p>
       )}
@@ -134,7 +162,7 @@ export function InquiryRow({
       )}
 
       {children && <div className="mt-3 pt-3 border-t border-ink-100">{children}</div>}
-    </Card>
+    </div>
   );
 }
 
@@ -166,7 +194,7 @@ export function BookingRow({
   const status = effectiveBookingStatus(booking);
   const showOwnerContact = booking.status === "APPROVED" && booking.asset.company;
   return (
-    <Card className="p-4">
+    <div className="p-4">
       <div className="flex flex-wrap items-start gap-2">
         <Link href={`/assets/${booking.asset.id}`} className="font-medium text-ink-900 hover:underline flex-1 min-w-0">
           {booking.asset.title}
@@ -249,6 +277,6 @@ export function BookingRow({
       )}
 
       {children && <div className="mt-3 pt-3 border-t border-ink-100">{children}</div>}
-    </Card>
+    </div>
   );
 }

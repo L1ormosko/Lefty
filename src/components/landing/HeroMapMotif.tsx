@@ -102,8 +102,10 @@ export function HeroMapMotif() {
           <div className="h-2 w-24 rounded-full bg-ink-200" />
           <div className="mt-1.5 h-2 w-16 rounded-full bg-ink-100" />
           <div className="mt-2.5 flex flex-wrap gap-1">
-            <AvailabilityBadge state="AVAILABLE" size="sm" />
-            <VerificationBadge status="VERIFIED" size="sm" />
+            {/* Loud in the motif: the badges are the only real content in it,
+                standing in for a card whose text is grey bars. */}
+            <AvailabilityBadge state="AVAILABLE" size="sm" tone="loud" />
+            <VerificationBadge status="VERIFIED" size="sm" tone="loud" />
           </div>
         </Card>
 
@@ -112,7 +114,7 @@ export function HeroMapMotif() {
           <div className="h-2 w-20 rounded-full bg-ink-200" />
           <div className="mt-1.5 h-2 w-14 rounded-full bg-ink-100" />
           <div className="mt-2.5 flex flex-wrap gap-1">
-            <AvailabilityBadge state="PARTIAL" size="sm" />
+            <AvailabilityBadge state="PARTIAL" size="sm" tone="loud" />
           </div>
         </Card>
       </div>

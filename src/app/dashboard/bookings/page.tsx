@@ -4,7 +4,7 @@ import { t } from "@/lib/labels";
 import { advertiserNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState, LinkButton } from "@/components/ui";
-import { BookingRow } from "@/components/lists";
+import { BookingRow, RowList } from "@/components/lists";
 import { CancelBookingButton } from "@/components/CancelBookingButton";
 import { isLiveBooking } from "@/lib/bookings";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
@@ -44,7 +44,7 @@ export default async function MyBookings({
         <EmptyState title={t("dash.noBookings")} action={<LinkButton href="/explore">{t("nav.explore")}</LinkButton>} />
       ) : (
         <>
-          <div className="space-y-3">
+          <RowList>
             {bookings.map((booking) => (
               <BookingRow key={booking.id} booking={booking}>
                 {(booking.status === "REQUESTED" || isLiveBooking(booking)) && (
@@ -52,7 +52,7 @@ export default async function MyBookings({
                 )}
               </BookingRow>
             ))}
-          </div>
+          </RowList>
           <Pager page={page} total={total} basePath="/dashboard/bookings" />
         </>
       )}

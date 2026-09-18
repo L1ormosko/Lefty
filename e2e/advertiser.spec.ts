@@ -18,8 +18,13 @@ test("an advertiser can discover an asset and send a request", async ({ page }) 
   await expect(cards.first()).toBeVisible({ timeout: 20_000 });
 
   // Open an asset from the results and check the honesty signals are present.
+  //
+  // The card's own title is the link. It used to carry a second row with a
+  // "check availability and price" link, which repeated on every card and said
+  // what opening the listing does anyway; `data-open` is the stable hook for
+  // the title, whose text is the listing's name and so differs per row.
   const firstCard = cards.first();
-  await firstCard.getByRole("link", { name: /בדיקת זמינות/ }).click();
+  await firstCard.locator("[data-open]").click();
   await page.waitForURL(/\/assets\//);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.getByText(/מאומת|ממתין לאימות/).first()).toBeVisible();
@@ -82,7 +87,7 @@ test("an anonymous visitor opening a listing is offered the trial", async ({ pag
   await openResults(page);
   const card = page.locator("[data-results]:visible [data-asset]").first();
   await expect(card).toBeVisible({ timeout: 20_000 });
-  await card.getByRole("link", { name: /בדיקת זמינות/ }).click();
+  await card.locator("[data-open]").click();
   await page.waitForURL(/\/assets\//);
   await expect(page.getByRole("heading", { name: "הדף הזה נפתח עם חשבון" })).toBeVisible();
 });

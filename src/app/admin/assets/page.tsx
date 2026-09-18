@@ -139,7 +139,10 @@ export default async function AdminAssets({
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <StatusPill label={t(`status.${asset.status}`)} tone={asset.status === "ACTIVE" ? "ok" : "neutral"} />
-                  <VerificationBadge status={asset.verificationStatus} size="sm" />
+                  {/* This page IS the verification queue, so "pending" is the
+                      state the admin is here to act on - the one place it
+                      earns a box. */}
+                  <VerificationBadge status={asset.verificationStatus} size="sm" tone="loud" />
                   {asset.isDemo && <DemoBadge />}
                 </div>
               </div>
