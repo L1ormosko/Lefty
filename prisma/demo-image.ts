@@ -139,35 +139,75 @@ export function faceFor(
 }
 
 /**
- * Where the sign's face sits in a demo photo, as fractions of the image.
+ * The angles each demo listing is drawn from.
+ *
+ * Three views of the same schematic sign, which is what a media owner is asked
+ * to photograph: straight on, and from either side. They exist so the
+ * turntable preview is reachable from the first listing anybody opens - a
+ * feature only one listing can reach is a feature that did not ship, which is
+ * the mistake this seed made last time.
+ *
+ * Still drawings, still stamped "תמונת הדגמה" in the bitmap. Drawing the same
+ * schematic from another angle invents no inventory; it is the identical
+ * object, projected.
+ */
+export const DEMO_VIEW_ANGLES = [-28, 0, 28] as const;
+
+/** How far the camera stands from the sign, in the 0-100 drawing box. */
+const CAMERA_DISTANCE = 190;
+
+/**
+ * The sign's face, seen from `yawDeg` around it.
+ *
+ * The face is turned about its own vertical centre line and projected with a
+ * perspective divide, so the near edge is taller than the far one. That is the
+ * whole point: the quad it produces is genuinely projective, the artwork's
+ * transform is recomputed from it per angle, and the ad therefore appears
+ * fixed to the sign as the view moves. An affine "skew" would slide the ad
+ * across the face and read as a sticker.
  *
  * Clockwise from the top-left, which is the order lib/mockup.ts expects.
+ */
+function projectFace(
+  face: { x: number; y: number; w: number; h: number },
+  yawDeg: number
+): { x: number; y: number }[] {
+  const cx = face.x + face.w / 2;
+  const cy = face.y + face.h / 2;
+  const yaw = (yawDeg * Math.PI) / 180;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+
+  // u runs along the face, v up and down it; both from its centre.
+  const corner = (u: number, v: number) => {
+    const depth = u * sin;
+    const scale = CAMERA_DISTANCE / (CAMERA_DISTANCE + depth);
+    return { x: cx + u * cos * scale, y: cy + v * scale };
+  };
+
+  const hw = face.w / 2;
+  const hh = face.h / 2;
+  return [corner(-hw, -hh), corner(hw, -hh), corner(hw, hh), corner(-hw, hh)];
+}
+
+/**
+ * Where the sign's face sits in a demo photo, as fractions of the image.
  *
- * These are true rectangles, because the schematic is drawn face-on. The
- * transform is therefore affine here, and that is the honest result: giving a
- * flat drawing a fake angle would be inventing perspective that is not in the
- * picture. A real photograph gets a real quad, marked by an admin.
+ * Computed from the same face and the same angle the picture is drawn with, so
+ * the mark cannot drift off the sign in the drawing. A real photograph gets a
+ * real quad, marked by an admin looking at it.
  */
 export function demoSurfaceQuad(
   assetType: AssetType,
-  dimensions?: { widthCm?: number | null; heightCm?: number | null }
+  dimensions?: { widthCm?: number | null; heightCm?: number | null },
+  yawDeg = 0
 ) {
   const face = faceFor(assetType, dimensions);
   const px = (v: number) => (SHAPE_TX + v * SHAPE_SCALE) / WIDTH;
   const py = (v: number) => (SHAPE_TY + v * SHAPE_SCALE) / HEIGHT;
   const round = (n: number) => Number(n.toFixed(4));
 
-  const left = round(px(face.x));
-  const right = round(px(face.x + face.w));
-  const top = round(py(face.y));
-  const bottom = round(py(face.y + face.h));
-
-  return [
-    { x: left, y: top },
-    { x: right, y: top },
-    { x: right, y: bottom },
-    { x: left, y: bottom },
-  ];
+  return projectFace(face, yawDeg).map((p) => ({ x: round(px(p.x)), y: round(py(p.y)) }));
 }
 
 function escapeXml(value: string): string {
@@ -185,12 +225,24 @@ export async function demoImage(params: {
   /** The listing's real size, so the drawn sign is the shape being sold. */
   widthCm?: number | null;
   heightCm?: number | null;
+  /** Which of DEMO_VIEW_ANGLES this picture is drawn from. */
+  yawDeg?: number;
 }): Promise<Buffer> {
   const face = faceFor(params.assetType, params);
-  const rounding = params.assetType === "TOTEM" ? 4 : 1.5;
+  const corners = projectFace(face, params.yawDeg ?? 0);
+  // The structure - post, legs, roof - is placed under the face as it appears
+  // from this angle, so a turned sign does not float beside its own post.
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const seen = {
+    x: Math.min(...xs),
+    y: Math.min(...ys),
+    w: Math.max(...xs) - Math.min(...xs),
+    h: Math.max(...ys) - Math.min(...ys),
+  };
   const shape =
-    structureFor(params.assetType, face) +
-    `<rect x="${face.x}" y="${face.y}" width="${face.w}" height="${face.h}" rx="${rounding}"/>`;
+    structureFor(params.assetType, seen) +
+    `<polygon points="${corners.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ")}"/>`;
   // Long titles would overflow the plate; the badge is the part that matters.
   const label = escapeXml(params.label.slice(0, 44));
 

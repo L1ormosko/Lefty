@@ -599,6 +599,9 @@ const he: Dict = {
   // Said at the point of upload, because a wide shot cannot be asked for
   // after the fact - the owner has left the site by then.
   "wizard.imagesHint": "העלו גם צילום רחב אחד שמראה את השטח בסביבתו, לא רק תקריב. מפרסם שרואה את השטח ברחוב מבין מה הוא קונה — ועל הצילום הזה נבנית ההדמיה של המודעה שלו.",
+  // Three angles, because that is exactly what the turntable preview needs and
+  // nobody goes back to the site to take the missing one.
+  "wizard.imagesAngles": "מומלץ להעלות שלושה צילומים של אותו שטח — מלפנים ומכל צד. כשיש כמה זוויות, המפרסם יכול לסובב ביניהן ולראות את המודעה שלו יושבת על השטח מכל אחת.",
 
   "mockup.faceSize": "מידות השטח: {w}×{h} ס״מ · יחס {ratio}",
   "mockup.faceSizeUnknown": "מידות השטח לא צוינו, ולכן הקובץ נמתח לפאה. היחס שיוצג אינו בהכרח היחס האמיתי.",
@@ -607,6 +610,17 @@ const he: Dict = {
   "mockup.viewClose": "מבט על השטח",
   "mockup.viewContext": "מבט נוסף",
   "mockup.views": "בחירת תמונה",
+
+  // The turntable. The second line is the whole honesty of the feature: these
+  // are photographs taken from a few places, not a model that can be spun.
+  "mockup.turntable": "סיבוב בין זוויות הצילום",
+  "mockup.turntableHint": "{count} זוויות מצולמות של השטח. גררו על התמונה או השתמשו במקשי החיצים.",
+  "mockup.turntableNotModel": "אלה צילומים מזוויות שצולמו בפועל, לא מודל תלת־מימד. מה שלא צולם אינו מוצג.",
+  "mockup.angleLeft": "משמאל",
+  "mockup.angleFront": "מלפנים",
+  "mockup.angleRight": "מימין",
+  "mockup.angleUnknown": "זווית לא צוינה",
+  "mockup.angleOf": "זווית {n}",
   "mockup.limitations":
     "ההדמיה מניחה משטח שטוח, ואינה מתחשבת בתאורה, בהשתקפויות או בעצמים שעוברים לפני השטח.",
 
@@ -622,6 +636,9 @@ const he: Dict = {
   "mockup.saved": "הסימון נשמר.",
   "mockup.cleared": "הסימון נמחק.",
   "mockup.invalid": "הסימון אינו תקין. יש לסמן ארבע פינות בסדר, לפי כיוון השעון.",
+  "mockup.angleTitle": "מאיפה צולמה התמונה",
+  "mockup.angleHint": "ביחס לחזית השטח. קובע את סדר הזוויות בהדמיה; אפשר להשאיר ריק.",
+  "mockup.angleSaved": "הזווית נשמרה.",
 
   // Street View. Deliberately its own panel: Google's terms forbid altering
   // their imagery, and an ad painted onto it would be exactly that.

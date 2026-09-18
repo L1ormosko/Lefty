@@ -66,7 +66,7 @@ export default async function AdminAssets({
       // marking only the primary would cap the feature at one viewpoint.
       images: {
         orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
-        select: { id: true, url: true, surfaceQuad: true },
+        select: { id: true, url: true, surfaceQuad: true, viewAngleDeg: true },
       },
     },
   });
@@ -147,6 +147,7 @@ export default async function AdminAssets({
                     imageId={image.id}
                     photoUrl={image.url}
                     initialQuad={parseQuad(image.surfaceQuad)}
+                    initialAngle={image.viewAngleDeg}
                   />
                 ))}
               </div>

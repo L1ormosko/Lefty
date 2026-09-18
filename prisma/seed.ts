@@ -16,7 +16,7 @@
 import { PrismaClient, type AssetType, type Illumination, type LocationTag } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
-import { demoImage, demoSurfaceQuad } from "./demo-image";
+import { DEMO_VIEW_ANGLES, demoImage, demoSurfaceQuad } from "./demo-image";
 import { demoSeedEnabled, requireSeedPassword } from "./seed-config";
 
 const prisma = new PrismaClient();
@@ -377,46 +377,56 @@ async function main() {
     // photograph: inventing a picture of a hoarding that does not exist would
     // be fabricating inventory. Written through the same table and encoder the
     // real upload route uses, so there is no second storage path to maintain.
-    const imageId = randomUUID();
-    const bytes = await demoImage({
-      assetType: s.assetType,
-      label: asset.title,
-      // The picture is drawn at the listing's real proportions, so a 3:1
-      // billboard does not appear as a 2:1 one.
-      widthCm: s.w ?? null,
-      heightCm: s.h ?? null,
-    });
-    await prisma.$transaction([
-      prisma.mediaAssetImage.create({
-        data: {
-          id: imageId,
-          assetId: asset.id,
-          url: `/api/images/${imageId}`,
-          width: 1200,
-          height: 675,
-          sizeBytes: bytes.length,
-          isPrimary: true,
-          sortOrder: 0,
-          // Every demo listing gets its face marked, not just one.
-          //
-          // It was one, and that one sorted last of fifteen on /explore, so
-          // anybody opening the first listing found no preview and reasonably
-          // concluded the feature had not shipped. The e2e test walked every
-          // listing until it found the marked one, so it passed while the
-          // feature was effectively invisible - a test that proved the code
-          // worked without proving it could be reached.
-          //
-          // The coordinates come from the same constants demoImage() draws
-          // with, so the face cannot drift away from the sign in the picture.
-          // These are demo rows, already flagged isDemo; a real listing gets
-          // its face marked by an admin looking at an actual photograph.
-          surfaceQuad: demoSurfaceQuad(s.assetType, { widthCm: s.w ?? null, heightCm: s.h ?? null }),
-        },
-      }),
-      prisma.mediaAssetImageBlob.create({
-        data: { imageId, data: new Uint8Array(bytes), contentType: "image/webp" },
-      }),
-    ]);
+    // Three angles of the same schematic sign, not one. A media owner is asked
+    // for the same three - straight on and from either side - because that is
+    // what makes the creative preview read as an object in a street rather
+    // than a picture with an ad pasted on it.
+    const dimensions = { widthCm: s.w ?? null, heightCm: s.h ?? null };
+    for (const [i, yawDeg] of DEMO_VIEW_ANGLES.entries()) {
+      const imageId = randomUUID();
+      const bytes = await demoImage({
+        assetType: s.assetType,
+        label: asset.title,
+        // The picture is drawn at the listing's real proportions, so a 3:1
+        // billboard does not appear as a 2:1 one.
+        ...dimensions,
+        yawDeg,
+      });
+      await prisma.$transaction([
+        prisma.mediaAssetImage.create({
+          data: {
+            id: imageId,
+            assetId: asset.id,
+            url: `/api/images/${imageId}`,
+            width: 1200,
+            height: 675,
+            sizeBytes: bytes.length,
+            // The straight-on view is the one that represents the listing.
+            isPrimary: yawDeg === 0,
+            sortOrder: i,
+            viewAngleDeg: yawDeg,
+            // Every demo listing gets its face marked, not just one.
+            //
+            // It was one, and that one sorted last of fifteen on /explore, so
+            // anybody opening the first listing found no preview and reasonably
+            // concluded the feature had not shipped. The e2e test walked every
+            // listing until it found the marked one, so it passed while the
+            // feature was effectively invisible - a test that proved the code
+            // worked without proving it could be reached.
+            //
+            // The coordinates come from the same constants demoImage() draws
+            // with, and from the same angle, so the face cannot drift away from
+            // the sign in the picture. These are demo rows, already flagged
+            // isDemo; a real listing gets its face marked by an admin looking
+            // at an actual photograph.
+            surfaceQuad: demoSurfaceQuad(s.assetType, dimensions, yawDeg),
+          },
+        }),
+        prisma.mediaAssetImageBlob.create({
+          data: { imageId, data: new Uint8Array(bytes), contentType: "image/webp" },
+        }),
+      ]);
+    }
 
     created.push({ id: asset.id, title: asset.title });
   }

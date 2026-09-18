@@ -106,6 +106,7 @@ export function AssetWizard({ asset }: { asset: WizardAsset | null }) {
           <div className="space-y-4">
             <h2 className="font-semibold text-ink-900">{t("wizard.images")}</h2>
             <p className="text-sm text-ink-600">{t("wizard.imagesHint")}</p>
+            <p className="mt-1 text-sm text-ink-600">{t("wizard.imagesAngles")}</p>
             <ImageUploader assetId={assetId} initial={asset?.images ?? []} />
             <Button onClick={goNext}>{t("common.next")}</Button>
           </div>

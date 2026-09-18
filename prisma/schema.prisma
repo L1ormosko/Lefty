@@ -333,6 +333,16 @@ model MediaAssetImage {
   /// displayed at a dozen different sizes.
   surfaceQuad Json?
 
+  /// Where the camera stood when this photo was taken, in degrees around the
+  /// sign's face: 0 is straight on, negative to its left, positive to its
+  /// right.
+  ///
+  /// Optional, and never inferred. It orders the photographed angles for the
+  /// turntable preview (lib/turntable.ts) and labels them on screen; with no
+  /// angle the photos stay in upload order and are labelled "לא צוין", the
+  /// same as any other unknown value in this schema.
+  viewAngleDeg Int?
+
   createdAt DateTime @default(now())
 
   asset MediaAsset          @relation(fields: [assetId], references: [id], onDelete: Cascade)

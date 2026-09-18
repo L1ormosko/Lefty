@@ -1,10 +1,11 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
-import { setImageQuadAction } from "@/app/actions/admin";
+import { setImageAngleAction, setImageQuadAction } from "@/app/actions/admin";
 import type { ActionState } from "@/app/actions/inquiries";
 import { t } from "@/lib/labels";
 import { isUsableQuad, type Point, type Quad } from "@/lib/mockup";
+import { angleLabel } from "@/lib/turntable";
 import { Button } from "@/components/ui";
 
 /**
@@ -19,14 +20,21 @@ export function MarkSurfaceForm({
   imageId,
   photoUrl,
   initialQuad,
+  initialAngle,
 }: {
   imageId: string;
   photoUrl: string;
   initialQuad: Quad | null;
+  /** Where the camera stood, if anyone has said. */
+  initialAngle?: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const [points, setPoints] = useState<Point[]>(initialQuad ?? []);
   const [state, action, pending] = useActionState<ActionState, FormData>(setImageQuadAction, undefined);
+  const [angleState, angleAction, anglePending] = useActionState<ActionState, FormData>(
+    setImageAngleAction,
+    undefined
+  );
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   function addPoint(e: React.MouseEvent<HTMLImageElement>) {
@@ -127,6 +135,40 @@ export function MarkSurfaceForm({
           </span>
         )}
       </div>
+
+      {/* Which side the photo was taken from. Separate from the quad on
+          purpose: marking a face and saying where you stood are two different
+          judgements, and one should not have to be redone to change the
+          other. */}
+      <form action={angleAction} className="mt-3 pt-3 border-t border-ink-100">
+        <input type="hidden" name="imageId" value={imageId} />
+        <label className="block text-sm font-medium text-ink-900" htmlFor={`angle-${imageId}`}>
+          {t("mockup.angleTitle")}
+        </label>
+        <p className="mt-1 text-xs text-ink-500">{t("mockup.angleHint")}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <select
+            id={`angle-${imageId}`}
+            name="angle"
+            defaultValue={initialAngle == null ? "" : angleLabel(initialAngle)}
+            className="rounded-md border border-ink-200 px-2 py-1.5 text-sm"
+          >
+            <option value="">{t("mockup.angleUnknown")}</option>
+            <option value="left">{t("mockup.angleLeft")}</option>
+            <option value="front">{t("mockup.angleFront")}</option>
+            <option value="right">{t("mockup.angleRight")}</option>
+          </select>
+          <Button type="submit" size="sm" variant="ghost" disabled={anglePending}>
+            {t("common.save")}
+          </Button>
+          {angleState?.ok && <span className="text-xs text-ok-700">{angleState.message}</span>}
+          {angleState && !angleState.ok && (
+            <span role="alert" className="text-xs text-bad-700">
+              {angleState.error}
+            </span>
+          )}
+        </div>
+      </form>
     </div>
   );
 }

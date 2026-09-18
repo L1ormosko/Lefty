@@ -197,3 +197,40 @@ export async function setImageQuadAction(_prev: ActionState, formData: FormData)
     return { ok: false, error: toUserMessage(err) };
   }
 }
+
+/**
+ * Where a photo was taken from, relative to the sign's face.
+ *
+ * Deliberately three coarse choices and "not stated" rather than a number
+ * field: an owner standing in a street knows which side they were on and does
+ * not know they were at 23 degrees, and a typed figure would dress that guess
+ * up as a measurement. The value only orders the angles and labels them.
+ */
+export async function setImageAngleAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    await requireRole("ADMIN");
+    const imageId = String(formData.get("imageId") ?? "");
+    const image = await prisma.mediaAssetImage.findUnique({
+      where: { id: imageId },
+      select: { id: true, assetId: true },
+    });
+    if (!image) return { ok: false, error: "התמונה לא נמצאה." };
+
+    const raw = String(formData.get("angle") ?? "").trim();
+    const choices: Record<string, number> = { left: -30, front: 0, right: 30 };
+    // Anything unrecognised - including the empty "not stated" choice - clears
+    // the angle rather than being coerced to zero, which would claim the photo
+    // was taken head on.
+    const angle = raw in choices ? choices[raw] : null;
+
+    await prisma.mediaAssetImage.update({
+      where: { id: image.id },
+      data: { viewAngleDeg: angle },
+    });
+    revalidatePath(`/assets/${image.assetId}`);
+    revalidatePath("/admin/assets");
+    return { ok: true, message: t("mockup.angleSaved") };
+  } catch (err) {
+    return { ok: false, error: toUserMessage(err) };
+  }
+}

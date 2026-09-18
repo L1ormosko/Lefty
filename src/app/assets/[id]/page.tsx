@@ -95,9 +95,17 @@ export default async function AssetPage({ params }: Params) {
   // gives the advertiser the second thing they actually want to know: how the
   // ad sits in its surroundings. Both are real photographs of the site.
   const mockupPhotos = asset.images
-    .map((image) => ({ id: image.id, url: image.url, quad: parseQuad(image.surfaceQuad) }))
-    .filter((p): p is { id: string; url: string; quad: NonNullable<typeof p.quad> } =>
-      p.quad != null && isUsableQuad(p.quad)
+    .map((image) => ({
+      id: image.id,
+      url: image.url,
+      quad: parseQuad(image.surfaceQuad),
+      // Where the camera stood, when the owner said. The panel orders the
+      // angles by it and labels them; null keeps the upload order.
+      angleDeg: image.viewAngleDeg,
+    }))
+    .filter(
+      (p): p is { id: string; url: string; quad: NonNullable<typeof p.quad>; angleDeg: number | null } =>
+        p.quad != null && isUsableQuad(p.quad)
     );
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 
