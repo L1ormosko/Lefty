@@ -14,6 +14,14 @@ const OG_IMAGE = {
 };
 
 export const metadata: Metadata = {
+  /*
+   * Without this, Next resolves every relative image in the metadata below
+   * against http://localhost:3000 - so in production the share card pasted
+   * into WhatsApp points at the reader's own machine and renders as nothing.
+   * It was a build warning rather than an error, which is exactly the kind of
+   * thing that ships.
+   */
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
   title: { default: "VELTO — שטחי פרסום חוץ בישראל", template: "%s | VELTO" },
   description: t("app.tagline"),
   applicationName: t("app.name"),

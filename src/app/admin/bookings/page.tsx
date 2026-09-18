@@ -5,30 +5,43 @@ import { adminNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState } from "@/components/ui";
 import { BookingRow } from "@/components/lists";
+import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminBookings() {
+export default async function AdminBookings({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requireRole("ADMIN");
-  const bookings = await prisma.booking.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 100,
-    include: {
-      asset: { select: { id: true, title: true } },
-      advertiser: { select: { name: true, email: true, phone: true } },
-    },
-  });
+  const page = pageFromParam((await searchParams).page);
+  const [bookings, total] = await Promise.all([
+    prisma.booking.findMany({
+      orderBy: { createdAt: "desc" },
+      take: PAGE_SIZE,
+      skip: skipFor(page),
+      include: {
+        asset: { select: { id: true, title: true } },
+        advertiser: { select: { name: true, email: true, phone: true } },
+      },
+    }),
+    prisma.booking.count(),
+  ]);
 
   return (
     <DashboardShell title={t("dash.bookings")} nav={adminNav()} current="/admin/bookings">
       {bookings.length === 0 ? (
         <EmptyState title={t("dash.noBookings")} />
       ) : (
-        <div className="space-y-3">
-          {bookings.map((booking) => (
-            <BookingRow key={booking.id} booking={booking} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {bookings.map((booking) => (
+              <BookingRow key={booking.id} booking={booking} />
+            ))}
+          </div>
+          <Pager page={page} total={total} basePath="/admin/bookings" />
+        </>
       )}
     </DashboardShell>
   );

@@ -141,6 +141,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   inquiryMessages     InquiryMessage[]
   subscription        Subscription?
+  auditEntries        AuditLog[]
 
   @@index([role])
   @@index([companyId])
@@ -311,6 +312,13 @@ model MediaAsset {
   @@index([city])
   @@index([assetType])
   @@index([status, latitude, longitude])
+  /// The owner's own list, in the order that page shows it.
+  @@index([ownerId, status])
+  @@index([ownerId, updatedAt])
+  /// citiesWithInventory() and realInventorySummary(): group public inventory
+  /// by city, on every landing page and every map load.
+  @@index([status, city])
+  @@index([status, isDemo])
 }
 
 model MediaAssetImage {
@@ -342,6 +350,19 @@ model MediaAssetImage {
   /// angle the photos stay in upload order and are labelled "לא צוין", the
   /// same as any other unknown value in this schema.
   viewAngleDeg Int?
+
+  /// Where the bytes live, as the storage provider addresses them.
+  ///
+  /// Opaque to everything except server/storage: for the database-backed
+  /// provider it is the image id, for an object store it will be the object
+  /// key ("assets/<assetId>/<imageId>.webp"). Nullable only because rows
+  /// written before the abstraction existed have none - new rows always do.
+  storageKey String?
+
+  /// Which provider wrote those bytes, so a migration between stores can run
+  /// row by row instead of all at once, and so a half-migrated database can
+  /// still serve every image.
+  storageProvider String?
 
   createdAt DateTime @default(now())
 
@@ -446,6 +467,9 @@ model Booking {
 
   @@index([assetId, status, startDate, endDate])
   @@index([advertiserId, createdAt])
+  /// The renewal pipeline: approved bookings ending inside a window, which is
+  /// a scan of every booking ever made without this.
+  @@index([status, endDate])
 }
 
 model SavedAsset {
@@ -459,6 +483,62 @@ model SavedAsset {
 
   @@unique([userId, assetId])
   @@index([userId, createdAt])
+}
+
+/**
+ * What was done, by whom, to what.
+ *
+ * Written for the actions that change someone else's standing on the platform
+ * - an admin verifying or rejecting a listing, switching a user off, recording
+ * a subscription - and for the few user actions with the same weight
+ * (publishing, deleting, deciding a booking). Not an activity feed: a page
+ * view is not in here, and neither is anything that only affects the actor's
+ * own draft.
+ *
+ * `actorId` is a nullable reference rather than a copy of the actor's name or
+ * email on purpose. Accounts here are anonymized rather than deleted (see
+ * server/account.ts), so the reference still resolves after erasure - and
+ * resolves to the anonymized identity, which is the correct outcome. A
+ * snapshotted email would have quietly survived the erasure it was supposed
+ * to respect.
+ *
+ * Immutable by convention: nothing in the codebase updates or deletes a row
+ * here. A log that can be edited by the people it audits is decoration.
+ */
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?
+  action     AuditAction
+  /// Model name of the thing acted on, e.g. "MediaAsset" or "User".
+  targetType String
+  targetId   String
+  /// One human-readable line. Never secrets, never a whole record.
+  summary    String?
+  createdAt  DateTime    @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@index([action, createdAt])
+}
+
+enum AuditAction {
+  USER_REGISTERED
+  USER_ACTIVATED
+  USER_DEACTIVATED
+  ACCOUNT_ANONYMIZED
+  ASSET_PUBLISHED
+  ASSET_UNPUBLISHED
+  ASSET_DELETED
+  ASSET_VERIFIED
+  ASSET_REJECTED
+  ASSET_SURFACE_MARKED
+  BOOKING_DECIDED
+  BOOKING_CANCELLED
+  SUBSCRIPTION_CHANGED
+  BACKUP_DOWNLOADED
 }
 
 model Notification {

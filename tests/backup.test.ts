@@ -46,7 +46,7 @@ beforeAll(async () => {
     await tx.mediaAssetImage.create({
       data: { id: imageId, assetId: asset.id, url: imageUrl(imageId), isPrimary: true, sortOrder: 0 },
     });
-    await storeImage({ imageId, data: imageBytes, tx });
+    await storeImage({ assetId: asset.id, imageId, data: imageBytes, tx });
   });
 
   // A live session, so "sessions are excluded" is asserted against a database

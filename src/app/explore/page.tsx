@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Discover } from "@/components/map/Discover";
-import { citiesWithInventory, queryMapAssets, redactForRestricted } from "@/server/assets";
+import { citiesWithInventory, queryMap, redactForRestricted } from "@/server/assets";
 import { getCurrentUser } from "@/server/auth";
 import { viewerAccess } from "@/server/subscription";
 import { mapQuerySchema } from "@/lib/validation";
@@ -26,12 +26,15 @@ export default async function ExplorePage({
   const parsed = mapQuerySchema.safeParse(flat);
   const query = parsed.success ? parsed.data : mapQuerySchema.parse({});
 
-  // First paint is server-rendered: the map has inventory before any client fetch.
-  const [rows, cities, viewer] = await Promise.all([
-    queryMapAssets(query),
+  // First paint is server-rendered: the map has inventory before any client
+  // fetch. The access check happens first because it decides which filters are
+  // even allowed to reach the query - see withoutSaleableFilters().
+  const viewer = await viewerAccess(await getCurrentUser());
+  const [result, cities] = await Promise.all([
+    queryMap(query, { restricted: !viewer.full }),
     citiesWithInventory(),
-    viewerAccess(await getCurrentUser()),
   ]);
+  const rows = result.assets;
   // Redacted here too, not only in /api/assets. The first paint is HTML, and
   // an unredacted price in the server-rendered markup is just as readable as
   // one in a JSON response.

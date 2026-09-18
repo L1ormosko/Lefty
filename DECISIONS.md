@@ -512,3 +512,107 @@ Trials are granted in the same statement that creates the user. Granting one
 afterwards leaves a window in which a half-failed signup produces an account
 with no access at all, and the person most likely to land in that window is the
 one who just spent five minutes signing up.
+
+## The paywall is a property of the query, not of the page
+
+Three screens listed inventory and only one of them was careful. `/brief`
+ranked the real inventory and handed an anonymous visitor the street address, a
+priced estimate and the date each sign frees up. `/dashboard/saved` handed a
+lapsed advertiser the same for everything they had bookmarked during their
+trial. Both were written after the map's redaction and neither knew about it.
+
+There was a subtler leak underneath. Blanking a price in the response does
+nothing if the filter that selects on it still works: `maxPrice=4000` matching
+a sign and `maxPrice=3999` not matching it states that sign's price to the
+shekel, and a dozen requests do it for the whole map. The same trick reads the
+address out of the free-text search one letter at a time and the calendar out
+of a date range.
+
+So the rule moved into `queryMap(q, { restricted })`, which strips the price,
+date and availability filters and narrows free text to the city before building
+the WHERE clause. Callers pass who is asking rather than remembering to
+pre-filter. The map's filter panel hides the controls it knows are disarmed,
+because a control that silently does nothing is a lie about the product - but
+the UI is the second line, not the first.
+
+What a viewer without access keeps is deliberate and unchanged: the type of
+sign, the city, digital or not, and a position rounded to a neighbourhood. They
+can see that there are eleven spaces in Be'er Sheva and roughly where they
+cluster. That is the argument for signing up.
+
+One detail worth keeping: the redacted title is the *type* of sign, not the
+city. It was the city, which made a shortlist of ten read as ten identical
+cards called "באר שבע" - correctly redacted and useless as a ranking.
+
+## Holding a UUID is not permission
+
+`/api/images/[id]` was reachable by anyone who knew the URL. That was inherited
+honestly - it matched the static `/uploads/<uuid>.webp` path it replaced, and
+the change that moved bytes into Postgres deliberately changed where images
+were stored and nothing about who could read them, so that neither question was
+reviewed by halves.
+
+A UUID is an identifier, not a credential. It appears in server-rendered HTML,
+in shared links, in browser history and in every proxy log on the way. Two
+things leaked because of it: photographs of listings that were never public - a
+draft, one the owner took down, one an admin rejected - and photographs of
+public listings, which are part of what the subscription buys.
+
+`server/images.ts` answers it once, from the asset the image belongs to. The
+route 404s rather than 403s, because whether an image exists is itself a fact
+about a listing that is not public. `Cache-Control` is `private` with `Vary:
+Cookie`: a shared cache holding one of these would undo the check on the next
+request.
+
+## Storage is an interface, and Postgres is the stopgap behind it
+
+Image bytes still live in Postgres, which holds roughly 250 fully photographed
+assets per GB - a ceiling that arrives without warning. What changed is that
+nothing outside `src/server/storage/` knows that. A `StorageProvider` has
+`put`, `get` and an optional `remove`; `MediaAssetImage` records `storageKey`
+and `storageProvider` per row.
+
+Two rules are load-bearing. A key is opaque - callers persist it and never
+parse it, because one store's key is a row id and another's is an object path.
+And the URL is always ours: even once bytes sit in a bucket, the browser asks
+`/api/images/[id]`, because that is where the authorization check lives. A
+public bucket URL would hand every photograph to anyone who guessed a path,
+which is precisely the hole above.
+
+Reading resolves the provider *per row*, so a half-migrated database serves
+every image: each row says where its own bytes are.
+
+## The audit log must never break what it audits
+
+`recordAudit` swallows its own failures and reports them to the server log, the
+same way `server/email.ts` treats a missing provider. A booking that was
+approved has been approved; rolling that back because an audit row would not
+insert turns a bookkeeping problem into a commercial one.
+
+The trade-off is explicit: this is a moderation and support aid, not a
+tamper-proof ledger, and no guarantee in the product rests on it.
+
+`actorId` is a nullable reference rather than a copy of the actor's email.
+Accounts here are anonymized rather than deleted, so the reference still
+resolves after erasure - and resolves to the anonymized identity, which is the
+correct outcome. A snapshotted email would have quietly survived the erasure it
+was supposed to respect.
+
+## A request for dates that are already sold is refused at the door
+
+`validateRequestWindow` checked the dates, the minimum booking length and that
+the listing was public. It did not check whether any of those days were
+actually for sale, so a request for a fortnight that an approved booking owned
+outright was accepted, notified the owner, and sat in their queue as something
+they could only ever reject - the overlap constraint would refuse the approval.
+
+A window that is *partly* free is still allowed, deliberately. An advertiser
+asking about 1-30 November when the 20th onward is taken is asking a reasonable
+question, and the owner is the right person to answer it.
+
+Availability windows gained the same treatment: a window that has already ended
+is refused (it is almost always a mistyped year), and so is one that overlaps a
+window the owner already declared. Overlapping periods are not wrong
+arithmetically - `availabilityFor` unions them - but they are wrong as a
+record: two rows saying "free in March" leave the owner unable to tell which
+one a note belongs to, and deleting one appears to do nothing.

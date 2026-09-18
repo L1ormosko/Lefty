@@ -12,17 +12,26 @@ import { AssetStatusToggle } from "@/components/owner/AssetStatusToggle";
 import { DeleteAssetButton } from "@/components/owner/DeleteAssetButton";
 import { PlanPanel } from "@/components/owner/PlanPanel";
 import { ownerPlanRow, ownerPlanStatus } from "@/server/subscription";
+import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
 
-export default async function OwnerAssets() {
+export default async function OwnerAssets({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireRole("MEDIA_OWNER");
+  const page = pageFromParam((await searchParams).page);
   // The subscription belongs on the page about listings, because the limit is
   // a limit on listings. It renders nothing for an owner with no plan row.
   const [planStatus, plan] = await Promise.all([ownerPlanStatus(user.id), ownerPlanRow(user.id)]);
+  const assetCount = await prisma.mediaAsset.count({ where: { ownerId: user.id } });
   const assets = await prisma.mediaAsset.findMany({
     where: { ownerId: user.id },
     orderBy: { updatedAt: "desc" },
+    take: PAGE_SIZE,
+    skip: skipFor(page),
     include: {
       periods: { select: { startDate: true, endDate: true } },
       bookings: { where: { status: "APPROVED" }, select: { startDate: true, endDate: true } },
@@ -46,6 +55,7 @@ export default async function OwnerAssets() {
           action={<LinkButton href="/owner/assets/new">{t("dash.addAsset")}</LinkButton>}
         />
       ) : (
+        <>
         <div className="space-y-3">
           {assets.map((asset) => (
             <Card key={asset.id} className="p-4">
@@ -117,6 +127,8 @@ export default async function OwnerAssets() {
             </Card>
           ))}
         </div>
+        <Pager page={page} total={assetCount} basePath="/owner/assets" />
+        </>
       )}
     </DashboardShell>
   );

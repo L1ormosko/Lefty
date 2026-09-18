@@ -7,11 +7,59 @@ const isoDateString = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "תאריך לא תקין");
 
 export const emailSchema = z.string().trim().toLowerCase().email("כתובת דוא״ל לא תקינה");
+
+/**
+ * A web address that is safe to render as a link.
+ *
+ * `z.string().url()` is not enough on its own: it delegates to `new URL()`,
+ * which happily accepts `javascript:alert(1)` and `data:text/html,...`. A
+ * media owner's company website is rendered as an <a href> on their public
+ * asset page, so an unrestricted scheme there is stored XSS against every
+ * advertiser who opens the listing.
+ *
+ * So the scheme is allow-listed rather than denied: http and https, nothing
+ * else, ever - not mailto, not tel, not a protocol invented next year.
+ */
+const httpUrl = z
+  .string()
+  .trim()
+  .url("כתובת אתר לא תקינה")
+  .max(200)
+  .refine(
+    (value) => {
+      try {
+        const scheme = new URL(value).protocol;
+        return scheme === "http:" || scheme === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "כתובת האתר חייבת להתחיל ב־http:// או ב־https://" }
+  );
 export const passwordSchema = z.string().min(8, "auth.passwordRule").max(200);
 const phoneSchema = z
   .string()
   .trim()
   .regex(/^[0-9+\-() ]{7,20}$/, "מספר טלפון לא תקין");
+
+/**
+ * The same rule, applied when rendering rather than when writing.
+ *
+ * Defence in depth on purpose: validation protects what is written from now
+ * on, and this protects what is already in the database. A row saved before
+ * the schema tightened - or by any future code path that forgets - must not be
+ * able to put a `javascript:` URL into an href. Returns null when the value is
+ * not a safe link, and callers render nothing rather than an inert one.
+ */
+export function safeExternalUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 export const registerSchema = z.object({
   name: z.string().trim().min(2, "יש להזין שם מלא").max(120),
@@ -49,7 +97,7 @@ export const profileSchema = z.object({
   companyName: z.string().trim().min(2).max(160).optional().or(z.literal("")),
   companyEmail: emailSchema.optional().or(z.literal("")),
   companyPhone: phoneSchema.optional().or(z.literal("")),
-  companyWebsite: z.string().trim().url("כתובת אתר לא תקינה").max(200).optional().or(z.literal("")),
+  companyWebsite: httpUrl.optional().or(z.literal("")),
   businessId: z.string().trim().max(20).optional().or(z.literal("")),
 });
 

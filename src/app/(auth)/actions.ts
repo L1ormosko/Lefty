@@ -6,6 +6,7 @@ import { prisma } from "@/server/db";
 import { createPasswordResetToken, createSession, destroySession, hashPassword, login, resetPassword } from "@/server/auth";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema, fieldErrors } from "@/lib/validation";
 import { toUserMessage } from "@/server/errors";
+import { recordAudit } from "@/server/audit";
 import { trialEnd } from "@/lib/subscription";
 import { t } from "@/lib/labels";
 import { rateLimit } from "@/server/rate-limit";
@@ -86,6 +87,13 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
         // worth of attention.
         subscription: { create: { trialEndsAt: trialEnd() } },
       },
+    });
+    await recordAudit({
+      actorId: user.id,
+      action: "USER_REGISTERED",
+      targetType: "User",
+      targetId: user.id,
+      summary: `${user.email} · ${user.role}`,
     });
     await createSession(user.id);
     target = landingFor(user.role);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { mapQuerySchema } from "@/lib/validation";
-import { queryMapAssets, redactForRestricted } from "@/server/assets";
+import { queryMap, redactForRestricted } from "@/server/assets";
 import { getCurrentUser } from "@/server/auth";
 import { viewerAccess } from "@/server/subscription";
 
@@ -19,12 +19,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "פרמטרים לא תקינים" }, { status: 400 });
   }
   try {
-    const rows = await queryMapAssets(parsed.data);
     const viewer = await viewerAccess(await getCurrentUser());
-    const assets = viewer.full ? rows : rows.map(redactForRestricted);
+    // Decided inside the query, not after it: a price filter that reaches the
+    // WHERE clause has already answered the question, whatever we do with the
+    // rows afterwards.
+    const result = await queryMap(parsed.data, { restricted: !viewer.full });
+    const assets = viewer.full ? result.assets : result.assets.map(redactForRestricted);
     return NextResponse.json(
-      { assets, count: assets.length, restricted: !viewer.full },
-      { headers: { "Cache-Control": "no-store" } }
+      {
+        assets,
+        count: assets.length,
+        total: result.total,
+        truncated: result.truncated,
+        restricted: !viewer.full,
+      },
+      { headers: { "Cache-Control": "no-store, private" } }
     );
   } catch (err) {
     console.error("[velto] /api/assets failed:", err);

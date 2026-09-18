@@ -5,23 +5,53 @@ import { setOwnerPlanAction } from "@/app/actions/admin";
 import type { ActionState } from "@/app/actions/inquiries";
 import { t } from "@/lib/labels";
 import { Button, inputClass } from "@/components/ui";
+import type { AccessState } from "@/lib/subscription";
 
 /**
- * Recording a media owner's subscription, by hand.
+ * Recording a subscription, by hand, for either side of the marketplace.
  *
- * Collapsed by default. Most rows on this page are not owners, and of the ones
- * that are, most will never have a plan: this is a drawer, not a field.
+ * It used to be owner-only, which was right when the only thing a subscription
+ * did was cap how many listings an owner could publish. Once access to the
+ * inventory itself went behind a trial, that left advertisers - the people the
+ * paywall is actually aimed at - with no way for anyone to record that they
+ * had paid. Their trial would end and nothing could reopen it.
+ *
+ * So: the paid-through date and the commercial terms apply to everyone; the
+ * listing quota is shown only for the role it can mean anything to.
+ *
+ * Collapsed by default - a drawer, not a field.
  */
+const STATE_LABELS: Record<AccessState, string> = {
+  paid: "plan.statePaid",
+  trial: "plan.stateTrial",
+  lapsed: "plan.stateLapsed",
+  none: "plan.none",
+};
+
 export function OwnerPlanForm({
   userId,
+  role,
+  accessState,
   limit,
   paidThrough,
+  committedUntil,
+  monthlyAmount,
   invoiceRef,
 }: {
   userId: string;
+  role: "ADVERTISER" | "MEDIA_OWNER";
+  /**
+   * What this account's access actually is right now, from the same function
+   * the map and the API use. The collapsed button used to read "no plan"
+   * whenever no listing quota was set, which said nothing about whether the
+   * customer had paid - the one thing an admin scanning this list wants.
+   */
+  accessState: AccessState;
   limit: number | null;
   /** ISO date (yyyy-mm-dd), already in the shape the date input wants. */
   paidThrough: string | null;
+  committedUntil: string | null;
+  monthlyAmount: number | null;
   invoiceRef: string | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -29,8 +59,9 @@ export function OwnerPlanForm({
 
   if (!open) {
     return (
-      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        {limit == null ? t("plan.none") : t("plan.title")}
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)} data-plan-toggle>
+        {t(STATE_LABELS[accessState])}
+        {limit != null && <span className="text-ink-400"> · {limit}</span>}
       </Button>
     );
   }
@@ -41,17 +72,22 @@ export function OwnerPlanForm({
       <p className="text-sm font-medium text-ink-900">{t("plan.adminTitle")}</p>
 
       <div className="flex flex-wrap gap-2">
-        <label className="text-xs text-ink-600">
-          {t("plan.limitField")}
-          <input
-            name="activeListingLimit"
-            type="number"
-            min={0}
-            step={1}
-            defaultValue={limit ?? ""}
-            className={`${inputClass} mt-1 w-32`}
-          />
-        </label>
+        {/* A quota on published listings is meaningless for an advertiser,
+            who publishes nothing - so it is not offered, and the server
+            refuses it for that role too. */}
+        {role === "MEDIA_OWNER" && (
+          <label className="text-xs text-ink-600">
+            {t("plan.limitField")}
+            <input
+              name="activeListingLimit"
+              type="number"
+              min={0}
+              step={1}
+              defaultValue={limit ?? ""}
+              className={`${inputClass} mt-1 w-32`}
+            />
+          </label>
+        )}
         <label className="text-xs text-ink-600">
           {t("plan.paidThroughField")}
           <input
@@ -59,6 +95,26 @@ export function OwnerPlanForm({
             type="date"
             defaultValue={paidThrough ?? ""}
             className={`${inputClass} mt-1 w-44`}
+          />
+        </label>
+        <label className="text-xs text-ink-600">
+          {t("plan.committedUntilField")}
+          <input
+            name="committedUntil"
+            type="date"
+            defaultValue={committedUntil ?? ""}
+            className={`${inputClass} mt-1 w-44`}
+          />
+        </label>
+        <label className="text-xs text-ink-600">
+          {t("plan.monthlyAmountField")}
+          <input
+            name="monthlyAmount"
+            type="number"
+            min={0}
+            step={1}
+            defaultValue={monthlyAmount ?? ""}
+            className={`${inputClass} mt-1 w-32`}
           />
         </label>
         <label className="text-xs text-ink-600">

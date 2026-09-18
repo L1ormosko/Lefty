@@ -17,7 +17,10 @@ test("an admin records a plan, and the owner is held to it", async ({ page }) =>
   await page.goto("/admin/users");
 
   const ownerRow = page.locator('[data-user="owner@velto.dev"]');
-  await ownerRow.getByRole("button", { name: "אין מנוי" }).click();
+  // By its hook rather than its text: the collapsed button now reports the
+  // account's real access state ("paid", "trial", "lapsed"), which is what an
+  // admin scanning the list needs and which the seeded fixture can change.
+  await ownerRow.locator("[data-plan-toggle]").click();
   await page.locator('input[name="activeListingLimit"]').first().fill("0");
   await page.getByRole("button", { name: "שמירת המנוי" }).first().click();
   await expect(page.getByText("המנוי עודכן.")).toBeVisible();
@@ -63,7 +66,7 @@ test("with the plan lifted, the same listing publishes again", async ({ page }) 
   await login(page, "admin@velto.dev", DEV_PASSWORD);
   await page.goto("/admin/users");
   const ownerRow = page.locator('[data-user="owner@velto.dev"]');
-  await ownerRow.getByRole("button", { name: "המנוי שלכם" }).click();
+  await ownerRow.locator("[data-plan-toggle]").click();
   await page.locator('input[name="activeListingLimit"]').first().fill("99");
   await page.getByRole("button", { name: "שמירת המנוי" }).first().click();
   await expect(page.getByText("המנוי עודכן.")).toBeVisible();
@@ -87,11 +90,19 @@ test("the plan is removed again, leaving the account unlimited", async ({ page }
   await page.goto("/admin/users");
 
   const ownerRow = page.locator('[data-user="owner@velto.dev"]');
-  await ownerRow.getByRole("button", { name: "המנוי שלכם" }).click();
+  await ownerRow.locator("[data-plan-toggle]").click();
   await page.locator('input[name="activeListingLimit"]').first().fill("");
   await page.getByRole("button", { name: "שמירת המנוי" }).first().click();
-  await expect(page.getByText("המנוי בוטל. החשבון חזר להיות ללא הגבלה.")).toBeVisible();
+  await expect(
+    page.getByText("המכסה הוסרה. החשבון יכול לפרסם ללא הגבלה; הגישה למלאי לא השתנתה.")
+  ).toBeVisible();
 
+  // The quota is gone and the account is unlimited again...
   await page.goto("/admin/users");
-  await expect(ownerRow.getByRole("button", { name: "אין מנוי" })).toBeVisible();
+  await expect(ownerRow.locator("[data-plan-toggle]")).toBeVisible();
+
+  // ...and, the part that matters, the customer still has their access.
+  // Clearing a quota used to delete the whole Subscription row, which took
+  // trialEndsAt and paidThrough with it and silently cut the customer off.
+  await expect(ownerRow.getByText("מנוי בתוקף")).toBeVisible();
 });

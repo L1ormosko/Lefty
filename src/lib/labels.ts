@@ -663,6 +663,66 @@ const he: Dict = {
   "access.lapsedCta": "לחידוש — פנו אלינו.",
   "access.adminNote": "גישת מנהל — נתונים מלאים.",
 
+  // The audit trail. Deliberately plain: this screen is read when something
+  // went wrong, and a clever layout is the last thing anyone wants then.
+  "audit.title": "יומן פעולות",
+  "audit.lead": "פעולות שמשנות את מעמדו של מישהו אחר במערכת — אימות שטח, השבתת משתמש, שינוי מנוי, החלטה על הזמנה. נרשם אוטומטית ואינו ניתן לעריכה.",
+  "audit.empty": "עדיין לא נרשמו פעולות.",
+  "audit.actor": "מבצע",
+  "audit.target": "אובייקט",
+  "audit.system": "המערכת",
+  "audit.deletedActor": "חשבון שנמחק",
+  "audit.USER_REGISTERED": "נפתח חשבון",
+  "audit.USER_ACTIVATED": "משתמש הופעל",
+  "audit.USER_DEACTIVATED": "משתמש הושבת",
+  "audit.ACCOUNT_ANONYMIZED": "חשבון נמחק",
+  "audit.ASSET_PUBLISHED": "שטח פורסם",
+  "audit.ASSET_UNPUBLISHED": "שטח הושבת",
+  "audit.ASSET_DELETED": "שטח נמחק",
+  "audit.ASSET_VERIFIED": "שטח אומת",
+  "audit.ASSET_REJECTED": "שטח נדחה",
+  "audit.ASSET_SURFACE_MARKED": "פאת שלט סומנה",
+  "audit.BOOKING_DECIDED": "הוכרעה הזמנה",
+  "audit.BOOKING_CANCELLED": "הזמנה בוטלה",
+  "audit.SUBSCRIPTION_CHANGED": "מנוי עודכן",
+  "audit.BACKUP_DOWNLOADED": "הורד גיבוי מסד",
+
+  "admin.searchUsers": "חיפוש לפי שם, דוא״ל או חברה",
+  "admin.search": "חיפוש",
+  "admin.clearSearch": "ניקוי",
+  "admin.noUserMatch": "אין משתמשים שתואמים את החיפוש.",
+
+  "plan.statePaid": "מנוי בתוקף",
+  "plan.stateTrial": "בתקופת ניסיון",
+  "plan.stateLapsed": "המנוי פג",
+  "plan.limitCleared": "המכסה הוסרה. החשבון יכול לפרסם ללא הגבלה; הגישה למלאי לא השתנתה.",
+  "plan.committedUntilField": "התחייבות עד",
+  "plan.monthlyAmountField": "סכום חודשי (₪)",
+
+  // Shown when a page throws. Says what to do, never what broke.
+  "wizard.periodInPast": "חלון הזמינות שהוזן כבר הסתיים. אפשר להגדיר רק חלונות שעדיין לא נגמרו.",
+  "wizard.periodOverlaps": "התאריכים האלה כבר מכוסים בחלון קיים ({range}). מחקו אותו או בחרו טווח אחר.",
+  "request.fullyBooked": "כל התאריכים שביקשתם כבר תפוסים בהזמנה מאושרת. בחרו טווח אחר.",
+  "request.outsideWindows": "השטח אינו מוצע למכירה בתאריכים האלה. בדקו את חלונות הזמינות בעמוד השטח.",
+
+  "error.title": "משהו השתבש בטעינת העמוד",
+  "error.body": "זו תקלה אצלנו, לא אצלכם. נסו שוב — ואם זה חוזר, כתבו לנו ל־support@velto.co.il.",
+  "error.retry": "ניסיון נוסף",
+  "error.reference": "מזהה תקלה",
+  "error.notFoundTitle": "העמוד לא נמצא",
+  "error.notFoundBody": "ייתכן שהקישור שגוי, או שהשטח הוסר מהמפה על ידי בעליו.",
+
+  "filter.restrictedNote": "סינון לפי מחיר, תאריכים וזמינות נפתח עם חשבון. בינתיים אפשר לסנן לפי עיר וסוג שטח.",
+
+  "pager.label": "ניווט בין עמודים",
+  "pager.previous": "הקודם",
+  "pager.next": "הבא",
+  "pager.position": "עמוד {page} מתוך {pages}",
+  "map.truncated": "מוצגים {shown} מתוך {total} שטחים באזור הזה. התקרבו במפה או הוסיפו מסנן כדי לראות את כולם.",
+  "access.hiddenOnCard": "מחיר, כתובת ותאריכים פנויים נפתחים עם חשבון.",
+  "access.savedRestricted":
+    "השטחים ששמרתם נשמרו. הפרטים שלהם — כתובת, מחיר ותאריכים — ייפתחו שוב עם חידוש הגישה.",
+
   "notif.empty": "אין התראות חדשות.",
   "notif.markRead": "סימון כנקרא",
 };

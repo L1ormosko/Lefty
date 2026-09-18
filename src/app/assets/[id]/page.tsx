@@ -17,6 +17,7 @@ import { faceRatio, isUsableQuad, parseQuad } from "@/lib/mockup";
 import { StreetViewPanel } from "@/components/assets/StreetViewPanel";
 import { AccessNotice } from "@/components/access/AccessNotice";
 import { viewerAccess } from "@/server/subscription";
+import { safeExternalUrl } from "@/lib/validation";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -110,6 +111,11 @@ export default async function AssetPage({ params }: Params) {
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 
   const headlinePrice = priceLine(asset);
+  // An owner-supplied link, checked before it becomes an href. Rows written
+  // before the schema allow-listed http(s) could still carry a javascript:
+  // URL, which would be stored XSS against every advertiser who opened the
+  // listing; null means the link is simply not rendered.
+  const companyWebsite = safeExternalUrl(asset.company?.website);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
@@ -368,14 +374,14 @@ export default async function AssetPage({ params }: Params) {
                   <Num>{asset.company.contactPhone}</Num>
                 </a>
               )}
-              {asset.company?.website && (
+              {companyWebsite && (
                 <a
-                  href={asset.company.website}
+                  href={companyWebsite}
                   rel="noopener noreferrer nofollow"
                   target="_blank"
                   className="block text-sm text-brand-600 hover:underline w-fit"
                 >
-                  {asset.company.website}
+                  {companyWebsite}
                 </a>
               )}
             </div>

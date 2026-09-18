@@ -14,7 +14,8 @@ import {
 } from "@/lib/validation";
 import { toUserMessage, ValidationError } from "@/server/errors";
 import { ownerPlanStatus } from "@/server/subscription";
-import { toUtcDate } from "@/lib/dates";
+import { recordAudit } from "@/server/audit";
+import { isoDate, todayUtc, toUtcDate } from "@/lib/dates";
 import { t } from "@/lib/labels";
 import type { AssetType, Illumination, LocationTag, PermitStatus } from "@prisma/client";
 
@@ -178,12 +179,42 @@ export async function addAvailabilityPeriodAction(
     const parsed = availabilityPeriodSchema.safeParse(Object.fromEntries(formData));
     if (!parsed.success) return { ok: false, fields: fieldErrors(parsed.error) };
     const asset = await loadOwnedAsset(String(formData.get("assetId")), user);
+    const startDate = toUtcDate(parsed.data.startDate);
+    const endDate = toUtcDate(parsed.data.endDate);
+
+    // A window that has already closed cannot be sold, so declaring one is
+    // always a mistake - usually a mistyped year. Refusing it is kinder than
+    // storing a period that silently contributes nothing.
+    if (endDate < todayUtc()) {
+      throw new ValidationError(t("wizard.periodInPast"));
+    }
+
+    // Overlapping windows are not wrong arithmetically - availabilityFor()
+    // unions them - but they are wrong as a record: two rows saying "free in
+    // March" leave the owner unable to tell which one a note belongs to, and
+    // deleting one appears to do nothing. The honest answer is to refuse the
+    // duplicate and say which window already covers those dates.
+    const clash = await prisma.availabilityPeriod.findFirst({
+      where: {
+        assetId: asset.id,
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+      },
+      select: { startDate: true, endDate: true },
+    });
+    if (clash) {
+      throw new ValidationError(
+        t("wizard.periodOverlaps", {
+          range: `${isoDate(clash.startDate)} – ${isoDate(clash.endDate)}`,
+        })
+      );
+    }
 
     const period = await prisma.availabilityPeriod.create({
       data: {
         assetId: asset.id,
-        startDate: toUtcDate(parsed.data.startDate),
-        endDate: toUtcDate(parsed.data.endDate),
+        startDate,
+        endDate,
         note: parsed.data.note || null,
       },
       select: { id: true, startDate: true, endDate: true, note: true },
@@ -252,6 +283,14 @@ export async function publishAssetAction(_prev: AssetActionState, formData: Form
       where: { id: asset.id },
       data: { status: "ACTIVE", verificationStatus: asset.verifiedAt ? asset.verificationStatus : "PENDING" },
     });
+    await recordAudit({
+      actorId: user.id,
+      action: "ASSET_PUBLISHED",
+      targetType: "MediaAsset",
+      targetId: asset.id,
+      summary: asset.title,
+    });
+
     revalidatePath("/owner/assets");
     revalidatePath("/explore");
     revalidatePath("/");
@@ -271,6 +310,13 @@ export async function setAssetStatusAction(assetId: string, status: "ACTIVE" | "
       await requirePublishingRoom(asset.ownerId);
     }
     await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status } });
+    await recordAudit({
+      actorId: user.id,
+      action: status === "ACTIVE" ? "ASSET_PUBLISHED" : "ASSET_UNPUBLISHED",
+      targetType: "MediaAsset",
+      targetId: asset.id,
+      summary: asset.title,
+    });
     revalidatePath("/owner/assets");
     revalidatePath("/explore");
     revalidatePath("/");
@@ -330,6 +376,14 @@ export async function deleteAssetAction(assetId: string): Promise<AssetActionSta
     const engaged = inquiries > 0 || bookings > 0;
 
     if (asset.status === "DRAFT" && !engaged) {
+      // Logged before the delete: afterwards there is no row left to describe.
+      await recordAudit({
+        actorId: user.id,
+        action: "ASSET_DELETED",
+        targetType: "MediaAsset",
+        targetId: asset.id,
+        summary: asset.title,
+      });
       await prisma.mediaAsset.delete({ where: { id: asset.id } });
       revalidatePath("/owner/assets");
       return { ok: true, assetId: asset.id, message: "השטח נמחק." };
@@ -345,6 +399,13 @@ export async function deleteAssetAction(assetId: string): Promise<AssetActionSta
     }
 
     await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status: "INACTIVE" } });
+    await recordAudit({
+      actorId: user.id,
+      action: "ASSET_UNPUBLISHED",
+      targetType: "MediaAsset",
+      targetId: asset.id,
+      summary: asset.title,
+    });
     revalidatePath("/owner/assets");
     revalidatePath("/explore");
     revalidatePath("/");

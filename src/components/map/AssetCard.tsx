@@ -52,7 +52,8 @@ export function AssetCard({
             <h3 className="font-medium text-sm text-ink-900 line-clamp-2 flex-1">{asset.title}</h3>
           </div>
           <p className="text-xs text-ink-500 mt-0.5 truncate">
-            {asset.city} · {asset.address}
+            {asset.city}
+            {asset.address ? ` · ${asset.address}` : ""}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <AvailabilityBadge

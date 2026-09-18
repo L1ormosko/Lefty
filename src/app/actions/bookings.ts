@@ -6,6 +6,7 @@ import { loadOwnBooking } from "@/server/authz";
 import { bookingDecisionSchema, fieldErrors } from "@/lib/validation";
 import { cancelBooking, decideBooking } from "@/server/bookings";
 import { toUserMessage } from "@/server/errors";
+import { recordAudit } from "@/server/audit";
 import { t } from "@/lib/labels";
 import type { ActionState } from "./inquiries";
 
@@ -27,6 +28,14 @@ export async function decideBookingAction(_prev: ActionState, formData: FormData
       ownerNote: parsed.data.ownerNote || undefined,
     });
 
+    await recordAudit({
+      actorId: user.id,
+      action: "BOOKING_DECIDED",
+      targetType: "Booking",
+      targetId: parsed.data.bookingId,
+      summary: parsed.data.decision,
+    });
+
     revalidatePath("/owner/bookings");
     revalidatePath("/dashboard/bookings");
     return {
@@ -43,6 +52,12 @@ export async function cancelBookingAction(bookingId: string): Promise<ActionStat
     const user = await requireUser();
     await loadOwnBooking(bookingId, user);
     await cancelBooking(bookingId, user.id);
+    await recordAudit({
+      actorId: user.id,
+      action: "BOOKING_CANCELLED",
+      targetType: "Booking",
+      targetId: bookingId,
+    });
     revalidatePath("/owner/bookings");
     revalidatePath("/dashboard/bookings");
     return { ok: true, message: t("booking.CANCELLED") };

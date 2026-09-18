@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { t } from "@/lib/labels";
 import { availabilityFor, estimatePrice, nextAvailableDate } from "@/lib/availability";
 import { daysBetween, toUtcDate, todayUtc } from "@/lib/dates";
 import { rankAssets, type Brief, type Match, type ScorableAsset } from "@/lib/brief";
@@ -33,6 +34,8 @@ export type Recommendation = Match & {
     availability: ScorableAsset["availability"];
     priceEstimate: number | null;
     nextAvailable: string | null;
+    /** True when this row was blurred for a viewer without access. */
+    restricted?: boolean;
   };
 };
 
@@ -51,6 +54,35 @@ function briefWindow(brief: Brief): { start: Date; end: Date } | undefined {
   return end >= start ? { start, end } : undefined;
 }
 
+/**
+ * The same recommendation with everything VELTO sells removed.
+ *
+ * The brief was the hole in the paywall: it ranks the real inventory and used
+ * to hand an anonymous visitor the street address, a priced estimate and the
+ * date each sign frees up - the whole of what the map is careful not to give
+ * away. The ranking itself is not the product and stays visible; what it
+ * ranked is.
+ *
+ * Same rule as redactForRestricted() in server/assets.ts: the reasons and the
+ * gaps survive, because they are about the match rather than about the site.
+ */
+export function redactRecommendation(match: Recommendation): Recommendation {
+  return {
+    ...match,
+    asset: {
+      ...match.asset,
+      // Titles carry street names ("שלט חוצות - דרך חברון"). The type of sign
+      // is public anyway and tells the rows apart - see redactForRestricted().
+      title: t(`type.${match.asset.assetType}`),
+      address: "",
+      priceEstimate: null,
+      nextAvailable: null,
+      imageUrl: null,
+      restricted: true,
+    },
+  };
+}
+
 export async function runBrief(brief: Brief, limit = 24): Promise<Recommendation[]> {
   const where: Prisma.MediaAssetWhereInput = { status: "ACTIVE" };
   if (brief.cities.length) where.city = { in: brief.cities };
@@ -64,6 +96,13 @@ export async function runBrief(brief: Brief, limit = 24): Promise<Recommendation
     where,
     // A ceiling rather than the brief's limit: the ranking happens after the
     // query, so cutting here would throw away candidates before scoring them.
+    //
+    // Ordered, because an unordered ceiling is a silent lottery: past 500
+    // active assets Postgres would hand back whichever 500 it liked and the
+    // shortlist would change between identical searches. Verified inventory
+    // first, then newest, so the cut is at least deterministic and falls on
+    // the candidates least likely to be the right answer.
+    orderBy: [{ verificationStatus: "asc" }, { createdAt: "desc" }],
     take: 500,
     select: {
       id: true,

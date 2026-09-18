@@ -14,7 +14,7 @@ import { isLiveBooking } from "@/lib/bookings";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { notify } from "./notifications";
 import { daysBetween, toUtcDate, todayUtc } from "@/lib/dates";
-import { estimatePrice } from "@/lib/availability";
+import { availabilityFor, estimatePrice } from "@/lib/availability";
 import { t } from "@/lib/labels";
 
 const OVERLAP_CONSTRAINT = "Booking_no_overlapping_approved";
@@ -53,17 +53,61 @@ export async function hasApprovedOverlap(
   return conflict != null;
 }
 
-/** Validate a requested window against the asset's own rules. */
+/**
+ * Validate a requested window against the asset's own rules.
+ *
+ * The date checks were here from the start. What was missing is the one that
+ * matters commercially: whether any of those days are actually for sale. A
+ * request for a fortnight that is entirely taken by an approved booking used
+ * to be accepted, notify the owner, and sit in their queue as something they
+ * could only ever reject - the overlap constraint would refuse the approval.
+ * Wasting both sides' time and then blaming the database is not a workflow.
+ *
+ * Note what is deliberately still allowed: a window that is *partly* free. An
+ * advertiser asking about 1-30 November when the 20th onward is taken is
+ * asking a reasonable question, and the owner is the right person to answer
+ * it. Only a window with nothing left in it is refused.
+ */
 export async function validateRequestWindow(assetId: string, startDate: Date, endDate: Date) {
   const asset = await prisma.mediaAsset.findUnique({
     where: { id: assetId },
-    select: { id: true, status: true, minimumBookingDays: true, priceWeekly: true, priceMonthly: true },
+    select: {
+      id: true,
+      status: true,
+      verificationStatus: true,
+      minimumBookingDays: true,
+      priceWeekly: true,
+      priceMonthly: true,
+      periods: { select: { startDate: true, endDate: true } },
+      bookings: { where: { status: "APPROVED" }, select: { startDate: true, endDate: true } },
+    },
   });
   if (!asset || asset.status !== "ACTIVE") throw new NotFoundError();
   if (startDate > endDate) throw new ValidationError(t("request.dateOrderError"));
   if (startDate < todayUtc()) throw new ValidationError(t("request.pastDateError"));
   const days = daysBetween(startDate, endDate);
   if (days < asset.minimumBookingDays) throw new ValidationError(t("request.minDaysError"));
+
+  // The same function the map and the asset page answer with, so what an
+  // advertiser was shown and what the server accepts cannot disagree.
+  const state = availabilityFor(
+    {
+      status: asset.status,
+      verificationStatus: asset.verificationStatus,
+      periods: asset.periods,
+      approvedBookings: asset.bookings,
+    },
+    { start: startDate, end: endDate }
+  );
+  if (state === "OCCUPIED") {
+    const declared = asset.periods.some(
+      (p) => p.startDate <= endDate && p.endDate >= startDate
+    );
+    // Two different problems with two different fixes: the owner never offered
+    // these dates, or they did and somebody else bought them.
+    throw new ValidationError(declared ? t("request.fullyBooked") : t("request.outsideWindows"));
+  }
+
   return { asset, days };
 }
 

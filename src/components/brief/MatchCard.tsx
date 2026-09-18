@@ -44,21 +44,28 @@ export function MatchCard({ match }: { match: Recommendation }) {
           </div>
 
           <p className="text-sm text-ink-600 mt-0.5 truncate">
-            {t(`type.${a.assetType}`)} · {a.city} · {a.address}
+            {t(`type.${a.assetType}`)} · {a.city}
+            {a.address ? ` · ${a.address}` : ""}
           </p>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            <span className="text-ink-700">
-              <span className="text-ink-500 text-xs">{t("brief.priceForWindow")}: </span>
-              <Price amount={a.priceEstimate} />
-            </span>
-            {a.availability !== "AVAILABLE" && a.nextAvailable && (
+          {/* A viewer without access is told the fields are withheld, not shown
+              an empty price that reads as "this one has no price". */}
+          {a.restricted ? (
+            <p className="mt-2 text-sm text-ink-500">{t("access.hiddenOnCard")}</p>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <span className="text-ink-700">
-                <span className="text-ink-500 text-xs">{t("expiring.freesOn")} </span>
-                <Num>{formatDate(a.nextAvailable)}</Num>
+                <span className="text-ink-500 text-xs">{t("brief.priceForWindow")}: </span>
+                <Price amount={a.priceEstimate} />
               </span>
-            )}
-          </div>
+              {a.availability !== "AVAILABLE" && a.nextAvailable && (
+                <span className="text-ink-700">
+                  <span className="text-ink-500 text-xs">{t("expiring.freesOn")} </span>
+                  <Num>{formatDate(a.nextAvailable)}</Num>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

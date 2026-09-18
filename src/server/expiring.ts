@@ -37,6 +37,9 @@ export async function expiringForOwner(ownerId: string, withinDays = 60): Promis
       endDate: { gte: today, lte: addDays(today, withinDays) },
     },
     orderBy: { endDate: "asc" },
+    // A dashboard panel, not a report. Soonest first, so the cut falls on the
+    // contracts furthest from needing attention.
+    take: 50,
     select: {
       id: true,
       endDate: true,
@@ -84,6 +87,10 @@ export async function freeingSoon(withinDays = 45, limit = 12): Promise<FreeingA
       asset: { status: "ACTIVE" },
     },
     orderBy: { endDate: "asc" },
+    // Deduplicated to one row per asset below, so read a few times the limit
+    // rather than the whole table: without this the query grows with every
+    // booking ever approved, to render a list of twelve.
+    take: limit * 10,
     select: {
       endDate: true,
       assetId: true,

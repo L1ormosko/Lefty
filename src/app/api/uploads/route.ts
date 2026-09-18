@@ -6,7 +6,7 @@ import { requireUser } from "@/server/auth";
 import { loadOwnedAsset } from "@/server/authz";
 import { AppError } from "@/server/errors";
 import { rateLimit } from "@/server/rate-limit";
-import { MAX_STORED_BYTES, imageUrl, storeImage } from "@/server/storage";
+import { MAX_STORED_BYTES, imageKey, imageUrl, storage, storeImage } from "@/server/storage";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_DIMENSION = 8000;
@@ -78,9 +78,14 @@ export async function POST(request: Request) {
           sizeBytes: output.info.size,
           isPrimary: existing === 0,
           sortOrder: existing,
+          storageKey: imageKey(asset.id, id),
+          storageProvider: storage.name,
         },
       });
-      await storeImage({ imageId: id, data: output.data, tx });
+      // Inside the transaction where the provider can be - the database one is,
+      // an object store is not. Either way a throw here rolls the row back, so
+      // there is never an image row whose bytes are missing.
+      await storeImage({ assetId: asset.id, imageId: id, data: output.data, tx });
       return row;
     });
 

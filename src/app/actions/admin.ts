@@ -5,6 +5,7 @@ import { prisma } from "@/server/db";
 import { requireRole } from "@/server/auth";
 import { toUserMessage } from "@/server/errors";
 import { notify } from "@/server/notifications";
+import { recordAudit } from "@/server/audit";
 import { t } from "@/lib/labels";
 import { isUsableQuad, parseQuad } from "@/lib/mockup";
 import { Prisma } from "@prisma/client";
@@ -50,6 +51,14 @@ export async function verifyAssetAction(_prev: ActionState, formData: FormData):
       linkUrl: "/owner/assets",
     });
 
+    await recordAudit({
+      actorId: admin.id,
+      action: decision === "VERIFIED" ? "ASSET_VERIFIED" : "ASSET_REJECTED",
+      targetType: "MediaAsset",
+      targetId: asset.id,
+      summary: reviewNote ? `${asset.title} — ${reviewNote}` : asset.title,
+    });
+
     revalidatePath("/admin/assets");
     revalidatePath("/explore");
     revalidatePath("/");
@@ -61,8 +70,20 @@ export async function verifyAssetAction(_prev: ActionState, formData: FormData):
 
 export async function setAssetStatusAdminAction(assetId: string, status: "ACTIVE" | "INACTIVE"): Promise<ActionState> {
   try {
-    await requireRole("ADMIN");
-    await prisma.mediaAsset.update({ where: { id: assetId }, data: { status } });
+    const admin = await requireRole("ADMIN");
+    const asset = await prisma.mediaAsset.findUnique({
+      where: { id: assetId },
+      select: { id: true, title: true },
+    });
+    if (!asset) return { ok: false, error: "השטח לא נמצא." };
+    await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status } });
+    await recordAudit({
+      actorId: admin.id,
+      action: status === "ACTIVE" ? "ASSET_PUBLISHED" : "ASSET_UNPUBLISHED",
+      targetType: "MediaAsset",
+      targetId: asset.id,
+      summary: asset.title,
+    });
     revalidatePath("/admin/assets");
     revalidatePath("/explore");
     revalidatePath("/");
@@ -77,8 +98,17 @@ export async function setUserActiveAction(userId: string, isActive: boolean): Pr
   try {
     const admin = await requireRole("ADMIN");
     if (admin.id === userId) return { ok: false, error: "לא ניתן להשבית את המשתמש שלכם." };
+    const target = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!target) return { ok: false, error: "המשתמש לא נמצא." };
     await prisma.user.update({ where: { id: userId }, data: { isActive } });
     if (!isActive) await prisma.session.deleteMany({ where: { userId } });
+    await recordAudit({
+      actorId: admin.id,
+      action: isActive ? "USER_ACTIVATED" : "USER_DEACTIVATED",
+      targetType: "User",
+      targetId: userId,
+      summary: target.email,
+    });
     revalidatePath("/admin/users");
     return { ok: true, message: isActive ? t("admin.activate") : t("admin.deactivate") };
   } catch (err) {
@@ -95,52 +125,103 @@ export async function setUserActiveAction(userId: string, isActive: boolean): Pr
  */
 export async function setOwnerPlanAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   try {
-    await requireRole("ADMIN");
+    const admin = await requireRole("ADMIN");
     const userId = String(formData.get("userId") ?? "");
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, email: true },
+    });
     if (!user) return { ok: false, error: "המשתמש לא נמצא." };
-    if (user.role !== "MEDIA_OWNER") {
-      return { ok: false, error: "מנוי רלוונטי לבעלי שטחים בלבד." };
+    // Both sides of the marketplace pay. This used to refuse anything but a
+    // media owner, which left no way at all to record that an advertiser had
+    // paid - and an advertiser whose trial ends with no recorded payment
+    // simply loses the inventory. The revenue model had no operating handle.
+    if (user.role === "ADMIN") {
+      return { ok: false, error: "למנהלים יש גישה מלאה ממילא." };
     }
 
-    // An empty limit is how a plan is removed - see below. Anything else has
-    // to be a real, non-negative count.
+    const isOwner = user.role === "MEDIA_OWNER";
+
+    // An empty limit means "no cap on published listings", which is what every
+    // advertiser is and what an owner on an unmetered deal is.
+    //
+    // It used to delete the whole Subscription row. That was safe when the row
+    // held nothing but a listing limit, and became destructive the moment the
+    // same row started carrying trialEndsAt and paidThrough: an admin clearing
+    // a quota would silently revoke the customer's access to the inventory.
     const rawLimit = String(formData.get("activeListingLimit") ?? "").trim();
-    if (rawLimit === "") {
-      await prisma.subscription.deleteMany({ where: { userId } });
-      revalidatePath("/admin/users");
-      revalidatePath("/owner/assets");
-      return { ok: true, message: t("plan.removed") };
+    let limit: number | null = null;
+    if (rawLimit !== "") {
+      const parsedLimit = Number(rawLimit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 0) {
+        return { ok: false, error: "מכסת שטחים חייבת להיות מספר שלם." };
+      }
+      if (!isOwner) {
+        return { ok: false, error: "מכסת שטחים רלוונטית לבעלי שטחים בלבד." };
+      }
+      limit = parsedLimit;
     }
 
-    const limit = Number(rawLimit);
-    if (!Number.isInteger(limit) || limit < 0) {
-      return { ok: false, error: "מכסת שטחים חייבת להיות מספר שלם." };
-    }
+    const paidThrough = endOfDay(String(formData.get("paidThrough") ?? "").trim());
+    if (paidThrough === "invalid") return { ok: false, error: "תאריך לא תקין." };
+    const committedUntil = endOfDay(String(formData.get("committedUntil") ?? "").trim());
+    if (committedUntil === "invalid") return { ok: false, error: "תאריך לא תקין." };
 
-    const rawPaidThrough = String(formData.get("paidThrough") ?? "").trim();
-    // Stored at the end of the day: a subscription paid "through the 30th"
-    // lapses on the 31st, not at midnight on the 30th.
-    const paidThrough = rawPaidThrough ? new Date(`${rawPaidThrough}T23:59:59.999Z`) : null;
-    if (paidThrough && Number.isNaN(paidThrough.getTime())) {
-      return { ok: false, error: "תאריך לא תקין." };
+    const rawAmount = String(formData.get("monthlyAmount") ?? "").trim();
+    let monthlyAmount: number | null = null;
+    if (rawAmount !== "") {
+      const amount = Number(rawAmount);
+      if (!Number.isInteger(amount) || amount < 0) {
+        return { ok: false, error: "סכום חודשי חייב להיות מספר שלם." };
+      }
+      monthlyAmount = amount;
     }
 
     const invoiceRef = String(formData.get("invoiceRef") ?? "").trim().slice(0, 120) || null;
     const note = String(formData.get("note") ?? "").trim().slice(0, 500) || null;
 
+    const data = { activeListingLimit: limit, paidThrough, committedUntil, monthlyAmount, invoiceRef, note };
     await prisma.subscription.upsert({
       where: { userId },
-      create: { userId, activeListingLimit: limit, paidThrough, invoiceRef, note },
-      update: { activeListingLimit: limit, paidThrough, invoiceRef, note },
+      create: { userId, ...data },
+      // trialEndsAt is deliberately untouched: it is a record of what the
+      // account was given at registration, not a lever.
+      update: data,
+    });
+
+    await recordAudit({
+      actorId: admin.id,
+      action: "SUBSCRIPTION_CHANGED",
+      targetType: "User",
+      targetId: user.id,
+      summary: `${user.email} · מכסה ${limit ?? "ללא הגבלה"} · בתוקף עד ${
+        paidThrough ? paidThrough.toISOString().slice(0, 10) : "לא צוין"
+      }`,
     });
 
     revalidatePath("/admin/users");
     revalidatePath("/owner/assets");
-    return { ok: true, message: t("plan.saved") };
+    revalidatePath("/explore");
+    // Says what happened, not what was pressed. Clearing the quota used to
+    // report "subscription cancelled" while also deleting the row that held
+    // the customer's access - the message was accurate about a behaviour that
+    // should never have existed.
+    return { ok: true, message: limit === null && isOwner ? t("plan.limitCleared") : t("plan.saved") };
   } catch (err) {
     return { ok: false, error: toUserMessage(err) };
   }
+}
+
+/**
+ * A yyyy-mm-dd form field as an instant, at the very end of that day.
+ *
+ * "Paid through the 30th" has to include the 30th: storing midnight would cut
+ * a customer off a day early, on the day they paid for.
+ */
+function endOfDay(raw: string): Date | null | "invalid" {
+  if (!raw) return null;
+  const date = new Date(`${raw}T23:59:59.999Z`);
+  return Number.isNaN(date.getTime()) ? "invalid" : date;
 }
 
 /**
@@ -153,7 +234,7 @@ export async function setOwnerPlanAction(_prev: ActionState, formData: FormData)
  */
 export async function setImageQuadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   try {
-    await requireRole("ADMIN");
+    const admin = await requireRole("ADMIN");
     const imageId = String(formData.get("imageId") ?? "");
     const image = await prisma.mediaAssetImage.findUnique({
       where: { id: imageId },
@@ -189,6 +270,13 @@ export async function setImageQuadAction(_prev: ActionState, formData: FormData)
     await prisma.mediaAssetImage.update({
       where: { id: image.id },
       data: { surfaceQuad: quad },
+    });
+    await recordAudit({
+      actorId: admin.id,
+      action: "ASSET_SURFACE_MARKED",
+      targetType: "MediaAssetImage",
+      targetId: image.id,
+      summary: "פאה סומנה",
     });
     revalidatePath(`/assets/${image.assetId}`);
     revalidatePath("/admin/assets");

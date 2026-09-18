@@ -17,10 +17,21 @@ import { ConflictError } from "./errors";
  * the back-and-forth, and the thread renders it as the first thing said.
  */
 
+/**
+ * Every message on one inquiry, oldest first.
+ *
+ * Capped, because a thread is user-generated and nothing stops two determined
+ * parties from writing a thousand messages on one booking. Oldest-first with a
+ * ceiling keeps the conversation readable from the start; if a thread ever
+ * reaches this, the page needs paging rather than a bigger number.
+ */
+export const MAX_THREAD_MESSAGES = 200;
+
 export async function loadThread(inquiryId: string) {
   return prisma.inquiryMessage.findMany({
     where: { inquiryId },
     orderBy: { createdAt: "asc" },
+    take: MAX_THREAD_MESSAGES,
     include: { author: { select: { id: true, name: true, role: true } } },
   });
 }

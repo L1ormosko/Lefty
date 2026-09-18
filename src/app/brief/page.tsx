@@ -6,8 +6,11 @@ import { briefQuerySchema } from "@/lib/validation";
 import { EMPTY_BRIEF, applyExplicit, isEmptyBrief, type Brief } from "@/lib/brief";
 import { citiesWithInventory } from "@/server/assets";
 import { parseBriefText, aiEnabled } from "@/server/ai";
-import { runBrief } from "@/server/brief";
+import { runBrief, redactRecommendation } from "@/server/brief";
 import { freeingSoon } from "@/server/expiring";
+import { getCurrentUser } from "@/server/auth";
+import { viewerAccess } from "@/server/subscription";
+import { AccessNotice } from "@/components/access/AccessNotice";
 import { todayUtc, formatDate } from "@/lib/dates";
 import { Card, Num } from "@/components/ui";
 import { Section } from "@/components/DashboardShell";
@@ -62,15 +65,29 @@ export default async function BriefPage({
   });
 
   const asked = !isEmptyBrief(brief);
-  const [matches, freeing] = await Promise.all([
+  const viewer = await viewerAccess(await getCurrentUser());
+  const [ranked, freeingRows] = await Promise.all([
     asked ? runBrief(brief) : Promise.resolve([]),
-    freeingSoon(),
+    // Which signs come free, and when, is availability data - the thing the
+    // map withholds. Not computed at all for a viewer without access, rather
+    // than computed and hidden.
+    viewer.full ? freeingSoon() : Promise.resolve([]),
   ]);
+
+  // The matcher runs either way: which of our sites best fits a campaign is a
+  // real answer and a fair sample of the product. What each site *is* - its
+  // address, its price, the date it frees up - is what the subscription buys.
+  const matches = viewer.full ? ranked : ranked.map(redactRecommendation);
+  const freeing = freeingRows;
 
   return (
     <main className="mx-auto w-full max-w-[1100px] px-4 py-6 flex-1">
       <h1 className="text-xl font-semibold text-ink-900">{t("brief.title")}</h1>
       <p className="mt-1 text-sm text-ink-600 max-w-2xl">{t("brief.lead")}</p>
+
+      {/* Said before the results, not after: someone reading a blurred
+          shortlist should know why it is blurred while they read it. */}
+      <AccessNotice access={viewer} className="mt-4" />
 
       <div className="mt-5">
         <BriefForm brief={brief} text={text} cities={cities} />

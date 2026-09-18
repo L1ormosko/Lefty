@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { cleanup, makeAsset, makeUser, prisma } from "./factories";
-import { GET as getImage } from "@/app/api/images/[id]/route";
 import { MAX_STORED_BYTES, imageUrl, readImage, storeImage } from "@/server/storage";
+import { canViewImage } from "@/server/images";
 import { demoImage } from "../prisma/demo-image";
 import { ASSET_TYPES } from "@/lib/constants";
+import { addDays, todayUtc } from "@/lib/dates";
 
 let assetId: string;
 
@@ -18,16 +19,25 @@ async function webp(): Promise<Buffer> {
     .toBuffer();
 }
 
-async function makeImage(): Promise<{ id: string; data: Buffer }> {
+async function makeImage(onAsset: string = assetId): Promise<{ id: string; data: Buffer }> {
   const id = randomUUID();
   const data = await webp();
   await prisma.$transaction(async (tx) => {
     await tx.mediaAssetImage.create({
-      data: { id, assetId, url: imageUrl(id), isPrimary: false, sortOrder: 0 },
+      data: { id, assetId: onAsset, url: imageUrl(id), isPrimary: false, sortOrder: 0 },
     });
-    await storeImage({ imageId: id, data, tx });
+    await storeImage({ assetId: onAsset, imageId: id, data, tx });
   });
   return { id, data };
+}
+
+/** A paid-up subscription, so "has access" is not confused with "is signed in". */
+async function grantAccess(userId: string) {
+  await prisma.subscription.upsert({
+    where: { userId },
+    create: { userId, paidThrough: addDays(todayUtc(), 30) },
+    update: { paidThrough: addDays(todayUtc(), 30) },
+  });
 }
 
 beforeAll(async () => {
@@ -75,7 +85,7 @@ describe("image storage", () => {
       await tx.mediaAssetImage.create({
         data: { id, assetId: doomed.id, url: imageUrl(id), isPrimary: true, sortOrder: 0 },
       });
-      await storeImage({ imageId: id, data: await webp(), tx });
+      await storeImage({ assetId: doomed.id, imageId: id, data: await webp(), tx });
     });
 
     await prisma.mediaAsset.delete({ where: { id: doomed.id } });
@@ -87,25 +97,64 @@ describe("image storage", () => {
   });
 });
 
-describe("image route", () => {
-  it("serves the bytes with the stored content type", async () => {
-    const { id, data } = await makeImage();
-    const res = await getImage(new Request(`http://test/api/images/${id}`), {
-      params: Promise.resolve({ id }),
-    });
+/**
+ * Who may see a photograph.
+ *
+ * Tested here rather than through the route because the route reads a session
+ * cookie, and a test that stubs Next's request scope would be asserting on the
+ * stub. canViewImage is where the decision actually lives.
+ *
+ * The rule being pinned: holding the id is not permission. Images used to be
+ * served to anyone who knew the URL, which leaked the photographs of listings
+ * that were never public and the photographs the subscription gates.
+ */
+describe("image authorization", () => {
+  it("lets the owner see their own listing's photo whatever its status", async () => {
+    const owner = await makeUser("MEDIA_OWNER");
+    const draft = await makeAsset(owner.id, { status: "DRAFT" });
+    const { id } = await makeImage(draft.id);
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("image/webp");
-    expect(res.headers.get("cache-control")).toContain("immutable");
-    expect(Buffer.compare(Buffer.from(await res.arrayBuffer()), data)).toBe(0);
+    expect(await canViewImage(id, { id: owner.id, role: "MEDIA_OWNER" })).toBe(true);
   });
 
-  it("404s on an unknown id rather than erroring", async () => {
-    const id = randomUUID();
-    const res = await getImage(new Request(`http://test/api/images/${id}`), {
-      params: Promise.resolve({ id }),
-    });
-    expect(res.status).toBe(404);
+  it("refuses everyone else a photo of a listing that is not public", async () => {
+    const owner = await makeUser("MEDIA_OWNER");
+    const stranger = await makeUser("ADVERTISER");
+    await grantAccess(stranger.id);
+    const hidden = await makeAsset(owner.id, { status: "INACTIVE" });
+    const { id } = await makeImage(hidden.id);
+
+    // Even a paying advertiser: a listing taken off the map takes its
+    // photographs with it.
+    expect(await canViewImage(id, { id: stranger.id, role: "ADVERTISER" })).toBe(false);
+    expect(await canViewImage(id, null)).toBe(false);
+  });
+
+  it("treats a public listing's photo as part of what the subscription buys", async () => {
+    const owner = await makeUser("MEDIA_OWNER");
+    const live = await makeAsset(owner.id, { status: "ACTIVE" });
+    const { id } = await makeImage(live.id);
+
+    const paying = await makeUser("ADVERTISER");
+    await grantAccess(paying.id);
+    const lapsed = await makeUser("ADVERTISER");
+
+    expect(await canViewImage(id, { id: paying.id, role: "ADVERTISER" })).toBe(true);
+    expect(await canViewImage(id, { id: lapsed.id, role: "ADVERTISER" })).toBe(false);
+    expect(await canViewImage(id, null)).toBe(false);
+  });
+
+  it("lets an admin see everything - a verifier who cannot see the photo is useless", async () => {
+    const owner = await makeUser("MEDIA_OWNER");
+    const draft = await makeAsset(owner.id, { status: "DRAFT" });
+    const { id } = await makeImage(draft.id);
+    const admin = await makeUser("ADMIN");
+
+    expect(await canViewImage(id, { id: admin.id, role: "ADMIN" })).toBe(true);
+  });
+
+  it("says no to an id that does not exist, without leaking that it does not", async () => {
+    expect(await canViewImage(randomUUID(), null)).toBe(false);
   });
 });
 

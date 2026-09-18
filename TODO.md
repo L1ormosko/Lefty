@@ -8,14 +8,22 @@
       Postgres (`MediaAssetImageBlob`, served by `/api/images/[id]`). See
       DECISIONS.md §14. Run `npx tsx prisma/backfill-image-blobs.ts` once per
       environment, then remove `UPLOAD_DIR`.
-- [ ] **Swap `src/server/storage.ts` for object storage before ~250 assets.**
+- [ ] **Swap in an object-storage provider before ~250 assets.**
+      The seam is now built: `src/server/storage/` holds a `StorageProvider`
+      interface, `database.ts` implements it, and `MediaAssetImage` records
+      `storageKey` + `storageProvider` per row. Adding R2/S3/Supabase is a new
+      file, one line in `index.ts`, `VELTO_STORAGE=<name>`, and a backfill -
+      no caller changes, and a half-migrated database still serves every image
+      because each row says where its own bytes live.
       Postgres holds roughly 250 fully photographed assets per GB, and the free
       tier is 1GB. This is a known ceiling, not a surprise — but it arrives
       without warning, so watch the count.
-- [ ] Images are served unauthenticated by id, matching the old static
-      `/uploads/<uuid>.webp` behaviour. An image belonging to a non-ACTIVE
-      asset should arguably be owner/admin-only, the way `getPublicAsset`
-      already is.
+- [x] ~~Images are served unauthenticated by id~~ — `/api/images/[id]` now
+      asks `server/images.ts`: the owner and admins always; nobody else for a
+      listing that is not ACTIVE; and for a public listing the photograph is
+      part of what the subscription buys. 404 rather than 403, because whether
+      an image exists is itself information. Cache-Control is `private` with
+      `Vary: Cookie`.
 - [ ] **No database backups.** Free-tier Postgres has none, and **it is deleted
       on 2026-10-07** — that is a hard date, not an estimate. A paid plan with
       daily backups is the minimum before real customer data.
@@ -55,6 +63,8 @@
 - [ ] **`runBrief` scores in JS after a `take: 500` ceiling.** Fine at pilot
       scale and wrong the moment there are more than 500 active assets: the
       cut happens before the ranking. Move the hard filters into SQL first.
+      The ceiling is at least deterministic now (ordered verified-first, then
+      newest), so identical searches return identical shortlists.
 - [ ] Saved briefs and an alert when an asset matching one frees up. The data
       is already there (`freeingSoon` + `SavedAsset`); the notification is not.
 - [ ] Location tags are free-form per owner and unverifiable. If they start
@@ -67,13 +77,24 @@
       claim.
 
 ### P2 — correctness and scale
-- [ ] Availability is computed in JS *after* `take`, so pagination would drop
-      rows. Nothing paginates yet — that is the bug waiting to happen.
-- [ ] No pagination anywhere (assets, requests, bookings, notifications,
-      admin lists)
-- [ ] The rate limiter is in-process; a second instance halves every limit
-- [ ] No audit log of admin actions (verify, reject, deactivate a user)
-- [ ] No error tracking, no `/healthz`, no uptime check
+- [x] ~~Availability is computed in JS *after* `take`~~ — `queryMap` reads to a
+      separate ceiling, filters, then cuts, and reports `total` + `truncated`
+      so the map can say when it is showing a subset.
+- [x] ~~No pagination anywhere~~ — `components/pager.tsx` (offset paging, in the
+      URL) on every admin list, both owner lists, and the advertiser's
+      requests, bookings and saved assets. Nav badge counts are counted in the
+      database, not from the visible page.
+- [ ] The rate limiter is in-process; a second instance halves every limit.
+      **Decide this before scaling past one instance**, not after.
+- [x] ~~No audit log of admin actions~~ — `AuditLog` + `server/audit.ts`, read
+      at `/admin/audit`. Records verification decisions, user activation,
+      subscription changes, publish/unpublish/delete, booking decisions,
+      account erasure and backup downloads. Never blocks the operation it logs.
+- [x] ~~No `/healthz`~~ — `/api/healthz` runs a real `SELECT 1`, because this
+      app is unusable without its database and "the process is up" is not the
+      question. Still no error tracking.
+- [ ] No error tracking (Sentry or equivalent). `error.tsx` shows the user a
+      digest id and logs the detail, which is the minimum, not a replacement.
 
 ### P3 — map and UX polish (from the map + screen-by-screen reviews)
 - [ ] Commercial basemap (the keyless OSM style is dev-only per OSM policy)

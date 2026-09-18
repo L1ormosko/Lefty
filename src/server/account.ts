@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "@/server/db";
 import { hashPassword } from "@/server/auth";
 import { ConflictError, NotFoundError } from "@/server/errors";
+import { recordAudit } from "@/server/audit";
 import { todayUtc } from "@/lib/dates";
 
 /**
@@ -257,5 +258,16 @@ export async function anonymizeUser(userId: string): Promise<void> {
         deletedAt: new Date(),
       },
     });
+  });
+
+  // Recorded after the transaction, and deliberately without the old email:
+  // the point of the row is that an erasure happened and when, not who it was.
+  // The actor reference resolves to the now-anonymized account, which is the
+  // correct answer to "who did this".
+  await recordAudit({
+    actorId: userId,
+    action: "ACCOUNT_ANONYMIZED",
+    targetType: "User",
+    targetId: userId,
   });
 }

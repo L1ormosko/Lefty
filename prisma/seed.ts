@@ -405,6 +405,10 @@ async function main() {
             isPrimary: yawDeg === 0,
             sortOrder: i,
             viewAngleDeg: yawDeg,
+            // Same shape the upload route records, so demo rows and real ones
+            // are indistinguishable to the storage layer.
+            storageKey: `assets/${asset.id}/${imageId}.webp`,
+            storageProvider: "database",
             // Every demo listing gets its face marked, not just one.
             //
             // It was one, and that one sorted last of fifteen on /explore, so

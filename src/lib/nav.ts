@@ -25,4 +25,5 @@ export const adminNav = () => [
   { href: "/admin/users", label: t("admin.users") },
   { href: "/admin/inquiries", label: t("dash.requests") },
   { href: "/admin/bookings", label: t("dash.bookings") },
+  { href: "/admin/audit", label: t("audit.title") },
 ];

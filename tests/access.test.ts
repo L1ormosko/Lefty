@@ -106,6 +106,11 @@ describe("redaction is real, not cosmetic", () => {
     const row = rows.find((r) => r.id === asset.id)!;
     const hidden = redactForRestricted(row);
     expect(hidden.title).not.toContain("חברון");
-    expect(hidden.title).toContain("באר שבע");
+    // What replaces it is the type of sign rather than the city. The city made
+    // a shortlist of ten read as ten identical cards called "באר שבע" -
+    // redacted, and useless as a ranking. The type is public on the card
+    // anyway and tells the rows apart.
+    expect(hidden.title).toBe("שלט חוצות");
+    expect(hidden.city).toBe("באר שבע");
   });
 });

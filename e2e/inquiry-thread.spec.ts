@@ -18,8 +18,14 @@ test("both sides can keep talking on an inquiry", async ({ page, browser }) => {
   let assetId: string;
   let ownerEmail: string;
   try {
+    // Deliberately not just "any ACTIVE asset": findFirst with no ordering
+    // returned the one the seed books solid for the next six weeks, so the
+    // window this spec asks for was already sold. The server now refuses that
+    // - correctly - and the spec was left waiting for an inquiry that was
+    // never created. Pick one with no approved booking at all.
     const asset = await prisma.mediaAsset.findFirstOrThrow({
-      where: { status: "ACTIVE" },
+      where: { status: "ACTIVE", bookings: { none: { status: "APPROVED" } } },
+      orderBy: { createdAt: "asc" },
       include: { owner: { select: { email: true } } },
     });
     assetId = asset.id;

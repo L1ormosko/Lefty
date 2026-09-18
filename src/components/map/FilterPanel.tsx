@@ -14,13 +14,32 @@ type Props = {
   resultCount: number;
   onApply?: () => void;
   className?: string;
+  /**
+   * True for a viewer without a live trial or subscription.
+   *
+   * The server already refuses to apply price, date, availability and free-text
+   * filters for such a viewer - they are an oracle for exactly the values the
+   * redaction withholds (see withoutSaleableFilters in server/assets.ts). This
+   * flag is the other half: a control that has been disarmed must not still be
+   * on screen, or the product is lying about what it does.
+   */
+  restricted?: boolean;
 };
 
 function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
-export function FilterPanel({ filters, cities, onChange, onReset, resultCount, onApply, className }: Props) {
+export function FilterPanel({
+  filters,
+  cities,
+  onChange,
+  onReset,
+  resultCount,
+  onApply,
+  className,
+  restricted = false,
+}: Props) {
   return (
     <div className={cx("flex flex-col h-full", className)}>
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -60,6 +79,7 @@ export function FilterPanel({ filters, cities, onChange, onReset, resultCount, o
           </div>
         </fieldset>
 
+        {!restricted && (
         <fieldset>
           <legend className="text-sm font-medium text-ink-800 mb-2">{t("filter.availability")}</legend>
           <div className="space-y-1.5">
@@ -76,7 +96,9 @@ export function FilterPanel({ filters, cities, onChange, onReset, resultCount, o
             ))}
           </div>
         </fieldset>
+        )}
 
+        {!restricted && (
         <section>
           <p className="text-sm font-medium text-ink-800 mb-2">{t("filter.dates")}</p>
           <div className="grid grid-cols-2 gap-2">
@@ -109,7 +131,9 @@ export function FilterPanel({ filters, cities, onChange, onReset, resultCount, o
             </div>
           </div>
         </section>
+        )}
 
+        {!restricted && (
         <section>
           <p className="text-sm font-medium text-ink-800 mb-2">
             {t("filter.priceRange")} <span className="text-ink-500 font-normal">({CURRENCY})</span>
@@ -137,6 +161,13 @@ export function FilterPanel({ filters, cities, onChange, onReset, resultCount, o
             />
           </div>
         </section>
+        )}
+
+        {restricted && (
+          <p className="rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-ink-700">
+            {t("filter.restrictedNote")}
+          </p>
+        )}
 
         <section className="space-y-2 border-t border-ink-200 pt-4">
           <label className="flex items-center gap-2 text-sm text-ink-700 cursor-pointer">

@@ -9,6 +9,7 @@ import { DemoBadge, StatusPill, VerificationBadge } from "@/components/badges";
 import { VerifyAssetForm } from "@/components/admin/VerifyAssetForm";
 import { MarkSurfaceForm } from "@/components/admin/MarkSurfaceForm";
 import { parseQuad } from "@/lib/mockup";
+import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,11 @@ const FILTERS = [
 export default async function AdminAssets({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; page?: string }>;
 }) {
   await requireRole("ADMIN");
-  const { filter = "pending" } = await searchParams;
+  const { filter = "pending", page: pageParam } = await searchParams;
+  const page = pageFromParam(pageParam);
   const where =
     filter === "verified"
       ? { verificationStatus: "VERIFIED" as const }
@@ -56,7 +58,8 @@ export default async function AdminAssets({
   const assets = await prisma.mediaAsset.findMany({
     where,
     orderBy: { updatedAt: "desc" },
-    take: 100,
+    take: PAGE_SIZE,
+    skip: skipFor(page),
     include: {
       owner: { select: { id: true, name: true, email: true } },
       company: { select: { name: true } },
@@ -109,6 +112,7 @@ export default async function AdminAssets({
           }
         />
       ) : (
+        <>
         <div className="space-y-3">
           {assets.map((asset) => (
             // data-admin-asset scopes a test (or a person reading the DOM) to
@@ -155,6 +159,10 @@ export default async function AdminAssets({
             </div>
           ))}
         </div>
+        {/* The tab has to survive paging, or page 2 of "rejected" silently
+            becomes page 2 of "pending". */}
+        <Pager page={page} total={counts[filter] ?? countAll} basePath="/admin/assets" params={{ filter }} />
+        </>
       )}
     </DashboardShell>
   );

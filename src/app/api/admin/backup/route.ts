@@ -2,6 +2,7 @@ import { requireRole } from "@/server/auth";
 import { exportDatabase } from "@/server/backup";
 import { rateLimit } from "@/server/rate-limit";
 import { AppError } from "@/server/errors";
+import { recordAudit } from "@/server/audit";
 
 /**
  * Download a full database backup.
@@ -20,6 +21,14 @@ export async function GET() {
       return new Response("Too many backup requests", { status: 429 });
     }
     payload = await exportDatabase();
+    // A full dump of every user's personal data leaving the building is the
+    // single most consequential thing an admin session can do.
+    await recordAudit({
+      actorId: admin.id,
+      action: "BACKUP_DOWNLOADED",
+      targetType: "Database",
+      targetId: "backup",
+    });
   } catch (err) {
     if (err instanceof AppError) return new Response(err.message, { status: err.httpStatus });
     console.error("[velto] backup failed:", err);

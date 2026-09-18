@@ -40,6 +40,8 @@ export function Discover({ initialAssets, cities, access }: Props) {
   const [assets, setAssets] = useState<MapAsset[]>(initialAssets);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Which asset the pointer (or keyboard focus) is on, in either direction.
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -99,8 +101,17 @@ export function Discover({ initialAssets, cities, access }: Props) {
       }
       const res = await fetch(`/api/assets?${params.toString()}`, { signal: controller.signal });
       if (!res.ok) throw new Error("request failed");
-      const data = (await res.json()) as { assets: MapAsset[] };
+      const data = (await res.json()) as {
+        assets: MapAsset[];
+        total?: number;
+        truncated?: boolean;
+      };
       setAssets(data.assets);
+      // The map is bounded, so it can be showing part of an answer. Saying so
+      // is the difference between "there are four signs here" and "here are
+      // four of the twenty signs here".
+      setTotal(typeof data.total === "number" ? data.total : null);
+      setTruncated(Boolean(data.truncated));
     } catch (err) {
       if ((err as Error)?.name === "AbortError") return;
       setError(t("common.error"));
@@ -312,6 +323,21 @@ export function Discover({ initialAssets, cities, access }: Props) {
     <div data-results={surface} className="space-y-2 p-3">
       <AccessNotice access={access} className="mb-2" />
 
+      {/* The map is bounded by the viewport and by a limit, so it can be
+          showing part of an answer. A list that quietly stops is how someone
+          concludes a city has four billboards when it has twenty. */}
+      {truncated && total != null && (
+        <p
+          data-truncated
+          className="mb-2 rounded-md border border-warn-200 bg-warn-50 px-3 py-2 text-sm text-warn-800"
+        >
+          {t("map.truncated", {
+            shown: `\u2068${assets.length}\u2069`,
+            total: `\u2068${total}\u2069`,
+          })}
+        </p>
+      )}
+
       <FilterChips chips={chips} onClear={clearFilter} onClearAll={reset} className="pb-1" />
 
       {assets.length === 0 && !loading ? (
@@ -399,6 +425,7 @@ export function Discover({ initialAssets, cities, access }: Props) {
           onChange={patch}
           onReset={reset}
           resultCount={assets.length}
+          restricted={!access.full}
           className="flex-1 min-h-0"
         />
       </aside>
@@ -570,6 +597,7 @@ export function Discover({ initialAssets, cities, access }: Props) {
               onChange={patch}
               onReset={reset}
               resultCount={assets.length}
+              restricted={!access.full}
               onApply={() => setFiltersOpen(false)}
               className="flex-1 min-h-0"
             />
