@@ -32,7 +32,13 @@ export function DashboardShell({
               overflow-x-auto below only scrolls once the nav is allowed to be
               narrower than its contents. */}
           <nav aria-label={title} className="min-w-0 lg:sticky lg:top-20">
-            <ul className="flex lg:flex-col gap-1 overflow-x-auto pb-1">
+            {/* Wraps on a phone rather than scrolling sideways.
+                Horizontal scroll was fine at five tabs and stopped being fine
+                at six: the admin nav clipped "יומן פעולות" down to "יו",
+                which reads as a rendering fault rather than as an invitation
+                to scroll. Two tidy rows say the same thing and hide nothing.
+                The sidebar layout from lg: up is unchanged. */}
+            <ul className="flex flex-wrap lg:flex-nowrap lg:flex-col gap-1 overflow-x-auto pb-1">
               {nav.map((item) => {
                 const active = current === item.href;
                 return (

@@ -119,8 +119,28 @@
       run found six errors and seven warnings and all were fixed rather than
       suppressed. **Wire this into CI** — a lint that nobody runs is what this
       was.
+- [x] ~~N+1 / query cost was never measured~~ — `VELTO_LOG_QUERIES=1 npm run dev`
+      prints every statement, and a walk of all 16 list screens was counted
+      before and after. The finding was not the pages: it was `/api/images/[id]`
+      spending a query to authorize and a second to find the same row's
+      storage key, once per card on screen. One lookup now answers both.
+      **573 → 345 queries** for the identical walk.
 - [ ] No error tracking (Sentry or equivalent). `error.tsx` shows the user a
       digest id and logs the detail, which is the minimum, not a replacement.
+
+### Screen sweep and failure states — done, with what it found
+- [x] Every screen photographed at desktop and phone width (27 pages × 2):
+      **zero horizontal overflow, zero console errors.** One real defect found
+      and fixed: the admin tab strip clipped the sixth tab down to "יו", which
+      reads as a rendering fault rather than as an invitation to scroll. The
+      dashboard nav now wraps on a phone instead of scrolling sideways.
+- [x] `e2e/failure-states.spec.ts` walks the ways each journey fails:
+      duplicate signup, wrong password (and the identical message for an
+      unknown address, so login cannot enumerate accounts), publishing without
+      a photo, requesting dates that are already sold, opening another owner's
+      listing by id, a URL that does not exist, an asset id that does not
+      exist, and uploading a text file as a photograph. Every one is a
+      readable Hebrew message on a page that still works.
 
 ### P3 — map and UX polish (from the map + screen-by-screen reviews)
 - [ ] Commercial basemap (the keyless OSM style is dev-only per OSM policy)

@@ -1,6 +1,6 @@
 import { getCurrentUser } from "@/server/auth";
-import { canViewImage } from "@/server/images";
-import { readImage } from "@/server/storage";
+import { loadViewableImage } from "@/server/images";
+import { readImageAt } from "@/server/storage";
 
 /**
  * Serve an uploaded image.
@@ -23,14 +23,17 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
 
   const viewer = await getCurrentUser();
-  const allowed = await canViewImage(id, viewer);
-  if (!allowed) {
-    // Deliberately 404 rather than 403: whether an image exists is itself
-    // information about a listing that is not public.
+  // One lookup answers both "may they?" and "where are the bytes?" - the row
+  // that decides the first is the row that records the second.
+  //
+  // Deliberately 404 rather than 403 when refused: whether an image exists is
+  // itself information about a listing that is not public.
+  const row = await loadViewableImage(id, viewer);
+  if (!row) {
     return new Response("Not found", { status: 404 });
   }
 
-  const image = await readImage(id);
+  const image = await readImageAt(row);
   if (!image) {
     return new Response("Not found", { status: 404 });
   }

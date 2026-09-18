@@ -80,25 +80,45 @@ export async function storeImage(params: {
   return { storageKey: key, storageProvider: storage.name };
 }
 
-/**
- * Read an image's bytes by image id.
- *
- * Looks up the key the row recorded rather than deriving one, so a database
- * that is half-migrated between providers still serves every image: each row
- * says where its own bytes are.
- */
-export async function readImage(imageId: string): Promise<StoredImage | null> {
-  const row = await prisma.mediaAssetImage.findUnique({
-    where: { id: imageId },
-    select: { storageKey: true, storageProvider: true, assetId: true },
-  });
-  if (!row) return null;
+/** The parts of an image row that say where its bytes are. */
+export type ImageLocation = {
+  id: string;
+  assetId: string;
+  storageKey: string | null;
+  storageProvider: string | null;
+};
 
+/**
+ * Read an image's bytes from a row that has already been loaded.
+ *
+ * The caller has the row because it had to read it to answer "may this person
+ * see this?" (server/images.ts). Re-reading it here was a second query on
+ * every single image request, which on a map of sixteen cards is sixteen
+ * avoidable round trips.
+ *
+ * Resolves the provider *per row*, so a database half-migrated between stores
+ * still serves every image: each row says where its own bytes live.
+ */
+export async function readImageAt(row: ImageLocation): Promise<StoredImage | null> {
   const provider = row.storageProvider ? PROVIDERS[row.storageProvider] : undefined;
   // Rows written before this abstraction have neither field. They are all in
   // the database provider by definition - it was the only one - so that is the
   // honest fallback rather than a failure.
   const from = provider ?? databaseStorage;
-  const key = row.storageKey ?? imageKey(row.assetId, imageId);
+  const key = row.storageKey ?? imageKey(row.assetId, row.id);
   return from.get(key);
+}
+
+/**
+ * Read an image's bytes by id, looking the row up first.
+ *
+ * For callers that do not already hold the row - tests, and any future
+ * maintenance script. The serving path uses readImageAt().
+ */
+export async function readImage(imageId: string): Promise<StoredImage | null> {
+  const row = await prisma.mediaAssetImage.findUnique({
+    where: { id: imageId },
+    select: { id: true, storageKey: true, storageProvider: true, assetId: true },
+  });
+  return row ? readImageAt(row) : null;
 }
