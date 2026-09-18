@@ -10,7 +10,6 @@ import { AvailabilityBadge } from "@/components/badges";
 
 type Props = {
   assetId: string;
-  title: string;
   priceLine: string | null;
   minimumBookingDays: number;
   instantBookable: boolean;
@@ -23,7 +22,6 @@ const today = new Date().toISOString().slice(0, 10);
 
 export function RequestPanel({
   assetId,
-  title,
   priceLine,
   minimumBookingDays,
   instantBookable,

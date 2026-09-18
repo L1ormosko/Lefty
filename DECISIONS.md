@@ -616,3 +616,69 @@ window the owner already declared. Overlapping periods are not wrong
 arithmetically - `availabilityFor` unions them - but they are wrong as a
 record: two rows saying "free in March" leave the owner unable to tell which
 one a note belongs to, and deleting one appears to do nothing.
+
+## Linting existed as a script and not as a check
+
+`npm run lint` ran `next lint`, which found no configuration and offered to
+create one interactively. There was no ESLint config in the repository and
+`eslint` was not a dependency. So the script had never run - not in CI, not
+locally - and "the build is clean" was being reported on a check that was
+never performed.
+
+It runs now, as flat config (ESLint 9 treats `.eslintrc` as legacy) with
+`next/core-web-vitals` and `next/typescript`. Two rules are raised to errors
+because both describe mistakes this codebase had actually made: unused
+variables (one was a redaction helper that had stopped being called) and
+`any` (which is how a Prisma type gets silently widened until it stops
+catching what it was there to catch). Tests and seeds are exempt from the
+`any` rule - they reach into partial shapes on purpose.
+
+The first run found six errors and seven warnings, all real: five dead
+imports and a dead helper, and four `react-hooks/exhaustive-deps` warnings in
+the map. Those last were fixed structurally rather than suppressed - the three
+"apply" functions read everything from refs, so they became `useCallback` with
+empty dependency lists, which is both honest and stable enough to list in the
+effects that call them.
+
+## The maplibre advisory, and why the map is still on 4.7.1
+
+`npm audit` had never been run either. It reports a critical advisory against
+maplibre-gl: an XSS sanitizer bypass in the library's own `DOM.sanitize()`.
+
+Reachability was checked before reacting. VELTO builds its popup content as an
+HTML string, which is exactly the risky shape - but it escapes the two
+owner-supplied fields (title, city) itself, before the string ever reaches
+maplibre. The library's sanitizer is not load-bearing here, so the bypass has
+nothing to bypass. That escaping moved to `lib/html.ts` and is now tested, so
+the mitigation cannot be deleted quietly.
+
+The upgrade was still attempted, on the principle that a mitigated critical is
+not a fixed one. maplibre 6 is ESM-only and drops its default export, which is
+a small change; the blocker is larger. Under Next 15's bundler the GeoJSON
+source never finishes loading - `isSourceLoaded` stays false, `querySourceFeatures`
+returns nothing, and **no pins render at all**. The map is the product's main
+surface, and shipping it blank to close a hole that is already closed by our
+own escaping would be a bad trade. Tracked in TODO.md with the symptom named,
+so the next attempt starts from the evidence rather than from scratch.
+
+sharp was upgraded (0.33.5 → 0.35.4) without hesitation and is a different
+case entirely: those are libvips and libheif CVEs in a decoder that runs on
+**untrusted uploads**, which is the worst possible place to carry one. AVIF is
+in the accepted format list, so the libheif issues were directly reachable.
+
+## Cluster counts should not depend on the basemap
+
+Found while investigating the above, and true on either version: the cluster
+count labels were rendered only on maplibre's `idle` event, guarded by
+`isStyleLoaded()`.
+
+Both are about the basemap. `idle` means "every tile is loaded and nothing is
+animating", so a slow, blocked or failing tile server means it never arrives -
+and every cluster count silently vanishes from a map that is otherwise working.
+The pins are ours, drawn from our own GeoJSON source; whether OpenStreetMap is
+having a bad day has nothing to do with whether we can count them.
+
+The guard is now "does our source exist", and the labels also render on
+`moveend` and on `sourcedata` for our own source. `renderClusterLabels` was
+already idempotent - it reuses markers by cluster id and removes the ones that
+no longer exist - so firing it more often costs one `querySourceFeatures`.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapAsset } from "@/server/assets";
@@ -11,6 +11,10 @@ import {
   type AvailabilityState,
 } from "@/lib/constants";
 import { AVAILABILITY_GLYPH, t } from "@/lib/labels";
+// Popup content is injected as HTML and titles are owner-supplied text, so the
+// escaping is a security control. It lives in a pure module so it can be
+// tested - this file cannot be, because vitest runs with no jsdom.
+import { escapeHtml } from "@/lib/html";
 import { priceLine } from "@/lib/price";
 
 export type Bounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
@@ -59,16 +63,6 @@ function toGeoJSON(assets: MapAsset[]): GeoJSON.FeatureCollection<GeoJSON.Point>
       },
     })),
   };
-}
-
-/** Popup content is injected as HTML, and titles are owner-supplied text. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function popupHtml(props: Record<string, unknown>): string {
@@ -138,10 +132,22 @@ export function MapView({
   hoverCb.current = onHover;
   boundsCb.current = onBoundsChange;
 
-  function applyData() {
+  /*
+   * The three appliers below are useCallback with no dependencies, and that is
+   * load-bearing rather than decorative.
+   *
+   * Every value they touch - the assets, the selected and hovered ids, the map
+   * itself - is read from a ref that is assigned on each render just above. So
+   * they are stale-closure-free by construction, and a stable identity is what
+   * lets the effects that call them declare them honestly instead of carrying
+   * an eslint-disable. Plain function declarations would be new objects every
+   * render, and listing those as dependencies would re-run an effect that
+   * calls easeTo() on every keystroke in the filter box.
+   */
+  const applyData = useCallback(() => {
     const src = map.current?.getSource(SOURCE) as GeoJSONSource | undefined;
     src?.setData(toGeoJSON(assetsRef.current));
-  }
+  }, []);
 
   /**
    * Paint one flag, by id.
@@ -152,29 +158,37 @@ export function MapView({
    * the hover and the pin under the cursor would drop back to its resting size
    * mid-hover.
    */
-  function paint(key: "selected" | "hovered", next: string | null, painted: { current: string | null }) {
-    const m = map.current;
-    if (!m || !ready.current) return;
-    if (painted.current && painted.current !== next) {
-      m.removeFeatureState({ source: SOURCE, id: painted.current }, key);
-    }
-    // Always re-set: setData drops feature state, so this is also how the flag
-    // survives a refetch.
-    if (next) m.setFeatureState({ source: SOURCE, id: next }, { [key]: true });
-    painted.current = next;
-  }
+  const paint = useCallback(
+    (key: "selected" | "hovered", next: string | null, painted: { current: string | null }) => {
+      const m = map.current;
+      if (!m || !ready.current) return;
+      if (painted.current && painted.current !== next) {
+        m.removeFeatureState({ source: SOURCE, id: painted.current }, key);
+      }
+      // Always re-set: setData drops feature state, so this is also how the flag
+      // survives a refetch.
+      if (next) m.setFeatureState({ source: SOURCE, id: next }, { [key]: true });
+      painted.current = next;
+    },
+    []
+  );
 
-  function applySelection() {
+  const applySelection = useCallback(() => {
     paint("selected", selectedRef.current, paintedSelection);
-  }
+  }, [paint]);
 
-  function applyHover() {
+  const applyHover = useCallback(() => {
     paint("hovered", hoveredRef.current, paintedHover);
-  }
+  }, [paint]);
 
   useEffect(() => {
     if (!container.current || map.current) return;
     let cancelled = false;
+    // Captured here rather than read in the cleanup. The ref holds a Map that
+    // is created once and never reassigned, so reading it later would in fact
+    // be safe - but "safe because of something three hundred lines away" is
+    // the kind of reasoning that stops being true after one refactor.
+    const labels = clusterLabels.current;
 
     function emitBounds() {
       const m = map.current;
@@ -314,6 +328,26 @@ export function MapView({
       // than "render": querySourceFeatures on every animation frame was the
       // single most expensive thing the map did while panning.
       m.on("idle", renderClusterLabels);
+      /*
+       * "idle" alone is not enough, and the reason is worth keeping.
+       *
+       * idle means "every tile is loaded and nothing is animating". Our pins
+       * come from our own GeoJSON source, but idle waits for the *basemap*
+       * too - so when the tile server is slow, blocked or simply having a bad
+       * day, idle never arrives and every cluster count silently disappears
+       * from a map that is otherwise working perfectly. That is exactly what
+       * happened here: with tiles blocked, the map rendered and counted
+       * nothing.
+       *
+       * moveend covers the camera settling, and sourcedata covers our own data
+       * arriving. renderClusterLabels is idempotent - it reuses markers by
+       * cluster id and removes the ones that no longer exist - so firing it
+       * more often costs a querySourceFeatures and nothing else.
+       */
+      m.on("moveend", renderClusterLabels);
+      m.on("sourcedata", (e) => {
+        if (e.sourceId === SOURCE && e.isSourceLoaded) renderClusterLabels();
+      });
       // Markers stay anchored to their coordinate while panning, so panning
       // needs no help. Zooming re-clusters, which leaves counts attached to
       // circles that no longer exist - hide them until "idle" recomputes.
@@ -322,7 +356,10 @@ export function MapView({
       // Tiles can fail (offline, blocked network, provider outage). The markers
       // still work, so say so instead of showing an unexplained empty canvas.
       m.on("error", (e) => {
-        const msg = String((e as { error?: Error }).error?.message ?? "");
+        // maplibre 6 types the payload's `error` as its own ErrorLike rather
+        // than Error, so read the message structurally instead of asserting a
+        // shape the library no longer promises.
+        const msg = String((e as { error?: { message?: string } }).error?.message ?? "");
         if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
           setTilesFailed(true);
         }
@@ -396,7 +433,18 @@ export function MapView({
 
     function renderClusterLabels() {
       const m = map.current;
-      if (!m || !ready.current || !m.isStyleLoaded()) return;
+      /*
+       * The precondition is that our own source exists, not that the basemap
+       * has finished drawing.
+       *
+       * This used to guard on `isStyleLoaded()`. In maplibre 4 that meant "the
+       * style spec is parsed"; in 6 it also waits for the style's sources, so
+       * with a slow or unreachable tile server it stays false and every
+       * cluster count silently disappeared. The pins are ours and are drawn
+       * from our own GeoJSON source - whether OpenStreetMap is having a bad
+       * day has nothing to do with whether we can count them.
+       */
+      if (!m || !ready.current || !m.getSource(SOURCE)) return;
       const features = m.querySourceFeatures(SOURCE, { filter: ["has", "point_count"] });
       const seen = new Set<string>();
       for (const f of features) {
@@ -430,8 +478,8 @@ export function MapView({
       ready.current = false;
       resizeObserver.current?.disconnect();
       resizeObserver.current = null;
-      for (const marker of clusterLabels.current.values()) marker.remove();
-      clusterLabels.current.clear();
+      for (const marker of labels.values()) marker.remove();
+      labels.clear();
       popup.current?.remove();
       popup.current = null;
       map.current?.remove();
@@ -445,13 +493,13 @@ export function MapView({
     applyData();
     applySelection();
     applyHover();
-  }, [assets]);
+  }, [assets, applyData, applySelection, applyHover]);
 
   // Card -> pin. Cheap enough to run on every pointer move over the list: it
   // is two feature-state writes, no data round-trip and no camera movement.
   useEffect(() => {
     applyHover();
-  }, [hoveredId]);
+  }, [hoveredId, applyHover]);
 
   // "View all Israel" and similar callers ask the map to move by event, so the
   // parent does not need a ref to the map instance.
@@ -470,7 +518,7 @@ export function MapView({
     if (!m || !selectedId) return;
     const asset = assets.find((a) => a.id === selectedId);
     if (asset) m.easeTo({ center: [asset.longitude, asset.latitude], duration: 400 });
-  }, [selectedId, assets]);
+  }, [selectedId, assets, applySelection]);
 
   return (
     // The wrapper exists so the notice below has something to be positioned

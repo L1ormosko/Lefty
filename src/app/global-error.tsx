@@ -35,6 +35,10 @@ export default function GlobalError({ error }: { error: Error & { digest?: strin
           <p style={{ margin: "0 0 1.5rem", color: "#5b6472" }}>
             נסו לרענן את העמוד. אם זה חוזר, כתבו לנו ל־support@velto.co.il.
           </p>
+          {/* A plain anchor, not next/link: this component replaces the root
+              layout after it failed, so the router is exactly the thing that
+              cannot be relied on here. A full page load is the point. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/"
             style={{

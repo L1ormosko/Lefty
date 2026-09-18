@@ -21,9 +21,6 @@ import { demoSeedEnabled, requireSeedPassword } from "./seed-config";
 
 const prisma = new PrismaClient();
 
-function d(iso: string) {
-  return new Date(`${iso}T00:00:00.000Z`);
-}
 function daysFromNow(n: number) {
   const t = new Date();
   t.setUTCHours(0, 0, 0, 0);

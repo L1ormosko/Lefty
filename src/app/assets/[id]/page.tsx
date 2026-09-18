@@ -392,7 +392,6 @@ export default async function AssetPage({ params }: Params) {
         <div id="request" className="lg:sticky lg:top-20 pb-20 lg:pb-0">
           <RequestPanel
             assetId={asset.id}
-            title={asset.title}
             priceLine={headlinePrice.amount != null ? headlinePrice.text : null}
             minimumBookingDays={asset.minimumBookingDays}
             instantBookable={asset.instantBookable}

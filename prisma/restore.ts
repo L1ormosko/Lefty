@@ -21,7 +21,6 @@ const prisma = new PrismaClient();
  * real Date objects. The rows are parsed JSON and genuinely untyped at this
  * point - Prisma validates the shape when it writes them.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function reviveDates(rows: any[], fields: string[]): any[] {
   return rows.map((row) => {
     const copy = { ...row };

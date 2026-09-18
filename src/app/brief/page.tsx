@@ -3,7 +3,7 @@ import Link from "next/link";
 import { t } from "@/lib/labels";
 import { ASSET_TYPES, LOCATION_TAGS, CURRENCY } from "@/lib/constants";
 import { briefQuerySchema } from "@/lib/validation";
-import { EMPTY_BRIEF, applyExplicit, isEmptyBrief, type Brief } from "@/lib/brief";
+import { applyExplicit, isEmptyBrief, type Brief } from "@/lib/brief";
 import { citiesWithInventory } from "@/server/assets";
 import { parseBriefText, aiEnabled } from "@/server/ai";
 import { runBrief, redactRecommendation } from "@/server/brief";

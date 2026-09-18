@@ -39,6 +39,26 @@
       is anonymization: see DECISIONS.md §15 for why a hard delete would have
       destroyed the counterparty's records.
 
+### P1 — dependency advisories (from the first `npm audit` this repo has run)
+- [x] ~~sharp 0.33.5 carried libvips/libheif CVEs~~ — upgraded to 0.35.4. This
+      was the urgent one: sharp decodes **untrusted uploads**, and AVIF is in
+      the accepted format list, so the libheif issues were directly reachable.
+- [ ] **maplibre-gl 4.7.1 has a critical advisory** (XSS sanitizer bypass in
+      `DOM.sanitize()`). **Not reachable in this codebase** — VELTO escapes the
+      owner-supplied popup fields itself, in `lib/html.ts`, before the string
+      reaches maplibre, and `tests/html.test.ts` pins that. Upgrading is still
+      the goal. What blocks it: maplibre 6 is ESM-only and drops its default
+      export (easy), but under Next 15's bundler the GeoJSON source never
+      loads — `isSourceLoaded` stays false, `querySourceFeatures` returns 0,
+      and **no pins render**. Suspect the worker chunk the ESM build expects
+      the bundler to emit. Start there, not from scratch.
+- [ ] Next 15 → 16 would clear a moderate transitive advisory (via postcss).
+      Deliberately not done: a major framework upgrade at the end of a
+      production-readiness pass is how you ship a different set of bugs.
+- [ ] vitest 2 → 5 would clear a dev-only esbuild advisory. Dev-only, and a
+      major bump across 291 tests; not worth it during this pass.
+- [x] ~~postcss / tsx~~ — patched to current.
+
 ### P1 — the flows have dead ends
 - [x] ~~Filtering navigated the user off the map to the landing page~~ (fixed)
 - [x] ~~A booking never reaches `COMPLETED`~~ — derived from the end date in
@@ -93,6 +113,12 @@
 - [x] ~~No `/healthz`~~ — `/api/healthz` runs a real `SELECT 1`, because this
       app is unusable without its database and "the process is up" is not the
       question. Still no error tracking.
+- [x] ~~`npm run lint` never ran~~ — there was no ESLint config and `eslint` was
+      not a dependency, so the script had only ever offered to create one.
+      Flat config with `next/core-web-vitals` + `next/typescript`; the first
+      run found six errors and seven warnings and all were fixed rather than
+      suppressed. **Wire this into CI** — a lint that nobody runs is what this
+      was.
 - [ ] No error tracking (Sentry or equivalent). `error.tsx` shows the user a
       digest id and logs the detail, which is the minimum, not a replacement.
 

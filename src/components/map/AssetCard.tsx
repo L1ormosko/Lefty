@@ -6,7 +6,7 @@ import { t } from "@/lib/labels";
 import { priceLine } from "@/lib/price";
 import { formatDate } from "@/lib/dates";
 import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
-import { ImagePlaceholder, Num, Price, cx } from "@/components/ui";
+import { ImagePlaceholder, Price, cx } from "@/components/ui";
 
 export function AssetCard({
   asset,
