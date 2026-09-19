@@ -20,7 +20,7 @@ function StepList({ title, steps }: { title: string; steps: { title: string; bod
       <ol className="space-y-4">
         {steps.map((step, i) => (
           <li key={step.title} className="flex gap-3">
-            <span className="shrink-0 size-7 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-sm font-semibold flex items-center justify-center">
+            <span className="shrink-0 size-7 rounded-full bg-brand-100 text-brand-700 text-sm font-semibold flex items-center justify-center">
               <Num>{i + 1}</Num>
             </span>
             <div>
@@ -67,7 +67,10 @@ export default async function LandingPage() {
           />
           <div className="relative mx-auto max-w-[1200px] px-4 py-14 sm:py-20 grid lg:grid-cols-[1.25fr_0.75fr] items-center gap-12 lg:gap-16">
             <div>
-              <span className="inline-block text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded px-2 py-1 mb-4">
+              {/* Filled, not outlined - here and on the city chips below. A
+                  short label on a tint already reads as a unit, and the fold
+                  was carrying seven drawn rectangles before the headline. */}
+              <span className="inline-block text-xs font-medium text-brand-700 bg-brand-50 rounded px-2 py-1 mb-4">
                 {t("landing.eyebrow")}
               </span>
               <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-ink-900 text-balance">
@@ -111,7 +114,7 @@ export default async function LandingPage() {
                       {inventory.cities.slice(0, 6).map((c) => (
                         <span
                           key={c.city}
-                          className="inline-flex items-center gap-1.5 rounded border border-ink-200 bg-ink-50 px-2 py-1 text-xs text-ink-700"
+                          className="inline-flex items-center gap-1.5 rounded bg-ink-100 px-2 py-1 text-xs text-ink-700"
                         >
                           {c.city}
                           <Num className="text-ink-400">{c.count}</Num>

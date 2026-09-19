@@ -594,6 +594,9 @@ const he: Dict = {
   // thing that gets forwarded to a client as if it were a photograph.
   "mockup.title": "הדמיית המודעה על השטח",
   "mockup.disclaimer": "הדמיה בלבד — לא צילום של הפרסום בפועל.",
+  // The row that holds the explanation, the turntable note and the
+  // limitations. They used to be stacked open above the preview.
+  "mockup.howItWorks": "איך ההדמיה עובדת, ומה היא לא מראה",
   "mockup.explain":
     "בחרו קובץ מהמחשב כדי לראות איך המודעה יושבת על השטח. הקובץ נשאר בדפדפן שלכם ואינו נשלח לשום מקום.",
   "mockup.choose": "בחירת קובץ מודעה",

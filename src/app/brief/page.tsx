@@ -13,6 +13,8 @@ import { viewerAccess } from "@/server/subscription";
 import { AccessNotice } from "@/components/access/AccessNotice";
 import { todayUtc, formatDate } from "@/lib/dates";
 import { Card, Num } from "@/components/ui";
+import { DemoNotice } from "@/components/badges";
+import { RowList } from "@/components/lists";
 import { Section } from "@/components/DashboardShell";
 import { BriefForm } from "@/components/brief/BriefForm";
 import { MatchCard } from "@/components/brief/MatchCard";
@@ -112,11 +114,13 @@ export default async function BriefPage({
               </span>
             }
           >
-            <div className="space-y-3">
+            {/* Said once for the list rather than on every seeded row. */}
+            <DemoNotice count={matches.filter((m) => m.asset.isDemo).length} className="mb-2" />
+            <RowList>
               {matches.map((match) => (
                 <MatchCard key={match.assetId} match={match} />
               ))}
-            </div>
+            </RowList>
           </Section>
         )}
       </div>

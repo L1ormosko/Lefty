@@ -74,13 +74,27 @@ export function AssetWizard({ asset }: { asset: WizardAsset | null }) {
                 disabled={!reachable}
                 onClick={() => reachable && setStep(s)}
                 aria-current={s === step ? "step" : undefined}
+                /*
+                  Only where you are is drawn.
+
+                  Seven outlined pills across the top of the wizard put seven
+                  rectangles on screen to say one thing - which step this is.
+                  The filled one answers that on its own; the rest are places
+                  you can go, and they read as places without a box round
+                  each. Unreachable steps are told apart by colour and by
+                  `disabled`, which assistive tech reads either way.
+
+                  The element, its text and the surrounding <ol aria-label>
+                  are unchanged on purpose: the e2e suite finds steps with
+                  `ol[aria-label] button` filtered by text.
+                */
                 className={cx(
-                  "rounded-md px-2.5 h-8 text-xs border",
+                  "rounded-md px-2.5 h-8 text-xs transition-colors",
                   s === step
-                    ? "bg-ink-900 text-white border-ink-900"
+                    ? "bg-ink-900 text-white font-medium"
                     : reachable
-                      ? "bg-white text-ink-700 border-ink-200 hover:bg-ink-50"
-                      : "bg-ink-50 text-ink-400 border-ink-200 cursor-not-allowed"
+                      ? "text-ink-600 hover:bg-ink-100 hover:text-ink-900"
+                      : "text-ink-300 cursor-not-allowed"
                 )}
               >
                 <Num>{i + 1}</Num>. {t(`wizard.${s}`)}
@@ -372,10 +386,13 @@ function AvailabilityStep({
         הגדירו את החלונות שבהם השטח פנוי למכירה. ללא חלון זמינות, השטח יוצג כתפוס.
       </p>
 
+      {/* One frame with hairlines, not one tinted box per window. An owner who
+          declared eight windows had eight separate rectangles for what is
+          plainly a single list. */}
       {list.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="rounded-md border border-ink-200 divide-y divide-ink-100">
           {list.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 text-sm bg-ink-50 border border-ink-200 rounded p-2">
+            <li key={p.id} className="flex items-center gap-3 text-sm px-3 py-2">
               <Num>{formatRange(p.startDate, p.endDate)}</Num>
               {p.note && <span className="text-ink-500">{p.note}</span>}
               <Button
@@ -474,7 +491,8 @@ function ReviewStep({
           </dd>
         </div>
       </dl>
-      <p className="text-sm text-ink-600 bg-ink-50 border border-ink-200 rounded p-3">
+      {/* A sentence about what happens next, said as a sentence. */}
+      <p className="text-sm text-ink-600">
         לאחר הפרסום השטח יוצג במפה ויסומן כ״{t("verify.PENDING")}״ עד לאימות VELTO.
       </p>
       <Button type="submit" size="lg" disabled={pending}>

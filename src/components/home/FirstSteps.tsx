@@ -32,7 +32,7 @@ export function FirstSteps({
       <ol className="mt-5 space-y-4">
         {steps.map((step, i) => (
           <li key={step} className="flex gap-3">
-            <span className="shrink-0 size-7 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-sm font-semibold flex items-center justify-center">
+            <span className="shrink-0 size-7 rounded-full bg-brand-100 text-brand-700 text-sm font-semibold flex items-center justify-center">
               <Num>{i + 1}</Num>
             </span>
             <p className="text-sm text-ink-800 pt-0.5">{step}</p>

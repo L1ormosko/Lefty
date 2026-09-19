@@ -10,14 +10,36 @@
 import Link from "next/link";
 import { t } from "@/lib/labels";
 import { formatDate } from "@/lib/dates";
-import { Card, Num, Price } from "@/components/ui";
-import { AvailabilityBadge, DemoBadge, VerificationBadge } from "@/components/badges";
+import { Num, Price } from "@/components/ui";
+import { AvailabilityBadge, VerificationBadge } from "@/components/badges";
 import type { Recommendation } from "@/server/brief";
+
+/**
+ * A chip carrying one reason or one gap.
+ *
+ * Filled, not outlined. A short label already reads as a unit against a tinted
+ * background; drawing a border round it as well doubles the number of lines on
+ * a card that can carry a dozen of these, and the colour is doing the work
+ * either way. The glyph keeps the two kinds apart without relying on it.
+ */
+function Chip({ kind, children }: { kind: "reason" | "gap"; children: React.ReactNode }) {
+  return (
+    <li
+      className={
+        kind === "reason"
+          ? "rounded-full bg-ok-50 text-ok-700 px-2.5 py-1 text-xs"
+          : "rounded-full bg-ink-100 text-ink-600 px-2.5 py-1 text-xs"
+      }
+    >
+      {children}
+    </li>
+  );
+}
 
 export function MatchCard({ match }: { match: Recommendation }) {
   const a = match.asset;
   return (
-    <Card className="p-4">
+    <div className="p-4">
       <div className="flex gap-3">
         {a.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -36,11 +58,18 @@ export function MatchCard({ match }: { match: Recommendation }) {
             <Link href={`/assets/${a.id}`} className="font-medium text-ink-900 hover:underline">
               {a.title}
             </Link>
-            <div className="flex flex-wrap gap-1.5">
-              <AvailabilityBadge state={a.availability} />
-              <VerificationBadge status={a.verificationStatus} />
-              {a.isDemo && <DemoBadge />}
-            </div>
+            {/* Only the exceptions, the same rule the map's result card
+                follows: "available" and "verified" are what most of the
+                inventory is, and a marker printed on every row distinguishes
+                nothing. The demo marker moved to one line above the list. */}
+            {(a.availability !== "AVAILABLE" || a.verificationStatus !== "VERIFIED") && (
+              <div className="flex flex-wrap gap-x-2 gap-y-1">
+                {a.availability !== "AVAILABLE" && <AvailabilityBadge state={a.availability} />}
+                {a.verificationStatus !== "VERIFIED" && (
+                  <VerificationBadge status={a.verificationStatus} />
+                )}
+              </div>
+            )}
           </div>
 
           <p className="text-sm text-ink-600 mt-0.5 truncate">
@@ -74,12 +103,9 @@ export function MatchCard({ match }: { match: Recommendation }) {
           <p className="text-xs text-ink-500">{t("brief.why")}</p>
           <ul className="mt-1 flex flex-wrap gap-1.5">
             {match.reasons.map((reason) => (
-              <li
-                key={reason}
-                className="rounded-full bg-ok-50 text-ok-700 border border-ok-200 px-2.5 py-1 text-xs"
-              >
+              <Chip key={reason} kind="reason">
                 {t(reason)}
-              </li>
+              </Chip>
             ))}
           </ul>
         </div>
@@ -90,12 +116,9 @@ export function MatchCard({ match }: { match: Recommendation }) {
           <p className="text-xs text-ink-500">{t("brief.gaps")}</p>
           <ul className="mt-1 flex flex-wrap gap-1.5">
             {match.gaps.map((gap) => (
-              <li
-                key={gap}
-                className="rounded-full bg-ink-50 text-ink-600 border border-ink-200 px-2.5 py-1 text-xs"
-              >
+              <Chip key={gap} kind="gap">
                 {t(gap)}
-              </li>
+              </Chip>
             ))}
           </ul>
         </div>
@@ -107,6 +130,6 @@ export function MatchCard({ match }: { match: Recommendation }) {
           <span className="text-ink-400"> — {t("tag.declared")}</span>
         </p>
       )}
-    </Card>
+    </div>
   );
 }

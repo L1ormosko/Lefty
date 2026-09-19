@@ -113,14 +113,12 @@ function Bubble({
   body: string;
   mine: boolean;
 }) {
+  // Filled, not outlined. The fill is already what says whose message this is;
+  // a border in the matching hue draws a second line to repeat it, and a
+  // thread of a dozen messages is a dozen extra rectangles. The other side
+  // keeps a hairline, because white on white needs one.
   return (
-    <li
-      className={
-        mine
-          ? "rounded-lg border border-brand-200 bg-brand-50 p-4"
-          : "rounded-lg border border-ink-200 bg-white p-4"
-      }
-    >
+    <li className={mine ? "rounded-lg bg-brand-50 p-4" : "rounded-lg border border-ink-200 bg-white p-4"}>
       <p className="text-xs text-ink-500">
         {name}
         {" · "}

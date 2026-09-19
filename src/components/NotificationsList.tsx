@@ -1,7 +1,8 @@
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { formatDate } from "@/lib/dates";
-import { Card, EmptyState, Num } from "./ui";
+import { EmptyState, Num } from "./ui";
+import { RowList } from "./lists";
 import Link from "next/link";
 import { markAllReadAction } from "@/app/actions/notifications";
 
@@ -21,6 +22,9 @@ export async function NotificationsList({ userId }: { userId: string }) {
           {t("notif.markRead")}
         </button>
       </form>
+      {/* Up to fifty notifications. As cards that was fifty bordered boxes for
+          what is plainly one feed. */}
+      <RowList>
       {items.map((n) => {
         const body = (
           <>
@@ -37,7 +41,7 @@ export async function NotificationsList({ userId }: { userId: string }) {
           </>
         );
         return (
-          <Card key={n.id} className="p-4">
+          <div key={n.id} className="p-4">
             {n.linkUrl ? (
               <Link href={n.linkUrl} className="block hover:opacity-80">
                 {body}
@@ -45,9 +49,10 @@ export async function NotificationsList({ userId }: { userId: string }) {
             ) : (
               body
             )}
-          </Card>
+          </div>
         );
       })}
+      </RowList>
     </div>
   );
 }

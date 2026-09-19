@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "@/lib/labels";
 import { mockupMatrix3d, ratioMatches, type Quad } from "@/lib/mockup";
 import { angleLabel, blend, orderFrames, scrub, step, type Frame } from "@/lib/turntable";
-import { Button, Card, cx } from "@/components/ui";
+import { Button, Card, Collapsible, cx } from "@/components/ui";
 
 /**
  * An advertiser's artwork, previewed on photographs of the actual sign.
@@ -220,9 +220,18 @@ export function CreativeMockup({
     <div data-mockup>
       <Card className="p-4">
         <h2 className="font-medium text-ink-900">{t("mockup.title")}</h2>
-        {/* Said before the picture, not under it. */}
+        {/*
+          The one line that has to be read, said before the picture rather than
+          under it: this is a simulation, not a photograph of a printed ad.
+
+          Everything else that used to sit here - how the preview works, what
+          it cannot account for, what the turntable is and is not - moved to a
+          disclosure at the foot of the panel. Seven stacked paragraphs of
+          caveat is not a careful product, it is a paragraph nobody finishes,
+          and it buried the two things that change what the advertiser does:
+          this line, and the size they have to match.
+        */}
         <p className="mt-1 text-sm font-medium text-ink-800">{t("mockup.disclaimer")}</p>
-        <p className="mt-1 text-sm text-ink-600">{t("mockup.explain")}</p>
 
         {/* What the advertiser has to match. Stated before they choose a file,
             not after the preview has already surprised them. */}
@@ -392,9 +401,10 @@ export function CreativeMockup({
         )}
 
         {/* Not an error: the file is fine, it is simply a different shape from
-            the sign, and the preview already shows exactly what that means. */}
+            the sign, and the preview already shows exactly what that means -
+            so a line in the warning colour, not a tinted panel. */}
         {showRatioWarning && (
-          <p className="mt-2 text-sm text-warn-800 bg-warn-50 border border-warn-200 rounded p-2">
+          <p className="mt-2 text-sm text-warn-800">
             {t("mockup.ratioOff", {
               face: `⁨${ratioText(faceRatio!)}⁩`,
               file: `⁨${ratioText(creativeRatio!)}⁩`,
@@ -403,8 +413,19 @@ export function CreativeMockup({
         )}
         {fits && <p className="mt-2 text-sm text-ok-700">{t("mockup.ratioOk")}</p>}
 
-        {many && <p className="mt-3 text-xs text-ink-500">{t("mockup.turntableNotModel")}</p>}
-        <p className="mt-1 text-xs text-ink-500">{t("mockup.limitations")}</p>
+        {/* The caveats, kept in full and kept out of the way. Nothing is
+            dropped - a reader who wants to know what the preview does not
+            account for opens one row and gets every word that used to be
+            stacked above. */}
+        <div className="mt-4">
+          <Collapsible title={t("mockup.howItWorks")}>
+            <div className="space-y-2 text-sm text-ink-600">
+              <p>{t("mockup.explain")}</p>
+              {many && <p>{t("mockup.turntableNotModel")}</p>}
+              <p>{t("mockup.limitations")}</p>
+            </div>
+          </Collapsible>
+        </div>
       </Card>
     </div>
   );
