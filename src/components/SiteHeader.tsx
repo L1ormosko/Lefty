@@ -17,7 +17,13 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-ink-200">
       <div className="mx-auto max-w-[1600px] px-4 h-14 flex items-center gap-4">
-        <Link href="/" className="font-semibold text-lg tracking-tight text-ink-900 shrink-0">
+        {/* The wordmark is a link home, and on a phone it was a 29px target -
+            the smallest one in the product, on the control people reach for
+            when they are lost. The row is 56px, so min-h-11 costs no layout. */}
+        <Link
+          href="/"
+          className="inline-flex items-center min-h-11 sm:min-h-0 font-semibold text-lg tracking-tight text-ink-900 shrink-0"
+        >
           VELTO
         </Link>
         <span className="hidden lg:block text-xs text-ink-500 border-s border-ink-200 ps-4">

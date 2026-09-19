@@ -46,8 +46,13 @@ export function DashboardShell({
                     <Link
                       href={item.href}
                       aria-current={active ? "page" : undefined}
+                      /* 44px on touch, compact on a pointer device - the rule
+                         SiteHeader already follows. py-2 left these at 40px,
+                         which a sweep of the dashboards caught: every nav link
+                         in the product was under the minimum tap target. */
                       className={cx(
                         "flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap",
+                        "min-h-11 lg:min-h-0",
                         active ? "bg-ink-900 text-white" : "text-ink-700 hover:bg-ink-100"
                       )}
                     >

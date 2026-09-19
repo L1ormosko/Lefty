@@ -5,7 +5,8 @@ import { t } from "@/lib/labels";
 import { priceLine } from "@/lib/price";
 import { ownerNav } from "@/lib/nav";
 import { DashboardShell } from "@/components/DashboardShell";
-import { Card, EmptyState, LinkButton, Num, Price } from "@/components/ui";
+import { EmptyState, LinkButton, Num, Price } from "@/components/ui";
+import { RowList } from "@/components/lists";
 import { AvailabilityBadge, StatusPill, VerificationBadge } from "@/components/badges";
 import { availabilityFor } from "@/lib/availability";
 import { AssetStatusToggle } from "@/components/owner/AssetStatusToggle";
@@ -56,9 +57,12 @@ export default async function OwnerAssets({
         />
       ) : (
         <>
-        <div className="space-y-3">
+        {/* The last list still built as a stack of cards. Twenty-five listings
+            was twenty-five bordered boxes for what is one inventory table; the
+            same RowList every other list in the product now uses. */}
+        <RowList>
           {assets.map((asset) => (
-            <Card key={asset.id} className="p-4">
+            <div key={asset.id} className="p-4">
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <Link href={`/owner/assets/${asset.id}`} className="font-medium text-ink-900 hover:underline">
@@ -124,9 +128,9 @@ export default async function OwnerAssets({
                   engaged={asset._count.inquiries > 0 || asset._count.bookings > 0}
                 />
               </div>
-            </Card>
+            </div>
           ))}
-        </div>
+        </RowList>
         <Pager page={page} total={assetCount} basePath="/owner/assets" />
         </>
       )}
