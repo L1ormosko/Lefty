@@ -319,11 +319,32 @@ export function scoreAsset(asset: ScorableAsset, brief: Brief): Match {
   return { assetId: asset.id, score, reasons, gaps };
 }
 
+/**
+ * The one ordering of matches: score first, then id.
+ *
+ * Exported because the server ranks in pages and has to merge them, and two
+ * comparators that drifted apart would produce a shortlist whose order
+ * depended on where the page boundaries happened to fall.
+ */
+export function compareMatches(a: Match, b: Match): number {
+  return b.score - a.score || a.assetId.localeCompare(b.assetId);
+}
+
 /** Rank a set of assets for a brief, best first. Ties break on id, so the order is stable. */
 export function rankAssets(assets: ScorableAsset[], brief: Brief): Match[] {
-  return assets
-    .map((asset) => scoreAsset(asset, brief))
-    .sort((a, b) => b.score - a.score || a.assetId.localeCompare(b.assetId));
+  return assets.map((asset) => scoreAsset(asset, brief)).sort(compareMatches);
+}
+
+/**
+ * Merge an already-ranked page into the running best, keeping `limit`.
+ *
+ * `scoreAsset` gives each asset an absolute score - nothing is normalised
+ * against the rest of the set - so scoring a page at a time and merging is
+ * arithmetically identical to scoring the whole inventory at once. That is
+ * what lets the query be paged without changing a single result.
+ */
+export function mergeTopMatches(running: Match[], page: Match[], limit: number): Match[] {
+  return [...running, ...page].sort(compareMatches).slice(0, limit);
 }
 
 /**

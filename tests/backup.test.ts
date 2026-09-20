@@ -108,16 +108,24 @@ describe("backup export", () => {
   });
 });
 
-describe("backup route", () => {
+/** A request with no Authorization header: the admin-in-a-browser case. */
+const plainRequest = () => new Request("http://localhost/api/admin/backup");
+/** A request carrying a bearer token: the scheduled-job case. */
+const tokenRequest = (token: string) =>
+  new Request("http://localhost/api/admin/backup", {
+    headers: { authorization: `Bearer ${token}` },
+  });
+
+describe("backup route, admin session", () => {
   it("refuses anyone who is not an admin", async () => {
     requireRoleMock.mockRejectedValue(new ForbiddenError());
-    const res = await getBackup();
+    const res = await getBackup(plainRequest());
     expect(res.status).toBe(403);
   });
 
   it("serves an admin a file whose name says it is sensitive", async () => {
     requireRoleMock.mockResolvedValue({ id: admin.id, role: "ADMIN" });
-    const res = await getBackup();
+    const res = await getBackup(plainRequest());
     expect(res.status).toBe(200);
     // The name is the only warning attached to the file once it is sitting in
     // a downloads folder with every user's personal data in it.
@@ -125,5 +133,74 @@ describe("backup route", () => {
     expect(res.headers.get("cache-control")).toContain("no-store");
     const body = await res.json();
     expect(body.data.users.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The scheduled path.
+ *
+ * This is the one that runs unattended, with a credential that is not a
+ * person, against the most sensitive response the product can produce. Every
+ * case here is a way it could be left open: no token configured, a token too
+ * short to be worth anything, a near-miss, a token in the wrong place.
+ *
+ * requireRole is mocked to reject throughout, so a test that passes here has
+ * genuinely gone in on the token and not fallen through to a session.
+ */
+describe("backup route, scheduled token", () => {
+  const TOKEN = "z".repeat(48);
+
+  beforeEach(() => {
+    resetRateLimit();
+    requireRoleMock.mockRejectedValue(new ForbiddenError());
+    process.env.VELTO_BACKUP_TOKEN = TOKEN;
+  });
+
+  afterAll(() => {
+    delete process.env.VELTO_BACKUP_TOKEN;
+  });
+
+  it("serves the backup to the configured token", async () => {
+    const res = await getBackup(tokenRequest(TOKEN));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.users.length).toBeGreaterThan(0);
+  });
+
+  it("refuses a wrong token", async () => {
+    const res = await getBackup(tokenRequest("y".repeat(48)));
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses when no token is configured at all", async () => {
+    // The case that matters most: forgetting the environment variable must
+    // shut the door, not open it to anyone who guesses the URL.
+    delete process.env.VELTO_BACKUP_TOKEN;
+    const res = await getBackup(tokenRequest(TOKEN));
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses a configured token that is too short, even when it matches", async () => {
+    process.env.VELTO_BACKUP_TOKEN = "short";
+    const res = await getBackup(tokenRequest("short"));
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses the token when it is not presented as a bearer credential", async () => {
+    const res = await getBackup(
+      new Request("http://localhost/api/admin/backup", { headers: { authorization: TOKEN } })
+    );
+    // Falls through to the session path, which is mocked to reject.
+    expect(res.status).toBe(403);
+  });
+
+  it("rate limits the shared credential", async () => {
+    // One call a day is the job; the ceiling leaves room for a retry and
+    // nothing like enough for someone pulling the database repeatedly.
+    let last = await getBackup(tokenRequest(TOKEN));
+    for (let i = 0; i < 10 && last.status === 200; i++) {
+      last = await getBackup(tokenRequest(TOKEN));
+    }
+    expect(last.status).toBe(429);
   });
 });

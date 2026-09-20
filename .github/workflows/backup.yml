@@ -1,0 +1,111 @@
+# Daily off-site backup of the production database.
+#
+# The hosting plan deletes this database on a fixed date and takes no backups
+# of its own. Its IP allow-list is empty, so nothing outside Render can open a
+# connection to it and `pg_dump` from a runner is not available - see
+# src/server/backup.ts. The one route out is the application's own endpoint
+# over HTTPS, which is why this is an HTTP call rather than a database client.
+#
+# The artifact lands on GitHub, which is the point: a backup stored on the same
+# platform as the thing it is backing up is not a backup.
+#
+# Two secrets are required, and the job fails loudly without them:
+#   VELTO_BACKUP_URL    https://<the app>/api/admin/backup
+#   VELTO_BACKUP_TOKEN  the same value set on the service, >= 32 characters
+name: backup
+
+on:
+  schedule:
+    # 02:17 UTC daily. Deliberately not on the hour: scheduled jobs across
+    # GitHub bunch up at :00 and get queued, and a backup that runs late is
+    # a backup that sometimes does not run.
+    - cron: "17 2 * * *"
+  # So the first run does not have to wait until tomorrow, and so a failure
+  # can be retried without editing the schedule.
+  workflow_dispatch:
+
+# Only what this job needs. It reads no code and writes nothing to the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the secrets are present
+        env:
+          URL: ${{ secrets.VELTO_BACKUP_URL }}
+          TOKEN: ${{ secrets.VELTO_BACKUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${URL}" ] || [ -z "${TOKEN}" ]; then
+            echo "::error::VELTO_BACKUP_URL and VELTO_BACKUP_TOKEN must both be set as repository secrets."
+            exit 1
+          fi
+          # The endpoint refuses a token under 32 characters, so catch it here
+          # rather than discovering it as a 401 every night.
+          if [ "${#TOKEN}" -lt 32 ]; then
+            echo "::error::VELTO_BACKUP_TOKEN is shorter than 32 characters; the endpoint will refuse it."
+            exit 1
+          fi
+
+      - name: Fetch the backup
+        env:
+          URL: ${{ secrets.VELTO_BACKUP_URL }}
+          TOKEN: ${{ secrets.VELTO_BACKUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          # --fail-with-body so an HTML error page is never saved as if it were
+          # a backup, and the body is printed when something goes wrong.
+          # --retry covers a cold start on the hosting plan's free tier.
+          code=$(curl --silent --show-error --fail-with-body \
+            --retry 3 --retry-delay 20 --retry-connrefused \
+            --max-time 240 \
+            --header "Authorization: Bearer ${TOKEN}" \
+            --output backup.json \
+            --write-out '%{http_code}' \
+            "${URL}") || {
+              echo "::error::Backup request failed (HTTP ${code:-000}). The database was NOT backed up."
+              exit 1
+            }
+          echo "HTTP ${code}"
+
+      - name: Check the file is a real backup
+        run: |
+          set -euo pipefail
+          # A 200 that returns an empty object, or a login page, would otherwise
+          # be archived every night and discovered to be worthless on the one
+          # day it is needed.
+          bytes=$(wc -c < backup.json)
+          echo "size: ${bytes} bytes"
+          if [ "${bytes}" -lt 200 ]; then
+            echo "::error::Backup is only ${bytes} bytes. Refusing to store it."
+            exit 1
+          fi
+          # jq is on ubuntu-latest. These are the fields the restore script
+          # walks (prisma/restore.ts), so their absence means a file that
+          # cannot be restored from.
+          jq -e '.format and .data.users and (.data.users | length) > 0' backup.json > /dev/null || {
+            echo "::error::Backup is missing format/users. Refusing to store it."
+            exit 1
+          }
+          echo "users: $(jq '.data.users | length' backup.json)"
+          echo "assets: $(jq '.data.assets | length' backup.json)"
+          echo "images: $(jq '.data.blobs | length' backup.json)"
+
+      - name: Store it
+        uses: actions/upload-artifact@v4
+        with:
+          # Dated, so a month of daily runs is a month of restore points
+          # rather than one file overwritten.
+          name: velto-backup-SENSITIVE-${{ github.run_id }}
+          path: backup.json
+          # The maximum GitHub allows. The whole point is depth: a corruption
+          # noticed late is only recoverable if yesterday is not the only copy.
+          retention-days: 90
+          if-no-files-found: error

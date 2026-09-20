@@ -264,9 +264,15 @@ async function main() {
   const passwordHash = await bcrypt.hash(requireSeedPassword(), 10);
 
   // Remove previous demo data only. Real records are never touched.
+  //
+  // By the flag, never by the address. This used to delete every user whose
+  // email ended in "@velto.dev" - which is the product's own domain, not yet
+  // registered. The day it is, office@ or support@ belongs to a real person,
+  // and this line would delete their account on the next deploy and cascade
+  // through everything they own. Demo data is identified by what it is.
   await prisma.mediaAsset.deleteMany({ where: { isDemo: true } });
   await prisma.company.deleteMany({ where: { isDemo: true } });
-  await prisma.user.deleteMany({ where: { email: { endsWith: "@velto.dev" } } });
+  await prisma.user.deleteMany({ where: { isDemo: true } });
 
   const ownerCompany = await prisma.company.create({
     data: {
@@ -294,25 +300,28 @@ async function main() {
     },
   });
 
+  // isDemo on every one of them: it is what the cleanup above finds them by,
+  // so an account created here without it would survive the next deploy and
+  // collide with its own recreation on the unique email.
   const admin = await prisma.user.create({
-    data: { email: "admin@velto.dev", passwordHash, name: "מנהל VELTO", role: "ADMIN" },
+    data: { email: "admin@velto.dev", passwordHash, name: "מנהל VELTO", role: "ADMIN", isDemo: true },
   });
   const owner = await prisma.user.create({
     data: {
       email: "owner@velto.dev", passwordHash, name: "דנה לוי", role: "MEDIA_OWNER",
-      phone: "050-0000001", companyId: ownerCompany.id,
+      phone: "050-0000001", companyId: ownerCompany.id, isDemo: true,
     },
   });
   const owner2 = await prisma.user.create({
     data: {
       email: "owner2@velto.dev", passwordHash, name: "יוסי כהן", role: "MEDIA_OWNER",
-      phone: "050-0000002", companyId: ownerCompany2.id,
+      phone: "050-0000002", companyId: ownerCompany2.id, isDemo: true,
     },
   });
   const advertiser = await prisma.user.create({
     data: {
       email: "advertiser@velto.dev", passwordHash, name: "מיכל בר", role: "ADVERTISER",
-      phone: "050-0000003", companyId: advertiserCompany.id,
+      phone: "050-0000003", companyId: advertiserCompany.id, isDemo: true,
     },
   });
 

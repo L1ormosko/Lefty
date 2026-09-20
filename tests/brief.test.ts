@@ -6,6 +6,7 @@ import {
   parseBrief,
   parseBudget,
   parseDates,
+  mergeTopMatches,
   rankAssets,
   scoreAsset,
   type Brief,
@@ -218,5 +219,102 @@ describe("an empty brief", () => {
     expect(isEmptyBrief(EMPTY_BRIEF)).toBe(true);
     expect(isEmptyBrief(brief({ cities: ["באר שבע"] }))).toBe(false);
     expect(isEmptyBrief(brief({ budget: 1000 }))).toBe(false);
+  });
+});
+
+/**
+ * Ranking an inventory too large to score in one query.
+ *
+ * runBrief used to read 500 rows and rank what came back, so above 500 active
+ * listings the best match in the country could sit at row 501 and never be
+ * looked at. It now pages, scores every page and merges. These tests pin the
+ * property that makes the paging sound: because scoreAsset is absolute, the
+ * merged answer is the answer.
+ */
+describe("merging ranked pages", () => {
+  const scorableRun = (ids: string[], availability: ScorableAsset["availability"]) =>
+    ids.map((id) => asset({ id, availability }));
+
+  it("gives the same shortlist as ranking everything at once", () => {
+    // A hundred assets split across four pages, with the strongest candidates
+    // scattered so no single page holds them all.
+    const all: ScorableAsset[] = [];
+    for (let i = 0; i < 100; i++) {
+      all.push(
+        asset({
+          id: `a${String(i).padStart(3, "0")}`,
+          // Every seventh one is the good one.
+          availability: i % 7 === 0 ? "AVAILABLE" : "OCCUPIED",
+          nextAvailable: i % 7 === 0 ? null : "2026-12-01",
+        })
+      );
+    }
+
+    const atOnce = rankAssets(all, brief())
+      .filter((m) => m.score > 0)
+      .slice(0, 10);
+
+    let merged: ReturnType<typeof rankAssets> = [];
+    for (let start = 0; start < all.length; start += 25) {
+      const page = rankAssets(all.slice(start, start + 25), brief()).filter((m) => m.score > 0);
+      merged = mergeTopMatches(merged, page, 10);
+    }
+
+    expect(merged.map((m) => m.assetId)).toEqual(atOnce.map((m) => m.assetId));
+    expect(merged.map((m) => m.score)).toEqual(atOnce.map((m) => m.score));
+  });
+
+  it("finds a strong candidate that falls beyond the first page", () => {
+    // The exact failure the ceiling caused: the only available asset sits
+    // last, and a run that stopped after the first page would never see it.
+    const buried = [
+      ...scorableRun(
+        Array.from({ length: 30 }, (_, i) => `b${String(i).padStart(3, "0")}`),
+        "PARTIAL"
+      ),
+      asset({ id: "zzz-the-good-one", availability: "AVAILABLE" }),
+    ];
+
+    let merged: ReturnType<typeof rankAssets> = [];
+    for (let start = 0; start < buried.length; start += 10) {
+      const page = rankAssets(buried.slice(start, start + 10), brief()).filter((m) => m.score > 0);
+      merged = mergeTopMatches(merged, page, 5);
+    }
+
+    expect(merged[0].assetId).toBe("zzz-the-good-one");
+  });
+
+  it("never returns more than the limit", () => {
+    let merged: ReturnType<typeof rankAssets> = [];
+    for (let p = 0; p < 5; p++) {
+      const page = rankAssets(
+        scorableRun(
+          Array.from({ length: 20 }, (_, i) => `p${p}-${i}`),
+          "AVAILABLE"
+        ),
+        brief()
+      );
+      merged = mergeTopMatches(merged, page, 6);
+      expect(merged.length).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it("orders ties the same way however the pages are cut", () => {
+    // Identical assets, so every score matches and only the id break decides.
+    // A comparator that differed between the page sort and the merge would
+    // show up here as an order that depends on the page size.
+    const same = scorableRun(
+      Array.from({ length: 24 }, (_, i) => `t${String(i).padStart(3, "0")}`),
+      "AVAILABLE"
+    );
+    const cut = (size: number) => {
+      let merged: ReturnType<typeof rankAssets> = [];
+      for (let start = 0; start < same.length; start += size) {
+        merged = mergeTopMatches(merged, rankAssets(same.slice(start, start + size), brief()), 8);
+      }
+      return merged.map((m) => m.assetId);
+    };
+    expect(cut(3)).toEqual(cut(24));
+    expect(cut(7)).toEqual(cut(24));
   });
 });

@@ -119,6 +119,13 @@ model User {
   phone           String?
   role            Role      @default(ADVERTISER)
   isActive        Boolean   @default(true)
+  /// Created by the demo seed, which deletes and recreates its own rows on
+  /// every deploy. Company and MediaAsset already carried this flag; User did
+  /// not, so the seed identified its accounts by an "@velto.dev" email suffix
+  /// instead - which would delete a real member of staff at that domain the
+  /// day it is registered, taking their listings with them. Demo data is
+  /// identified by what it is, never by what it is called.
+  isDemo          Boolean   @default(false)
   companyId       String?
   /// When the user accepted the Terms of Service / Privacy Policy at registration.
   /// Required going forward; null only for accounts created before this field existed.
