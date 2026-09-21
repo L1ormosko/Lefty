@@ -6,8 +6,27 @@ import { forgotPasswordAction, type FormState } from "../actions";
 import { t } from "@/lib/labels";
 import { Alert, Button, Card, Field, inputClass } from "@/components/ui";
 
-export function ForgotPasswordForm() {
+export function ForgotPasswordForm({ available }: { available: boolean }) {
   const [state, action, pending] = useActionState<FormState, FormData>(forgotPasswordAction, undefined);
+
+  /*
+   * No provider, no form. The message names the one route that does exist -
+   * asking an administrator - instead of a field that would accept an address
+   * and do nothing with it.
+   */
+  if (!available) {
+    return (
+      <Card className="p-6">
+        <h1 className="text-xl font-semibold text-ink-900">{t("auth.forgotPasswordTitle")}</h1>
+        <div className="mt-4">
+          <Alert kind="info">{t("auth.forgotPasswordUnavailable")}</Alert>
+        </div>
+        <Link href="/login" className="mt-4 inline-block text-sm text-brand-600 hover:underline">
+          {t("auth.backToLogin")}
+        </Link>
+      </Card>
+    );
+  }
 
   if (state?.success) {
     return (
@@ -24,6 +43,13 @@ export function ForgotPasswordForm() {
     <Card className="p-6">
       <h1 className="text-xl font-semibold text-ink-900">{t("auth.forgotPasswordTitle")}</h1>
       <p className="mt-2 text-sm text-ink-600">{t("auth.forgotPasswordHint")}</p>
+      {/* The form had no error branch at all, so anything the action refused -
+          the configuration guard included - submitted into silence. */}
+      {state?.error && (
+        <div className="mt-4">
+          <Alert kind="error">{state.error}</Alert>
+        </div>
+      )}
       <form action={action} className="mt-5 space-y-4">
         <Field label={t("auth.email")} htmlFor="email" required error={state?.fields?.email}>
           <input id="email" name="email" type="email" autoComplete="email" dir="ltr" required className={inputClass} />

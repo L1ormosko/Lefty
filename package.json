@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "seed:dev": "tsx prisma/seed.ts",
+    "bootstrap:owner": "tsx prisma/bootstrap.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

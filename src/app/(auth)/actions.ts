@@ -10,7 +10,7 @@ import { recordAudit } from "@/server/audit";
 import { trialEnd } from "@/lib/subscription";
 import { t } from "@/lib/labels";
 import { rateLimit } from "@/server/rate-limit";
-import { sendEmail } from "@/server/email";
+import { emailConfigured, sendEmail } from "@/server/email";
 
 export type FormState =
   | { error?: string; fields?: Record<string, string>; success?: string }
@@ -111,6 +111,20 @@ export async function logoutAction(): Promise<void> {
 export async function forgotPasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = forgotPasswordSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fields: fieldErrors(parsed.error) };
+
+  /*
+   * The provider is checked before the account is, and on purpose.
+   *
+   * Without RESEND_API_KEY, sendEmail is a no-op - so the old code told
+   * everyone "we have sent you a link" and sent nothing, which for anyone who
+   * had actually forgotten their password was a dead end with no sign that it
+   * was one. Saying so costs nothing in enumeration terms: this is a fact
+   * about the platform, identical for an address that exists and one that
+   * does not, and no token is minted either way.
+   */
+  if (!emailConfigured()) {
+    return { error: t("auth.forgotPasswordUnavailable") };
+  }
 
   const token = await createPasswordResetToken(parsed.data.email, await clientKey());
   if (token) {

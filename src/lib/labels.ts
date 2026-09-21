@@ -392,6 +392,10 @@ const he: Dict = {
   "auth.forgotPasswordTitle": "שכחתי סיסמה",
   "auth.forgotPasswordHint": "הזינו את כתובת הדוא״ל שלכם ונשלח קישור לאיפוס הסיסמה, אם החשבון קיים.",
   "auth.forgotPasswordSent": "אם הכתובת רשומה במערכת, נשלח אליה קישור לאיפוס הסיסמה.",
+  // Says the platform cannot send, never whether the address is registered -
+  // the same answer for every address, so it gives no account away.
+  "auth.forgotPasswordUnavailable":
+    "שחזור סיסמה בדוא״ל אינו פעיל כרגע במערכת, ולכן לא יישלח אליכם קישור. פנו למנהל המערכת כדי לאפס את הסיסמה.",
   "auth.sendResetLink": "שליחת קישור לאיפוס",
   "auth.resetPasswordTitle": "איפוס סיסמה",
   "auth.newPassword": "סיסמה חדשה",

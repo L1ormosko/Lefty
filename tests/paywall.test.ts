@@ -30,6 +30,22 @@ beforeAll(async () => {
     priceMonthly: 4000,
   });
   assetId = asset.id;
+
+  /*
+   * A second listing at a different price, so the price-oracle test has
+   * something to compare against.
+   *
+   * It used to rely on the demo seed being present, which made the suite
+   * unrepeatable: tests/seed-cleanup.test.ts deletes every isDemo row, so a
+   * second `vitest run` against the same database failed here on inventory
+   * the previous run had removed - a red suite that says nothing about the
+   * code. A test's fixtures are its own.
+   */
+  await makeAsset(owner.id, {
+    title: "שלט חוצות - רחוב אחר",
+    address: "רחוב אחר 7",
+    priceMonthly: 9000,
+  });
 });
 
 afterAll(async () => {

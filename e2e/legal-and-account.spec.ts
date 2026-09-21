@@ -25,11 +25,24 @@ test("registration is blocked without accepting the terms", async ({ page }) => 
   await expect(page).toHaveURL(/\/register/);
 });
 
-test("forgot-password does not reveal whether an email is registered", async ({ page }) => {
+/*
+ * With no email provider configured - which is the state of this environment
+ * and of the deployment - the page says so instead of offering a field.
+ *
+ * It used to accept an address and answer "if that address is registered, we
+ * have sent it a link", while sendEmail quietly did nothing. For anyone who
+ * had genuinely forgotten their password that was a dead end disguised as a
+ * solution: they went away and waited for a message that was never coming.
+ *
+ * The no-enumeration property this test used to pin is now covered in
+ * tests/forgot-password.test.ts, where the provider can be simulated.
+ */
+test("forgot-password says so when it cannot send", async ({ page }) => {
   await page.goto("/forgot-password");
-  await page.locator("#email").fill(uniqueEmail("unregistered"));
-  await page.getByRole("button", { name: "שליחת קישור לאיפוס" }).click();
-  await expect(page.getByText("אם הכתובת רשומה במערכת")).toBeVisible();
+  await expect(page.getByText(/שחזור סיסמה בדוא״ל אינו פעיל/)).toBeVisible();
+  // No field, no button: nothing to press that would do nothing.
+  await expect(page.locator("#email")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "שליחת קישור לאיפוס" })).toHaveCount(0);
 });
 
 test("a reset-password link without a token shows an invalid-link message", async ({ page }) => {
