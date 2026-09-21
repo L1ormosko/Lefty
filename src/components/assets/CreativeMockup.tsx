@@ -48,6 +48,16 @@ export type MarkedPhoto = {
    * everything next to it worth less.
    */
   detected?: boolean;
+  /**
+   * Whether the picture under the artwork is Google's rather than the
+   * owner's.
+   *
+   * This one is not a footnote. A Street View frame is a photograph of the
+   * street on whatever day Google drove it, and an advertiser deciding to
+   * spend money on a site is entitled to know they are looking at that rather
+   * than at a photograph the owner took of their own sign.
+   */
+  streetView?: boolean;
 };
 
 /** Checked per gesture rather than cached: the setting can change mid-session. */
@@ -86,6 +96,18 @@ export function CreativeMockup({
   const { index, next, t: mix } = blend(Math.min(pos, frames.length - 1));
   const frame = frames[Math.min(index, frames.length - 1)];
   const nextFrame = frames[Math.min(next, frames.length - 1)];
+
+  /*
+   * Facts about the picture currently on screen, rather than about the set.
+   *
+   * orderFrames types its result as Frame, so the provenance fields do not
+   * survive the trip even though the values do; looking the photo back up by
+   * id is the honest way to read them. Per-frame and not "any of them",
+   * because a listing can hold an owner's photograph and a Street View frame
+   * at once, and a note that applied to the other one would be worse than no
+   * note - it would be a wrong one.
+   */
+  const shown = photos.find((p) => p.id === frame?.id);
 
   const [creative, setCreative] = useState<{ url: string; width: number; height: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -253,9 +275,10 @@ export function CreativeMockup({
             disclaimer rather than beside it: "this is a simulation" is the
             statement that changes what the advertiser does, and how the face
             was located is the footnote to it. */}
-        {photos.some((p) => p.detected) && (
-          <p className="mt-1 text-sm text-ink-600">{t("mockup.detected")}</p>
+        {shown?.streetView && (
+          <p className="mt-1 text-sm text-ink-700">{t("mockup.streetViewPhoto")}</p>
         )}
+        {shown?.detected && <p className="mt-1 text-sm text-ink-600">{t("mockup.detected")}</p>}
 
         {/* What the advertiser has to match. Stated before they choose a file,
             not after the preview has already surprised them. */}

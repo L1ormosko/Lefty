@@ -107,6 +107,41 @@ describe("a usable answer", () => {
   });
 });
 
+describe("the street as a second opinion", () => {
+  it("sends both pictures, the owner's first", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reply(JSON.stringify({ found: true, confidence: 0.9, corners: square }))
+    );
+    await detectSurface(IMAGE, CONTEXT, {
+      data: new Uint8Array([9, 9]),
+      contentType: "image/jpeg",
+    });
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]!.body));
+    const content = body.messages[0].content;
+    expect(content.filter((c: { type: string }) => c.type === "image")).toHaveLength(2);
+    // Order is the only thing telling the model which picture its corners
+    // are about, so it is not left to chance.
+    expect(content[0].source.media_type).toBe("image/webp");
+    expect(content[1].source.media_type).toBe("image/jpeg");
+    expect(body.system).toContain("TWO pictures");
+    expect(body.system).toContain("Never return corners measured");
+  });
+
+  it("says nothing about a second picture when there is none", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reply(JSON.stringify({ found: true, confidence: 0.9, corners: square }))
+    );
+    await detectSurface(IMAGE, CONTEXT);
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]!.body));
+    // Instructions about a picture that was not sent are instructions to
+    // hallucinate one.
+    expect(body.system).not.toContain("TWO pictures");
+    expect(body.messages[0].content.filter((c: { type: string }) => c.type === "image")).toHaveLength(1);
+  });
+});
+
 describe("every way it can go wrong", () => {
   it("takes a refusal at face value", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

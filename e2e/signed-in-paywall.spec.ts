@@ -67,8 +67,10 @@ test("a signed-in visitor is never told to register or to sign in", async ({ pag
   await page.goto(`/assets/${assetId}`);
 
   // The header proves there is a session - without this the rest of the test
-  // would pass for an anonymous visitor too.
-  await expect(page.getByRole("button", { name: "יציאה" })).toBeVisible();
+  // would pass for an anonymous visitor too. It used to check the logout
+  // button; that now lives inside the account menu, so the check is the menu
+  // itself, which only renders for a signed-in reader.
+  await expect(page.locator("[data-account-menu]")).toBeVisible();
 
   const body = await page.locator("main").innerText();
   expect(body).not.toContain("פתיחת חשבון");

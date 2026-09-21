@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/server/db";
 import { databaseStorage } from "./database";
+import { streetViewStorage } from "./streetview";
 import { imageKey, type StorageProvider, type StoredImage } from "./provider";
 
 export { imageKey, imageIdFromKey } from "./provider";
@@ -16,11 +17,28 @@ export type { StorageProvider, StoredImage, PutInput } from "./provider";
  */
 const PROVIDERS: Record<string, StorageProvider> = {
   database: databaseStorage,
+  /*
+   * Not selectable through VELTO_STORAGE, and that is not an oversight.
+   *
+   * The others here are alternatives: one of them holds every photograph in
+   * the product. This one is a per-row provider - a listing can have three
+   * photographs the owner uploaded and one Street View frame, and each row
+   * says where its own bytes come from. readImageAt() resolves per row, which
+   * is exactly the seam this needs; selectProvider() never returns it.
+   */
+  streetview: streetViewStorage,
 };
 
 function selectProvider(): StorageProvider {
   const name = process.env.VELTO_STORAGE?.trim();
   if (!name) return databaseStorage;
+  // Refused explicitly. It is in PROVIDERS so that rows can name it, but it
+  // cannot store anything, so choosing it as the default would fail every
+  // upload in the product with an error about panoramas.
+  if (name === "streetview") {
+    console.error('[velto] VELTO_STORAGE="streetview" is not a general store. Using "database".');
+    return databaseStorage;
+  }
   const provider = PROVIDERS[name];
   if (!provider) {
     // Loud, and then the safe default. A typo in an environment variable must

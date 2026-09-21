@@ -1,34 +1,43 @@
 import { t } from "@/lib/labels";
 import { Card } from "@/components/ui";
+import { lookupPano, embedViewUrl } from "@/server/streetview";
 
 /**
- * Google's own Street View of the listing's address, unaltered.
+ * Google's own view of the address, pointed at the sign.
  *
- * This is the honest half of "how will it look at this address". The other
- * half - the advertiser's artwork on the sign - happens on a photograph the
- * owner supplied, never here. Google's terms forbid modifying Street View
- * imagery, and particularly modifications that misrepresent what the camera
- * captured; an ad painted onto their photo of a street is precisely that, and
- * the legal exposure would be the operator's.
+ * It used to be pointed at nothing in particular. The embed was given the
+ * listing's coordinates and no more, so Google picked the nearest panorama
+ * and faced the camera in whatever direction that panorama's car had been
+ * travelling. On a corner plot that is the other street: the panel said "this
+ * is the site" and showed somewhere else, which is worse than showing nothing.
  *
- * So: a separate panel, embedded rather than fetched and re-hosted, with the
- * attribution the embed carries. The Maps Embed API is free and unmetered,
- * which is also why this is an iframe and not the Static API - the static
- * endpoint returns an image file, and storing or re-serving one is what the
- * terms actually prohibit.
+ * Now the panorama is looked up first (server/streetview.ts) and the frame is
+ * pinned to its id, with a heading computed from where the camera actually
+ * stands towards where the sign actually is. The panel also says how far away
+ * the camera is and when Google took the picture, because both change how much
+ * the viewer should trust what they are looking at - a view from 60m in 2019
+ * is a different kind of evidence from one from 8m last year.
  *
- * Renders nothing without a key. A panel that says "Street View unavailable"
- * would be a dead promise, and this project does not ship those.
+ * Nothing is drawn on top of this. The creative preview happens in its own
+ * panel; this one is the unaltered photograph, which is what makes it useful
+ * as a check on everything else the listing claims.
+ *
+ * Renders nothing without a key, without coverage, or when the nearest
+ * panorama is too far away to be of this place. A panel that says "Street View
+ * unavailable" would be a dead promise, and this project does not ship those.
  */
-export function StreetViewPanel({ latitude, longitude }: { latitude: number; longitude: number }) {
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
-  if (!key) return null;
+export async function StreetViewPanel({
+  latitude,
+  longitude,
+}: {
+  latitude: number;
+  longitude: number;
+}) {
+  const view = await lookupPano({ lat: latitude, lng: longitude });
+  if (!view) return null;
 
-  const src =
-    `https://www.google.com/maps/embed/v1/streetview` +
-    `?key=${encodeURIComponent(key)}` +
-    `&location=${latitude},${longitude}` +
-    `&fov=90`;
+  const src = embedViewUrl(view);
+  if (!src) return null;
 
   return (
     <Card className="p-4" data-streetview>
@@ -39,13 +48,23 @@ export function StreetViewPanel({ latitude, longitude }: { latitude: number; lon
           title={t("street.title")}
           src={src}
           loading="lazy"
-          // Street View has no coverage everywhere; the frame then shows
-          // Google's own "no imagery here" state, which is the truth.
           referrerPolicy="no-referrer-when-downgrade"
           className="block w-full h-[320px] border-0"
           allowFullScreen
         />
       </div>
+      {/* Two facts about the photograph rather than about the place. Both are
+          Google's own, neither is inferred, and "לא צוין" is the honest answer
+          when Google does not say. */}
+      <p className="mt-2 text-xs text-ink-500">
+        {t("street.cameraDistance", { m: `⁨${view.metresAway}⁩` })}
+        {" · "}
+        {view.capturedAt ? (
+          t("street.captured", { date: `⁨${view.capturedAt}⁩` })
+        ) : (
+          <span>{t("street.capturedUnknown")}</span>
+        )}
+      </p>
     </Card>
   );
 }

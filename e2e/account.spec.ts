@@ -54,6 +54,9 @@ test("a media owner has an account page too", async ({ page }) => {
   const email = uniqueEmail("owner-account");
   await register(page, "MEDIA_OWNER", email);
 
+  // The profile link moved out of the sidebar and into the account menu in
+  // the header, so reaching it now takes the press that opens the menu.
+  await page.locator("[data-account-menu]").click();
   await page.getByRole("link", { name: "פרופיל" }).click();
   await page.waitForURL(/\/owner\/profile/);
   await expect(page.locator("#name")).toBeVisible();

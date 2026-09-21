@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { t } from "@/lib/labels";
 import type { SessionUser } from "@/server/auth";
-import { LinkButton, Num } from "./ui";
-import { LogoutButton } from "./LogoutButton";
+import { LinkButton } from "./ui";
+import { AccountMenu } from "./AccountMenu";
 
 function dashboardHref(role: SessionUser["role"]) {
   if (role === "MEDIA_OWNER") return "/owner";
@@ -43,23 +43,15 @@ export function SiteHeader({ user, unread }: { user: SessionUser | null; unread:
             </Link>
           )}
           {user ? (
-            <>
-              <Link
-                href={`${dashboardHref(user.role)}/notifications`}
-                className="relative inline-flex items-center min-h-11 text-sm text-ink-700 hover:text-ink-900 px-2"
-              >
-                {t("nav.notifications")}
-                {unread > 0 && (
-                  <span className="absolute -top-1 -start-1 min-w-5 h-5 px-1 rounded-full bg-brand-600 text-white text-[11px] flex items-center justify-center">
-                    <Num>{unread}</Num>
-                  </span>
-                )}
-              </Link>
-              <LinkButton href={dashboardHref(user.role)} variant="secondary" size="sm" className={TOUCH}>
-                {t("nav.dashboard")}
-              </LinkButton>
-              <LogoutButton />
-            </>
+            /* Three controls became one.
+               The notifications link, the dashboard button and the logout
+               button all lived out here, and two of them were repeated in
+               every dashboard sidebar. They are all about the account rather
+               than about the product, so they fold behind the reader's own
+               name - see AccountMenu. The unread count still rides on the
+               outside of it, because a badge inside a closed menu is not a
+               notification. */
+            <AccountMenu user={user} unread={unread} dashboardHref={dashboardHref(user.role)} />
           ) : (
             <>
               <LinkButton href="/login" variant="ghost" size="sm" className={TOUCH}>

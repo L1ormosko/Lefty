@@ -437,6 +437,30 @@ export async function detectMissingSurfacesAction(): Promise<ActionState> {
     const limited = rateLimit(`surface:detect:${admin.id}`, 20, 60 * 60_000);
     if (!limited.ok) return { ok: false, error: t("mockup.detectTooMany") };
 
+    /*
+     * Before detecting, give listings a photograph to detect on.
+     *
+     * A listing whose owner uploaded nothing had no preview at all, and no
+     * amount of detection changes that - there was no picture. A Street View
+     * row is a description of a view, not bytes, so this is cheap and stores
+     * nothing of Google's; the frame is fetched when someone looks at it.
+     *
+     * Only ACTIVE listings: a draft nobody has published does not need a
+     * photograph from anywhere, and asking Google about it spends a request
+     * on a listing that may never exist.
+     */
+    const { ensureStreetViewPhoto } = await import("@/server/streetview");
+    const needPhoto = await prisma.mediaAsset.findMany({
+      where: { status: "ACTIVE", images: { none: { storageProvider: "streetview" } } },
+      select: { id: true },
+      orderBy: { id: "asc" },
+      take: DETECT_BATCH,
+    });
+    let attached = 0;
+    for (const asset of needPhoto) {
+      if (await ensureStreetViewPhoto(asset.id)) attached++;
+    }
+
     // Never looked at, and no face already on it. A photo an admin marked by
     // hand has a quad and a source, and is not a candidate for anything.
     const where = { surfaceCheckedAt: null, surfaceSource: null };
@@ -446,7 +470,15 @@ export async function detectMissingSurfacesAction(): Promise<ActionState> {
       orderBy: { id: "asc" },
       take: DETECT_BATCH,
     });
-    if (pending.length === 0) return { ok: true, message: t("mockup.detectNone") };
+    if (pending.length === 0) {
+      revalidatePath("/admin/assets");
+      return {
+        ok: true,
+        message: attached
+          ? t("mockup.detectAttached", { attached: `⁨${attached}⁩` })
+          : t("mockup.detectNone"),
+      };
+    }
 
     let found = 0;
     for (const image of pending) {
@@ -468,11 +500,12 @@ export async function detectMissingSurfacesAction(): Promise<ActionState> {
     revalidatePath("/admin/assets");
     return {
       ok: true,
-      message: t("mockup.detectDone", {
-        checked: `⁨${pending.length}⁩`,
-        found: `⁨${found}⁩`,
-        left: `⁨${remaining}⁩`,
-      }),
+      message:
+        t("mockup.detectDone", {
+          checked: `⁨${pending.length}⁩`,
+          found: `⁨${found}⁩`,
+          left: `⁨${remaining}⁩`,
+        }) + (attached ? " " + t("mockup.detectAttached", { attached: `⁨${attached}⁩` }) : ""),
     };
   } catch (err) {
     return { ok: false, error: toUserMessage(err) };

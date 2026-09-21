@@ -2,7 +2,21 @@ import Link from "next/link";
 import { cx } from "./ui";
 import { SiteFooter } from "./SiteFooter";
 
-export type NavItem = { href: string; label: string; badge?: number };
+export type NavItem = {
+  href: string;
+  label: string;
+  badge?: number;
+  /**
+   * Draw a rule above this item.
+   *
+   * One use, and it is the admin's: the first entries are queues where
+   * something is waiting for a person, the last two are reference screens
+   * looked at when a question comes up. Seven equal rows say those are seven
+   * of the same thing. A hairline says which kind you are about to open, and
+   * costs a single line rather than a collapsible section nobody would open.
+   */
+  divider?: boolean;
+};
 
 export function DashboardShell({
   title,
@@ -42,7 +56,16 @@ export function DashboardShell({
               {nav.map((item) => {
                 const active = current === item.href;
                 return (
-                  <li key={item.href} className="shrink-0">
+                  <li
+                    key={item.href}
+                    className={cx(
+                      "shrink-0",
+                      // A rule on the inline edge when the list is a row on a
+                      // phone, on the block edge when it is a column from lg:
+                      // up - the same separation, drawn the way the axis runs.
+                      item.divider && "border-s lg:border-s-0 lg:border-t border-ink-200 ps-1 lg:ps-0 lg:pt-1 lg:mt-1"
+                    )}
+                  >
                     <Link
                       href={item.href}
                       aria-current={active ? "page" : undefined}

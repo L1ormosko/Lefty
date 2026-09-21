@@ -131,26 +131,31 @@ export default async function AssetPage({ params }: Params) {
       detected: image.surfaceSource === "ai",
       confidence: image.surfaceConfidence,
       source: image.surfaceSource,
+      // Whose photograph this is. A Street View frame is a picture of the
+      // street on the day Google drove it, and an advertiser deciding where
+      // to spend money should not have to guess which kind they are seeing.
+      streetView: image.storageProvider === "streetview",
     }))
-    .filter(
-      (p): p is {
-        id: string;
-        url: string;
-        quad: NonNullable<typeof p.quad>;
-        angleDeg: number | null;
-        detected: boolean;
-        confidence: number | null;
-        source: string | null;
-      } =>
-        p.quad != null &&
-        isShowable(
-          {
-            quad: p.quad,
-            confidence: p.confidence,
-            source: p.source === "ai" || p.source === "admin" ? p.source : null,
-          },
-          asset
-        )
+    /*
+     * flatMap rather than filter with a type predicate.
+     *
+     * A predicate has to restate the whole shape, which means every field
+     * added here has to be added there too - and the compiler only complains
+     * about the omission, never about the one that is wrong. Returning the
+     * narrowed object directly lets inference do it.
+     */
+    .flatMap((p) =>
+      p.quad != null &&
+      isShowable(
+        {
+          quad: p.quad,
+          confidence: p.confidence,
+          source: p.source === "ai" || p.source === "admin" ? p.source : null,
+        },
+        asset
+      )
+        ? [{ ...p, quad: p.quad }]
+        : []
     );
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 

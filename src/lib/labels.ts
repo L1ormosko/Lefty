@@ -113,6 +113,7 @@ const he: Dict = {
   "nav.forgotPassword": "שכחתי סיסמה",
   "nav.logout": "יציאה",
   "nav.listYourSpace": "בעלי שטחים — פרסמו אצלנו",
+  "nav.account": "החשבון שלי",
   "nav.notifications": "התראות",
   "nav.skipToContent": "דילוג לתוכן הראשי",
 
@@ -609,6 +610,11 @@ const he: Dict = {
   "mockup.detectRun": "סריקת תמונות שלא נבדקו",
   "mockup.detectDone": "נבדקו {checked} תמונות, נמצאו {found} פאות. נותרו {left}.",
   "mockup.detectNone": "אין תמונות שממתינות לבדיקה.",
+  "mockup.detectAttached": "צורפו {attached} תצוגות Street View לשטחים בלי צילום.",
+  // Said on the listing itself: an advertiser is entitled to know that the
+  // picture under their artwork is Google's street photo and not the owner's.
+  "mockup.streetViewPhoto": "התצוגה הזאת היא צילום Street View של גוגל בכתובת השטח, לא צילום של בעל השטח.",
+  "mockup.streetViewTab": "תצוגת רחוב",
   "mockup.detectOff": "זיהוי אוטומטי אינו מוגדר במערכת (חסר ANTHROPIC_API_KEY). הסימון הידני פעיל כרגיל.",
   "mockup.detectTooMany": "יותר מדי סריקות בשעה האחרונה. נסו שוב מאוחר יותר.",
   "mockup.markedAuto": "סומן אוטומטית",
@@ -672,7 +678,11 @@ const he: Dict = {
   // Street View. Deliberately its own panel: Google's terms forbid altering
   // their imagery, and an ad painted onto it would be exactly that.
   "street.title": "הרחוב עצמו",
-  "street.note": "תצוגת Street View של גוגל בכתובת השטח. התמונה עשויה להיות מתאריך אחר ואינה כוללת את המודעה — ההדמיה יושבת על צילום השטח למעלה.",
+  "street.note": "תצוגת Street View של גוגל, ממוקדת לכיוון השלט. התמונה עשויה להיות מתאריך אחר ואינה כוללת את המודעה.",
+  // Two facts about the photograph, not about the place. Both from Google.
+  "street.cameraDistance": "המצלמה במרחק {m} מ׳ מהשלט",
+  "street.captured": "צולם {date}",
+  "street.capturedUnknown": "תאריך הצילום לא צוין",
 
   // Access. The tone matters: a restricted visitor is a prospect, not an
   // intruder, and the copy says what they would get rather than what they

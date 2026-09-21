@@ -28,11 +28,13 @@ import { surfaceVerdict } from "@/lib/surface-confidence";
  * form is unchanged - the same arrangement as the brief parser, and the
  * screen says which marked the face either way.
  *
- * What this deliberately does NOT do is look at Google's imagery. The listing
- * page embeds Street View unmodified (see components/assets/StreetViewPanel)
- * precisely because Maps Platform's terms forbid deriving from that content;
- * sending it to a model is the same question wearing a different hat, and the
- * owner's own photograph is the one the artwork lands on anyway.
+ * Street View is given to the model as a second picture when one exists, to
+ * answer the question the owner's photograph often cannot: which of the signs
+ * in frame is the one at this address, and which way does it face. That is a
+ * decision of the operator's, taken knowingly - Maps Platform's terms are
+ * restrictive about what may be done with their imagery, and the note on that
+ * is in docs/OPERATIONS.md rather than buried here. The frame is passed
+ * through in memory and never stored.
  */
 
 const MODEL = process.env.ANTHROPIC_VISION_MODEL || "claude-haiku-4-5-20251001";
@@ -68,6 +70,8 @@ export type SurfaceContext = {
   city: string | null;
   widthCm: number | null;
   heightCm: number | null;
+  /** Set when a second, street-level picture is being sent alongside. */
+  hasStreetReference?: boolean;
 };
 
 function systemPrompt(context: SurfaceContext): string {
@@ -96,6 +100,17 @@ function systemPrompt(context: SurfaceContext): string {
     "If several signs appear, choose the one the photograph was taken of: the",
     "largest, most centred, most squarely framed advertising face.",
     "",
+    ...(context.hasStreetReference
+      ? [
+          "You are given TWO pictures. The FIRST is the photograph to answer",
+          "about - your corners refer to it and to nothing else. The SECOND is",
+          "a street-level view of the same address, looking towards the sign,",
+          "for reference only: use it to tell which structure at this address",
+          "is the sign, and which way it faces. Never return corners measured",
+          "on the second picture.",
+          "",
+        ]
+      : []),
     "confidence is your own honest estimate that these corners are that face.",
     "Report found: false with corners: null when the face is obscured, cut off",
     "at the edge of the frame, or you are not sure which object is the sign.",
@@ -115,7 +130,17 @@ export type DetectionOutcome =
  */
 export async function detectSurface(
   image: { data: Uint8Array; contentType: string },
-  context: SurfaceContext
+  context: SurfaceContext,
+  /**
+   * A street-level view of the same address, looking towards the sign.
+   *
+   * Reference only. It tells the model which structure at this address is the
+   * sign when the owner's photograph shows several, and which way it faces.
+   * The corners still refer to the first picture, and the prompt says so in
+   * as many words - a quad measured on the wrong photograph would be a
+   * confident answer about a different image.
+   */
+  reference?: { data: Uint8Array; contentType: string } | null
 ): Promise<DetectionOutcome> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { status: "skipped" };
@@ -134,7 +159,7 @@ export async function detectSurface(
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 512,
-        system: systemPrompt(context),
+        system: systemPrompt({ ...context, hasStreetReference: !!reference }),
         messages: [
           {
             role: "user",
@@ -147,6 +172,21 @@ export async function detectSurface(
                   data: Buffer.from(image.data).toString("base64"),
                 },
               },
+              // Second, and labelled as second in the system prompt. Order is
+              // the only thing telling the model which picture its answer is
+              // about, so it is fixed here rather than left to a caller.
+              ...(reference
+                ? [
+                    {
+                      type: "image",
+                      source: {
+                        type: "base64",
+                        media_type: reference.contentType,
+                        data: Buffer.from(reference.data).toString("base64"),
+                      },
+                    },
+                  ]
+                : []),
               { type: "text", text: "Where is this sign's face?" },
             ],
           },
@@ -209,11 +249,14 @@ export async function detectAndStore(imageId: string): Promise<DetectionOutcome>
       storageProvider: true,
       asset: {
         select: {
+          id: true,
           assetType: true,
           address: true,
           city: true,
           widthCm: true,
           heightCm: true,
+          latitude: true,
+          longitude: true,
         },
       },
     },
@@ -225,6 +268,17 @@ export async function detectAndStore(imageId: string): Promise<DetectionOutcome>
   const stored = await readImage(imageId);
   if (!stored) return { status: "skipped" };
 
+  /*
+   * The street, as a second opinion - except when the picture already is the
+   * street.
+   *
+   * Sending a Street View frame as its own reference would spend a request to
+   * show the model the image it is already looking at, and would invite it to
+   * answer about "the second picture" when both are the same one.
+   */
+  const reference =
+    image.storageProvider === "streetview" ? null : await streetReference(image.asset);
+
   const outcome = await detectSurface(
     { data: stored.data, contentType: stored.contentType },
     {
@@ -233,7 +287,8 @@ export async function detectAndStore(imageId: string): Promise<DetectionOutcome>
       city: image.asset.city,
       widthCm: image.asset.widthCm,
       heightCm: image.asset.heightCm,
-    }
+    },
+    reference
   );
   if (outcome.status === "skipped") return outcome;
 
@@ -276,4 +331,32 @@ export async function detectAndStore(imageId: string): Promise<DetectionOutcome>
     },
   });
   return outcome;
+}
+
+/**
+ * A street-level frame of the same address, or null.
+ *
+ * Fetched fresh and held only for the length of this call - the same rule the
+ * streetview storage provider works under. Every failure returns null and the
+ * detection simply proceeds on the owner's photograph alone, which is what it
+ * did before this existed.
+ */
+async function streetReference(asset: {
+  id: string;
+  latitude: number;
+  longitude: number;
+}): Promise<{ data: Uint8Array; contentType: string } | null> {
+  try {
+    const { lookupPano } = await import("./streetview");
+    const view = await lookupPano({ lat: asset.latitude, lng: asset.longitude });
+    if (!view) return null;
+
+    const { streetViewStorage, streetViewKeyFor } = await import("./storage/streetview");
+    const frame = await streetViewStorage.get(streetViewKeyFor(view));
+    return frame ? { data: frame.data, contentType: frame.contentType } : null;
+  } catch (err) {
+    // A reference that could not be fetched is a reference we do without.
+    console.error("[velto] street reference failed:", err);
+    return null;
+  }
 }
