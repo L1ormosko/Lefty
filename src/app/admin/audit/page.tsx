@@ -2,6 +2,7 @@ import { requireRole } from "@/server/auth";
 import { countAudit, recentAudit } from "@/server/audit";
 import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
+import { countOpenRequests } from "@/server/access-requests";
 import { DashboardShell } from "@/components/DashboardShell";
 import { Card, EmptyState, Num } from "@/components/ui";
 import { Pager, pageFromParam, PAGE_SIZE } from "@/components/pager";
@@ -30,7 +31,7 @@ export default async function AdminAudit({
   ]);
 
   return (
-    <DashboardShell title={t("audit.title")} nav={adminNav()} current="/admin/audit">
+    <DashboardShell title={t("audit.title")} nav={adminNav({ access: await countOpenRequests() })} current="/admin/audit">
       <p className="mb-3 text-sm text-ink-600 max-w-2xl">{t("audit.lead")}</p>
 
       {entries.length === 0 ? (

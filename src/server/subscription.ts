@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "./db";
 import { planStatus, type PlanStatus } from "@/lib/plan";
-import { access, trialEnd, type Access } from "@/lib/subscription";
+import { access, trialEnd, type ViewerAccess } from "@/lib/subscription";
 
 /**
  * A media owner's subscription state, as of right now.
@@ -39,15 +39,23 @@ export async function ownerPlanRow(userId: string) {
  */
 export async function viewerAccess(
   user: { id: string; role: string } | null
-): Promise<Access & { admin: boolean }> {
-  if (!user) return { ...access(null), admin: false };
-  if (user.role === "ADMIN") return { state: "paid", full: true, trialDaysLeft: null, admin: true };
+): Promise<ViewerAccess> {
+  // `signedIn` matters as much as `full`. Without it every screen that gates
+  // content told a logged-in customer to "open an account" and asked whether
+  // they "already had one" - the copy for a stranger, shown to someone whose
+  // name is in the header. The subscription state alone cannot tell those two
+  // people apart, because a signed-in account with no subscription row and an
+  // anonymous visitor both come out as "none".
+  if (!user) return { ...access(null), admin: false, signedIn: false };
+  if (user.role === "ADMIN") {
+    return { state: "paid", full: true, trialDaysLeft: null, admin: true, signedIn: true };
+  }
 
   const subscription = await prisma.subscription.findUnique({
     where: { userId: user.id },
     select: { trialEndsAt: true, paidThrough: true },
   });
-  return { ...access(subscription), admin: false };
+  return { ...access(subscription), admin: false, signedIn: true };
 }
 
 /**

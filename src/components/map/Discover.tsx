@@ -11,7 +11,7 @@ import { FilterPanel } from "./FilterPanel";
 import { AssetCard } from "./AssetCard";
 import { FilterChips, chipText } from "./FilterChips";
 import { clampFraction, nextSheet, snapTo, type Sheet } from "./sheet";
-import type { Access } from "@/lib/subscription";
+import type { ViewerAccess } from "@/lib/subscription";
 import { AccessNotice } from "@/components/access/AccessNotice";
 import { DemoNotice } from "@/components/badges";
 import {
@@ -27,7 +27,7 @@ type Props = {
   initialAssets: MapAsset[];
   cities: { city: string; count: number }[];
   /** What this viewer may see. Restricted viewers get blurred, priceless rows. */
-  access: Access;
+  access: ViewerAccess;
 };
 
 export function Discover({ initialAssets, cities, access }: Props) {

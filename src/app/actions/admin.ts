@@ -117,6 +117,69 @@ export async function setUserActiveAction(userId: string, isActive: boolean): Pr
 }
 
 /**
+ * Change what somebody is.
+ *
+ * This did not exist, and its absence had a sharp edge: appointing an admin
+ * required a hand-written UPDATE against the database, and the production
+ * database accepts no external connections. Whoever the seed happened to
+ * create was the only admin there would ever be.
+ *
+ * Three guards, and the last two are what stop this locking everyone out:
+ *
+ *   1. Never your own role. Nobody demotes themselves by accident, and it
+ *      closes the "promote myself" path for a compromised non-admin session -
+ *      though only an admin gets this far at all.
+ *   2. Never the last active admin. A platform with no admin cannot verify a
+ *      listing, record a payment or read this log, and there is no way back in
+ *      through the interface.
+ *   3. Audited, always. Appointing an admin is the most consequential thing
+ *      one account can do to another.
+ */
+export async function setUserRoleAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const admin = await requireRole("ADMIN");
+    const userId = String(formData.get("userId") ?? "");
+    const role = String(formData.get("role") ?? "");
+    if (role !== "ADVERTISER" && role !== "MEDIA_OWNER" && role !== "ADMIN") {
+      return { ok: false, error: "תפקיד לא תקין." };
+    }
+    if (admin.id === userId) return { ok: false, error: t("admin.roleSelfRefused") };
+
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true },
+    });
+    if (!target) return { ok: false, error: "המשתמש לא נמצא." };
+    if (target.role === role) return { ok: true, message: t("admin.roleSaved") };
+
+    // Counted at the moment of the change rather than trusted from a cached
+    // number: two admins demoting each other at once would otherwise both pass
+    // a check made a second earlier.
+    if (target.role === "ADMIN") {
+      const remaining = await prisma.user.count({
+        where: { role: "ADMIN", isActive: true, id: { not: userId } },
+      });
+      if (remaining === 0) return { ok: false, error: t("admin.roleLastAdminRefused") };
+    }
+
+    await prisma.user.update({ where: { id: userId }, data: { role } });
+
+    await recordAudit({
+      actorId: admin.id,
+      action: "USER_ROLE_CHANGED",
+      targetType: "User",
+      targetId: userId,
+      summary: `${target.email}: ${target.role} → ${role}`,
+    });
+
+    revalidatePath("/admin/users");
+    return { ok: true, message: t("admin.roleSaved") };
+  } catch (err) {
+    return { ok: false, error: toUserMessage(err) };
+  }
+}
+
+/**
  * Record or change a media owner's subscription.
  *
  * Recording, not charging: VELTO issues no invoices and moves no money. An

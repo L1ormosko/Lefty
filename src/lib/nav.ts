@@ -19,10 +19,14 @@ export const ownerNav = (counts: { inquiries?: number; bookings?: number } = {})
   { href: "/owner/profile", label: t("dash.profile") },
 ];
 
-export const adminNav = () => [
+export const adminNav = (counts: { access?: number } = {}) => [
   { href: "/admin", label: t("dash.overview") },
   { href: "/admin/assets", label: t("admin.assets") },
   { href: "/admin/users", label: t("admin.users") },
+  // Badged, because this is the queue where someone is waiting to give VELTO
+  // money. A request that sits unseen is the paywall failing in the expensive
+  // direction.
+  { href: "/admin/access", label: t("admin.accessRequests"), badge: counts.access },
   { href: "/admin/inquiries", label: t("dash.requests") },
   { href: "/admin/bookings", label: t("dash.bookings") },
   { href: "/admin/audit", label: t("audit.title") },

@@ -79,10 +79,17 @@ export default async function AssetPage({ params }: Params) {
           <p className="text-sm text-ink-500">
             {t(`type.${asset.assetType}`)} · {asset.city}
           </p>
+          {/* "Opens with an account" is true for a visitor and insulting to a
+              customer who is signed in and looking at it. Same page, two
+              audiences, two headings. */}
           <h1 className="mt-1 text-xl font-semibold text-ink-900">
-            {t("access.restrictedAsset")}
+            {viewer.signedIn ? t("access.restrictedAssetSignedIn") : t("access.restrictedAsset")}
           </h1>
-          <p className="mt-2 text-sm text-ink-700">{t("access.restrictedAssetNote")}</p>
+          <p className="mt-2 text-sm text-ink-700">
+            {viewer.signedIn
+              ? t("access.restrictedAssetSignedInNote")
+              : t("access.restrictedAssetNote")}
+          </p>
           <AccessNotice access={viewer} className="mt-4" />
         </Card>
       </main>

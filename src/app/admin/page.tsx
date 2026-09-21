@@ -4,6 +4,7 @@ import { citiesWithInventory } from "@/server/assets";
 import { t } from "@/lib/labels";
 import { CURRENCY } from "@/lib/constants";
 import { adminNav } from "@/lib/nav";
+import { countOpenRequests } from "@/server/access-requests";
 import { DashboardShell, Section } from "@/components/DashboardShell";
 import { Card, LinkButton, Num, StatTile, buttonClass } from "@/components/ui";
 import { addDays, todayUtc } from "@/lib/dates";
@@ -52,7 +53,7 @@ export default async function AdminOverview() {
   const pipelineValue = pipeline._sum.priceEstimate ?? 0;
 
   return (
-    <DashboardShell title={t("nav.admin")} nav={adminNav()} current="/admin">
+    <DashboardShell title={t("nav.admin")} nav={adminNav({ access: await countOpenRequests() })} current="/admin">
       <Section
         title={t("admin.platform")}
         action={<LinkButton href="/admin/assets" size="sm" variant="secondary">{t("admin.verify")}</LinkButton>}

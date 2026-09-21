@@ -46,6 +46,23 @@ export type Access = {
   trialDaysLeft: number | null;
 };
 
+/**
+ * Access plus who is asking.
+ *
+ * `state` alone cannot tell a signed-in account with no subscription apart
+ * from a visitor with no account: both are "none". Every screen that gates
+ * content needs the difference, because the two people need opposite things
+ * said to them - one should register, the other already has and needs a way
+ * to pay. Getting this wrong is what put "open an account" and "already have
+ * an account?" in front of a customer who was signed in at the time.
+ */
+export type ViewerAccess = Access & {
+  /** Full access by role rather than by payment. */
+  admin: boolean;
+  /** There is a session. Not the same as having access. */
+  signedIn: boolean;
+};
+
 const DAY = 24 * 60 * 60 * 1000;
 
 /**

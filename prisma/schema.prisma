@@ -109,6 +109,52 @@ enum NotificationType {
   BOOKING_CANCELLED
   ASSET_VERIFIED
   ASSET_REJECTED
+  ACCESS_REQUESTED
+  ACCESS_GRANTED
+}
+
+/// Where a request for full access has got to.
+enum AccessRequestStatus {
+  /// Waiting for someone to deal with it.
+  OPEN
+  /// Access was arranged. Closing this does not itself grant anything - the
+  /// subscription is recorded separately, on /admin/users.
+  RESOLVED
+  /// Looked at and declined, or withdrawn.
+  DISMISSED
+}
+
+/// A signed-in account asking to be let in.
+///
+/// VELTO charges nobody: `Subscription.paidThrough` is typed in by hand
+/// against an invoice raised in real bookkeeping software. That left a
+/// customer whose trial had ended with a screen that said "contact us" and no
+/// way to do it - the product could describe its own paywall but not take an
+/// order through it.
+///
+/// This is the missing half, and deliberately no more than that: it records
+/// that someone asked, tells the admins, and gives them a screen to work
+/// from. Money still moves outside the application.
+model AccessRequest {
+  id      String              @id @default(cuid())
+  userId  String
+  /// What the customer wrote. Optional - most people will write nothing.
+  message String?
+  status  AccessRequestStatus @default(OPEN)
+
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+  resolvedById String?
+  /// What the admin decided, for the next person who opens the record.
+  resolutionNote String?
+
+  user       User  @relation("AccessRequester", fields: [userId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation("AccessRequestResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  /// The admin queue: open requests, oldest first.
+  @@index([status, createdAt])
+  /// "Has this person already asked?" on every render of the access page.
+  @@index([userId, status])
 }
 
 model User {
@@ -149,6 +195,8 @@ model User {
   inquiryMessages     InquiryMessage[]
   subscription        Subscription?
   auditEntries        AuditLog[]
+  accessRequests      AccessRequest[]      @relation("AccessRequester")
+  resolvedAccessRequests AccessRequest[]   @relation("AccessRequestResolver")
 
   @@index([role])
   @@index([companyId])
@@ -546,6 +594,9 @@ enum AuditAction {
   BOOKING_CANCELLED
   SUBSCRIPTION_CHANGED
   BACKUP_DOWNLOADED
+  ACCESS_REQUESTED
+  ACCESS_REQUEST_RESOLVED
+  USER_ROLE_CHANGED
 }
 
 model Notification {

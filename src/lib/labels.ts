@@ -668,6 +668,67 @@ const he: Dict = {
   "access.trialEndingSoon": "תקופת הניסיון מסתיימת בעוד {days} ימים. לאחריה יוצגו אזורים בלבד, בלי מחירים ובלי פרטי קשר.",
   "access.lapsed": "תקופת הגישה שלכם הסתיימה. כרגע מוצגים אזורים בלבד.",
   "access.lapsedCta": "לחידוש — פנו אלינו.",
+
+  /*
+   * For someone who is signed in and does not have access.
+   *
+   * Every string above this block is written for a stranger - "open an
+   * account", "after registering", "do you already have an account?" - and
+   * they were shown to signed-in customers too, because the code could not
+   * tell the two apart. These are the ones that know there is a session.
+   */
+  "access.signedInNoAccess": "לחשבון שלכם אין כרגע גישה מלאה",
+  "access.signedInNote":
+    "המיקום המדויק, המחיר, חלונות הזמינות ופרטי בעל השטח פתוחים למנויים. אפשר לבקש גישה ונחזור אליכם.",
+  "access.requestCta": "בקשת גישה",
+  "access.restrictedAssetSignedIn": "הדף הזה פתוח למנויים",
+  "access.restrictedAssetSignedInNote":
+    "כתובת מדויקת, מחיר, חלונות זמינות, פרטי קשר והדמיית המודעה — פתוחים עם מנוי פעיל.",
+
+  // The /access page itself.
+  "access.pageTitle": "גישה לחשבון",
+  "access.stateTitle": "המצב שלכם",
+  "access.stateTrial": "תקופת ניסיון — נותרו {days} ימים.",
+  "access.statePaid": "מנוי פעיל בתוקף עד {date}.",
+  "access.stateLapsed": "תקופת הגישה הסתיימה.",
+  "access.stateNone": "אין כרגע מנוי על החשבון.",
+  "access.whatYouGet": "מה נפתח עם מנוי",
+  "access.benefit1": "הכתובת המדויקת של כל שטח, לא רק האזור.",
+  "access.benefit2": "מחירים, חלונות זמינות ותאריכים פנויים.",
+  "access.benefit3": "פרטי הקשר של בעל השטח, ושליחת בקשות ישירות.",
+  "access.benefit4": "הדמיית המודעה על צילומי השטח.",
+  "access.formTitle": "בקשת גישה",
+  "access.formNote":
+    "הבקשה מגיעה לצוות VELTO. אין כאן חיוב ואין צורך בכרטיס אשראי — נחזור אליכם עם הצעה ופרטי תשלום.",
+  "access.messageLabel": "משהו שכדאי שנדע? (לא חובה)",
+  "access.messagePlaceholder": "למשל: כמה שטחים אתם מחפשים, באילו ערים, ובאילו תאריכים.",
+  "access.submit": "שליחת הבקשה",
+  "access.pending": "הבקשה שלכם נשלחה ומחכה לטיפול.",
+  "access.pendingSince": "נשלחה בתאריך {date}.",
+  "access.pendingNote": "אין צורך לשלוח שוב. נחזור אליכם בדוא״ל ובהתראות.",
+  "access.alreadyFull": "יש לכם כבר גישה מלאה. אין צורך בבקשה.",
+  "access.sent": "הבקשה נשלחה. נחזור אליכם.",
+  "access.tooMany": "נשלחו יותר מדי בקשות. נסו שוב מאוחר יותר.",
+
+  // The admin queue.
+  "admin.accessRequests": "בקשות גישה",
+  "admin.accessEmpty": "אין בקשות גישה פתוחות.",
+  "admin.accessResolve": "סמנו כטופל",
+  "admin.accessDismiss": "דחייה",
+  "admin.accessNote": "הערה (תישלח למבקש)",
+  "admin.accessSetPlan": "הגדרת מנוי למשתמש",
+  "admin.accessResolved": "הבקשה נסגרה.",
+  "admin.accessHint":
+    "סגירת בקשה אינה פותחת גישה. את המנוי עצמו מזינים במסך המשתמשים, מול חשבונית.",
+
+  // Appointing an admin.
+  "admin.role": "תפקיד",
+  "admin.roleChange": "שינוי תפקיד",
+  "admin.roleSaved": "התפקיד עודכן.",
+  "admin.roleSelfRefused": "אי אפשר לשנות את התפקיד של עצמכם.",
+  "admin.roleLastAdminRefused": "זה המנהל הפעיל האחרון — אי אפשר להוריד אותו מתפקידו.",
+  "admin.rolePromoteConfirm":
+    "מנהל רואה את כל השטחים, את פרטי כל המשתמשים, ויכול להוריד גיבוי של כל המסד. להמשיך?",
   "access.adminNote": "גישת מנהל — נתונים מלאים.",
 
   // The audit trail. Deliberately plain: this screen is read when something

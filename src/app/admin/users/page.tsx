@@ -2,11 +2,13 @@ import { requireRole } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
+import { countOpenRequests } from "@/server/access-requests";
 import { DashboardShell } from "@/components/DashboardShell";
 import { Button, Card, EmptyState, LinkButton, Num, inputClass } from "@/components/ui";
 import { StatusPill } from "@/components/badges";
 import { formatDate } from "@/lib/dates";
 import { UserActiveToggle } from "@/components/admin/UserActiveToggle";
+import { UserRoleForm } from "@/components/admin/UserRoleForm";
 import { OwnerPlanForm } from "@/components/admin/OwnerPlanForm";
 import { access } from "@/lib/subscription";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
@@ -59,7 +61,7 @@ export default async function AdminUsers({
   });
 
   return (
-    <DashboardShell title={t("admin.users")} nav={adminNav()} current="/admin/users">
+    <DashboardShell title={t("admin.users")} nav={adminNav({ access: await countOpenRequests() })} current="/admin/users">
       {/* A GET form: the search is in the URL, so a result set survives a
           refresh and can be handed to a colleague. */}
       <form method="get" action="/admin/users" className="mb-4 flex flex-wrap gap-2">
@@ -113,6 +115,10 @@ export default async function AdminUsers({
                 </span>
                 <UserActiveToggle userId={u.id} isActive={u.isActive} />
               </div>
+              {/* How an admin gets appointed. Without this the only admin the
+                  platform would ever have is whoever the seed created, because
+                  the production database takes no external connections. */}
+              <UserRoleForm userId={u.id} role={u.role} />
               {/* Both sides pay: an advertiser subscribes for access to the
                   inventory, an owner for how much of it they may publish.
                   Admins need no record - they already see everything. */}

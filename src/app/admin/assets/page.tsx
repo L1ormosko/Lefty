@@ -3,6 +3,7 @@ import { requireRole } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
+import { countOpenRequests } from "@/server/access-requests";
 import { DashboardShell } from "@/components/DashboardShell";
 import { Card, EmptyState, LinkButton, Num, cx } from "@/components/ui";
 import { DemoBadge, StatusPill, VerificationBadge } from "@/components/badges";
@@ -75,7 +76,7 @@ export default async function AdminAssets({
   });
 
   return (
-    <DashboardShell title={t("admin.assets")} nav={adminNav()} current="/admin/assets">
+    <DashboardShell title={t("admin.assets")} nav={adminNav({ access: await countOpenRequests() })} current="/admin/assets">
       <div className="flex gap-1.5 mb-4 overflow-x-auto">
         {FILTERS.map((f) => (
           <Link

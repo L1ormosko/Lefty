@@ -2,6 +2,7 @@ import { requireRole } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { t } from "@/lib/labels";
 import { adminNav } from "@/lib/nav";
+import { countOpenRequests } from "@/server/access-requests";
 import { DashboardShell } from "@/components/DashboardShell";
 import { EmptyState } from "@/components/ui";
 import { InquiryRow, RowList } from "@/components/lists";
@@ -31,7 +32,7 @@ export default async function AdminInquiries({
   ]);
 
   return (
-    <DashboardShell title={t("dash.requests")} nav={adminNav()} current="/admin/inquiries">
+    <DashboardShell title={t("dash.requests")} nav={adminNav({ access: await countOpenRequests() })} current="/admin/inquiries">
       {inquiries.length === 0 ? (
         <EmptyState title={t("dash.noRequests")} />
       ) : (
