@@ -6,7 +6,7 @@ import type { ActionState } from "@/app/actions/inquiries";
 import { t } from "@/lib/labels";
 import { isUsableQuad, type Point, type Quad } from "@/lib/mockup";
 import { angleLabel } from "@/lib/turntable";
-import { Button } from "@/components/ui";
+import { Button, Num } from "@/components/ui";
 
 /**
  * Marking the face of a sign in a photo, by clicking its four corners.
@@ -21,12 +21,23 @@ export function MarkSurfaceForm({
   photoUrl,
   initialQuad,
   initialAngle,
+  detection,
 }: {
   imageId: string;
   photoUrl: string;
   initialQuad: Quad | null;
   /** Where the camera stood, if anyone has said. */
   initialAngle?: number | null;
+  /**
+   * What a detection said about this photo, when one has run.
+   *
+   * The corners arrive pre-placed either way, so confirming a detection is
+   * one press of the same Save button - it rewrites the row as an admin's
+   * marking. What this adds is the word for what the admin is looking at:
+   * a face already live, one waiting for them because the model was unsure,
+   * or a photo where nothing was found.
+   */
+  detection?: { source: string | null; confidence: number | null; checked: boolean; live: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const [points, setPoints] = useState<Point[]>(initialQuad ?? []);
@@ -54,10 +65,29 @@ export function MarkSurfaceForm({
   const complete = points.length === 4;
   const usable = complete && isUsableQuad(points as Quad);
 
+  /*
+   * One word for the state of this photo, on the button that opens it.
+   *
+   * The order is the order of urgency: something waiting for this admin
+   * first, then the states that need nothing from them. "Checked and no face
+   * found" is worth saying too - it is the difference between a photo the
+   * detector could not read and one it has not reached yet, and only one of
+   * those is worth marking by hand.
+   */
+  const status = detection?.source === "ai" && !detection.live
+    ? t("mockup.needsReview")
+    : initialQuad
+      ? detection?.source === "ai"
+        ? t("mockup.markedAuto")
+        : t("mockup.marked")
+      : detection?.checked
+        ? t("mockup.noneFound")
+        : null;
+
   if (!open) {
     return (
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        {initialQuad ? `${t("mockup.markTitle")} · ${t("mockup.marked")}` : t("mockup.markTitle")}
+        {status ? `${t("mockup.markTitle")} · ${status}` : t("mockup.markTitle")}
       </Button>
     );
   }
@@ -66,6 +96,23 @@ export function MarkSurfaceForm({
     <div className="w-full mt-3 pt-3 border-t border-ink-100">
       <p className="text-sm font-medium text-ink-900">{t("mockup.markTitle")}</p>
       <p className="mt-1 text-sm text-ink-600">{t("mockup.markHint")}</p>
+
+      {/* Said once, at the top, because it changes what the admin is doing:
+          confirming somebody else's answer is a different job from marking a
+          blank photo, and pressing Save is what turns the first into the
+          second. The confidence is shown as the model reported it - a number
+          the admin can weigh, not a verdict. */}
+      {detection?.source === "ai" && (
+        <p className="mt-1 text-sm text-ink-700">
+          {detection.live ? t("mockup.aiLive") : t("mockup.aiReview")}
+          {detection.confidence != null && (
+            <span className="text-ink-500">
+              {" · "}
+              <Num>{Math.round(detection.confidence * 100)}%</Num>
+            </span>
+          )}
+        </p>
+      )}
 
       <div className="mt-2 relative inline-block max-w-full">
         {/* eslint-disable-next-line @next/next/no-img-element */}

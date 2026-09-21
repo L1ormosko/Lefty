@@ -13,7 +13,8 @@ import { AssetMiniMap } from "@/components/map/AssetMiniMap";
 import { RequestPanel } from "@/components/request/RequestPanel";
 import { SaveAssetButton } from "@/components/SaveAssetButton";
 import { CreativeMockup } from "@/components/assets/CreativeMockup";
-import { faceRatio, isUsableQuad, parseQuad } from "@/lib/mockup";
+import { faceRatio, parseQuad } from "@/lib/mockup";
+import { isShowable } from "@/lib/surface-confidence";
 import { StreetViewPanel } from "@/components/assets/StreetViewPanel";
 import { AccessNotice } from "@/components/access/AccessNotice";
 import { viewerAccess } from "@/server/subscription";
@@ -118,10 +119,38 @@ export default async function AssetPage({ params }: Params) {
       // Where the camera stood, when the owner said. The panel orders the
       // angles by it and labels them; null keeps the upload order.
       angleDeg: image.viewAngleDeg,
+      /*
+       * Who marked the face, and how sure they were.
+       *
+       * The filter below turns on this rather than on the quad alone: a
+       * detection the rules sent to review is stored, because a person can
+       * correct it, but it must not reach this page at all. Not hidden with
+       * CSS, not rendered and skipped - absent, so a quad nobody has vouched
+       * for is never in the HTML a customer receives.
+       */
+      detected: image.surfaceSource === "ai",
+      confidence: image.surfaceConfidence,
+      source: image.surfaceSource,
     }))
     .filter(
-      (p): p is { id: string; url: string; quad: NonNullable<typeof p.quad>; angleDeg: number | null } =>
-        p.quad != null && isUsableQuad(p.quad)
+      (p): p is {
+        id: string;
+        url: string;
+        quad: NonNullable<typeof p.quad>;
+        angleDeg: number | null;
+        detected: boolean;
+        confidence: number | null;
+        source: string | null;
+      } =>
+        p.quad != null &&
+        isShowable(
+          {
+            quad: p.quad,
+            confidence: p.confidence,
+            source: p.source === "ai" || p.source === "admin" ? p.source : null,
+          },
+          asset
+        )
     );
   const futurePeriods = asset.periods.filter((p) => p.endDate >= todayUtc());
 

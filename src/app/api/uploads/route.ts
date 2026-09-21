@@ -89,6 +89,24 @@ export async function POST(request: Request) {
       return row;
     });
 
+    /*
+     * Look for the sign's face, without making the upload wait for it.
+     *
+     * Not awaited on purpose. Detection is a call to a vision model with a
+     * twenty-second ceiling, and holding the upload response open for that
+     * would turn "add a photo" into a page that appears to hang. The owner
+     * gets their photo back immediately; the face appears on the listing
+     * once the answer does, and if it never does the photo is simply one
+     * without a marked face - exactly the state every photo was in before.
+     *
+     * Imported lazily for the same reason server/report.ts is: this route
+     * is on the hot path for every upload, and the model client has no
+     * business being in its module graph when no key is configured.
+     */
+    void import("@/server/surface")
+      .then((m) => m.detectAndStore(image.id))
+      .catch((err) => console.error("[velto] surface detection dispatch failed:", err));
+
     return NextResponse.json({ image });
   } catch (err) {
     if (err instanceof AppError) {

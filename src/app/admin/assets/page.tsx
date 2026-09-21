@@ -10,6 +10,9 @@ import { DemoBadge, StatusPill, VerificationBadge } from "@/components/badges";
 import { VerifyAssetForm } from "@/components/admin/VerifyAssetForm";
 import { MarkSurfaceForm } from "@/components/admin/MarkSurfaceForm";
 import { parseQuad } from "@/lib/mockup";
+import { isShowable } from "@/lib/surface-confidence";
+import { StreetViewPanel } from "@/components/assets/StreetViewPanel";
+import { DetectSurfacesForm } from "@/components/admin/DetectSurfacesForm";
 import { Pager, pageFromParam, skipFor, PAGE_SIZE } from "@/components/pager";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +21,19 @@ const FILTERS = [
   { key: "pending", label: t("verify.PENDING") },
   { key: "verified", label: t("verify.VERIFIED") },
   { key: "rejected", label: t("verify.REJECTED") },
+  // Listings carrying a face a model found. Filtered on provenance rather
+  // than on "needs review", and the distinction is honest rather than
+  // pedantic: whether a detection is live depends on the shape check in
+  // lib/surface-confidence.ts, which is geometry and cannot be expressed as
+  // a WHERE clause. A tab that promised "exactly the ones awaiting you" would
+  // quietly miss those, so it promises what it can deliver and each photo
+  // says its own state.
+  { key: "detected", label: t("admin.surfaceDetected") },
   { key: "all", label: "הכול" },
 ] as const;
+
+/** Any photo on the listing whose face came from a detection. */
+const DETECTED_WHERE = { images: { some: { surfaceSource: "ai" } } };
 
 export default async function AdminAssets({
   searchParams,
@@ -34,25 +48,34 @@ export default async function AdminAssets({
       ? { verificationStatus: "VERIFIED" as const }
       : filter === "rejected"
         ? { verificationStatus: "REJECTED" as const }
-        : filter === "all"
-          ? {}
-          : { verificationStatus: "PENDING" as const, status: { not: "DRAFT" as const } };
+        : filter === "detected"
+          ? DETECTED_WHERE
+          : filter === "all"
+            ? {}
+            : { verificationStatus: "PENDING" as const, status: { not: "DRAFT" as const } };
 
   // Counts on every tab. The default view is "pending" because that is the
   // admin's actual queue, but with 0 pending assets it opened on a bare empty
   // state that read as a broken page while 16 assets sat one tab away. A tab
   // labelled 0 next to one labelled 16 explains itself.
   const pendingWhere = { verificationStatus: "PENDING" as const, status: { not: "DRAFT" as const } };
-  const [countPending, countVerified, countRejected, countAll] = await Promise.all([
+  const [countPending, countVerified, countRejected, countDetected, countAll] = await Promise.all([
     prisma.mediaAsset.count({ where: pendingWhere }),
     prisma.mediaAsset.count({ where: { verificationStatus: "VERIFIED" } }),
     prisma.mediaAsset.count({ where: { verificationStatus: "REJECTED" } }),
+    prisma.mediaAsset.count({ where: DETECTED_WHERE }),
     prisma.mediaAsset.count(),
   ]);
+  // Photographs nobody and nothing has looked at. Counted here rather than
+  // inside the form so the form can render nothing at all when it is zero.
+  const uncheckedImages = await prisma.mediaAssetImage.count({
+    where: { surfaceCheckedAt: null, surfaceSource: null },
+  });
   const counts: Record<string, number> = {
     pending: countPending,
     verified: countVerified,
     rejected: countRejected,
+    detected: countDetected,
     all: countAll,
   };
 
@@ -70,13 +93,23 @@ export default async function AdminAssets({
       // marking only the primary would cap the feature at one viewpoint.
       images: {
         orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
-        select: { id: true, url: true, surfaceQuad: true, viewAngleDeg: true },
+        select: {
+          id: true,
+          url: true,
+          surfaceQuad: true,
+          viewAngleDeg: true,
+          surfaceSource: true,
+          surfaceConfidence: true,
+          surfaceCheckedAt: true,
+        },
       },
     },
   });
 
   return (
     <DashboardShell title={t("admin.assets")} nav={adminNav({ access: await countOpenRequests() })} current="/admin/assets">
+      <DetectSurfacesForm pending={uncheckedImages} />
+
       <div className="flex gap-1.5 mb-4 overflow-x-auto">
         {FILTERS.map((f) => (
           <Link
@@ -149,15 +182,47 @@ export default async function AdminAssets({
               </div>
               <div className="mt-3 pt-3 border-t border-ink-100">
                 <VerifyAssetForm assetId={asset.id} status={asset.status} note={asset.reviewNote} />
-                {asset.images.map((image) => (
-                  <MarkSurfaceForm
-                    key={image.id}
-                    imageId={image.id}
-                    photoUrl={image.url}
-                    initialQuad={parseQuad(image.surfaceQuad)}
-                    initialAngle={image.viewAngleDeg}
-                  />
-                ))}
+                {asset.images.map((image) => {
+                  const quad = parseQuad(image.surfaceQuad);
+                  return (
+                    <MarkSurfaceForm
+                      key={image.id}
+                      imageId={image.id}
+                      photoUrl={image.url}
+                      initialQuad={quad}
+                      initialAngle={image.viewAngleDeg}
+                      detection={{
+                        source: image.surfaceSource,
+                        confidence: image.surfaceConfidence,
+                        checked: image.surfaceCheckedAt != null,
+                        // The same derivation the listing page renders on, so
+                        // the queue cannot tell the admin a face is live while
+                        // the customer sees nothing - or the reverse.
+                        live:
+                          quad != null &&
+                          isShowable(
+                            {
+                              quad,
+                              confidence: image.surfaceConfidence,
+                              source:
+                                image.surfaceSource === "ai" || image.surfaceSource === "admin"
+                                  ? image.surfaceSource
+                                  : null,
+                            },
+                            asset
+                          ),
+                      }}
+                    />
+                  );
+                })}
+
+                {/* Google's own view of the address, so the admin can check
+                    the photograph is of this place before vouching for where
+                    the sign is in it. Unmodified and embedded, exactly as on
+                    the listing page - it is a reference, never a canvas. */}
+                {asset.images.length > 0 && (
+                  <StreetViewPanel latitude={asset.latitude} longitude={asset.longitude} />
+                )}
               </div>
             </Card>
             </div>

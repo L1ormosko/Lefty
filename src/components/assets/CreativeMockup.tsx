@@ -32,7 +32,23 @@ import { Button, Card, Collapsible, cx } from "@/components/ui";
 const MAX_BYTES = 25 * 1024 * 1024;
 
 /** One photo of this listing that has its sign face marked. */
-export type MarkedPhoto = { id: string; url: string; quad: Quad; angleDeg?: number | null };
+export type MarkedPhoto = {
+  id: string;
+  url: string;
+  quad: Quad;
+  angleDeg?: number | null;
+  /**
+   * Whether a model found this face rather than a person marking it.
+   *
+   * Said on screen, not because the detection is untrustworthy - one that
+   * reaches this component has already cleared the confidence and shape
+   * checks - but because the reader is entitled to know which it is. The
+   * whole panel rests on the face being in the right place, and a machine's
+   * answer presented as a person's is the kind of small silence that makes
+   * everything next to it worth less.
+   */
+  detected?: boolean;
+};
 
 /** Checked per gesture rather than cached: the setting can change mid-session. */
 function reducedMotion(): boolean {
@@ -232,6 +248,14 @@ export function CreativeMockup({
           this line, and the size they have to match.
         */}
         <p className="mt-1 text-sm font-medium text-ink-800">{t("mockup.disclaimer")}</p>
+
+        {/* One quiet line, and only when it is true. It goes under the
+            disclaimer rather than beside it: "this is a simulation" is the
+            statement that changes what the advertiser does, and how the face
+            was located is the footnote to it. */}
+        {photos.some((p) => p.detected) && (
+          <p className="mt-1 text-sm text-ink-600">{t("mockup.detected")}</p>
+        )}
 
         {/* What the advertiser has to match. Stated before they choose a file,
             not after the preview has already surprised them. */}

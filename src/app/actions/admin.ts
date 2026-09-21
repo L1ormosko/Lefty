@@ -8,6 +8,7 @@ import { notify } from "@/server/notifications";
 import { recordAudit } from "@/server/audit";
 import { t } from "@/lib/labels";
 import { isUsableQuad, parseQuad } from "@/lib/mockup";
+import { rateLimit } from "@/server/rate-limit";
 import { Prisma } from "@prisma/client";
 import type { ActionState } from "./inquiries";
 
@@ -309,7 +310,18 @@ export async function setImageQuadAction(_prev: ActionState, formData: FormData)
     if (!raw) {
       await prisma.mediaAssetImage.update({
         where: { id: image.id },
-        data: { surfaceQuad: Prisma.DbNull },
+        data: {
+          surfaceQuad: Prisma.DbNull,
+          // The provenance goes with the quad it described. Leaving "ai"
+          // behind on a cleared row would leave a confidence attached to
+          // nothing, and would let detection treat the photo as already
+          // answered when an admin has just said it has no usable face.
+          surfaceSource: null,
+          surfaceConfidence: null,
+          // Kept: an admin clearing a face IS the check, and re-running
+          // detection on a photo a person just rejected would undo them.
+          surfaceCheckedAt: new Date(),
+        },
       });
       revalidatePath(`/assets/${image.assetId}`);
       revalidatePath("/admin/assets");
@@ -332,7 +344,18 @@ export async function setImageQuadAction(_prev: ActionState, formData: FormData)
 
     await prisma.mediaAssetImage.update({
       where: { id: image.id },
-      data: { surfaceQuad: quad },
+      data: {
+        surfaceQuad: quad,
+        // A person looked at the photograph and placed these corners. That
+        // outranks any detection: "admin" is shown unconditionally, and
+        // detectAndStore refuses to touch a row carrying it, so a correction
+        // made here cannot be reverted by a later run.
+        surfaceSource: "admin",
+        // There is no confidence in a human's marking, and a number left over
+        // from the detection this replaces would describe the wrong quad.
+        surfaceConfidence: null,
+        surfaceCheckedAt: new Date(),
+      },
     });
     await recordAudit({
       actorId: admin.id,
@@ -381,6 +404,76 @@ export async function setImageAngleAction(_prev: ActionState, formData: FormData
     revalidatePath(`/assets/${image.assetId}`);
     revalidatePath("/admin/assets");
     return { ok: true, message: t("mockup.angleSaved") };
+  } catch (err) {
+    return { ok: false, error: toUserMessage(err) };
+  }
+}
+
+/**
+ * Run face detection over photographs nobody has looked at yet.
+ *
+ * This exists as a button rather than as the one-off script the other
+ * backfills in prisma/ are, and the reason is not preference. The production
+ * database accepts no external connections - its IP allow list is empty - so
+ * a script run from a laptop cannot reach the rows that need backfilling. It
+ * would be a tool that works everywhere except the one place it is for, which
+ * is the definition of the fake feature this project refuses to ship.
+ *
+ * Batched, and small. Each photo is a call to a vision model with a
+ * twenty-second ceiling; a press that tried to clear a thousand of them would
+ * be a request that times out somewhere between here and the browser, having
+ * done an unknown amount of work. A press does ten, says how many are left,
+ * and can be pressed again.
+ */
+const DETECT_BATCH = 10;
+
+export async function detectMissingSurfacesAction(): Promise<ActionState> {
+  try {
+    const admin = await requireRole("ADMIN");
+
+    const { detectAndStore, detectionEnabled } = await import("@/server/surface");
+    if (!detectionEnabled()) return { ok: false, error: t("mockup.detectOff") };
+
+    const limited = rateLimit(`surface:detect:${admin.id}`, 20, 60 * 60_000);
+    if (!limited.ok) return { ok: false, error: t("mockup.detectTooMany") };
+
+    // Never looked at, and no face already on it. A photo an admin marked by
+    // hand has a quad and a source, and is not a candidate for anything.
+    const where = { surfaceCheckedAt: null, surfaceSource: null };
+    const pending = await prisma.mediaAssetImage.findMany({
+      where,
+      select: { id: true },
+      orderBy: { id: "asc" },
+      take: DETECT_BATCH,
+    });
+    if (pending.length === 0) return { ok: true, message: t("mockup.detectNone") };
+
+    let found = 0;
+    for (const image of pending) {
+      // Sequential on purpose: ten concurrent vision calls from a single
+      // free-tier instance is how a page becomes unresponsive for everybody
+      // else using the site at that moment.
+      const outcome = await detectAndStore(image.id);
+      if (outcome.status === "found") found++;
+    }
+
+    const remaining = await prisma.mediaAssetImage.count({ where });
+    await recordAudit({
+      actorId: admin.id,
+      action: "ASSET_SURFACE_MARKED",
+      targetType: "MediaAssetImage",
+      targetId: pending[0].id,
+      summary: `זיהוי אוטומטי · ${pending.length} תמונות · ${found} פאות`,
+    });
+    revalidatePath("/admin/assets");
+    return {
+      ok: true,
+      message: t("mockup.detectDone", {
+        checked: `⁨${pending.length}⁩`,
+        found: `⁨${found}⁩`,
+        left: `⁨${remaining}⁩`,
+      }),
+    };
   } catch (err) {
     return { ok: false, error: toUserMessage(err) };
   }

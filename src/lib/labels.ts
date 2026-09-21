@@ -543,6 +543,7 @@ const he: Dict = {
 
   "admin.users": "משתמשים",
   "admin.assets": "שטחים",
+  "admin.surfaceDetected": "פאה שזוהתה",
   "admin.verify": "אימות",
   "admin.approveAsset": "אימות השטח",
   "admin.rejectAsset": "דחיית השטח",
@@ -598,6 +599,23 @@ const he: Dict = {
   // thing that gets forwarded to a client as if it were a photograph.
   "mockup.title": "הדמיית המודעה על השטח",
   "mockup.disclaimer": "הדמיה בלבד — לא צילום של הפרסום בפועל.",
+  // Shown only when it is true. Who located the face is a footnote to the
+  // disclaimer above it, not a second disclaimer.
+  "mockup.detected": "מיקום פאת השלט זוהה אוטומטית מתוך הצילום.",
+  // The admin queue's four states. The first is the only one asking for work.
+  "mockup.needsReview": "ממתין לאישור",
+  "mockup.detectTitle": "זיהוי פאות אוטומטי",
+  "mockup.detectHint": "סורק תמונות שטרם נבדקו ומסמן בהן את פאת השלט. עשר תמונות בכל לחיצה.",
+  "mockup.detectRun": "סריקת תמונות שלא נבדקו",
+  "mockup.detectDone": "נבדקו {checked} תמונות, נמצאו {found} פאות. נותרו {left}.",
+  "mockup.detectNone": "אין תמונות שממתינות לבדיקה.",
+  "mockup.detectOff": "זיהוי אוטומטי אינו מוגדר במערכת (חסר ANTHROPIC_API_KEY). הסימון הידני פעיל כרגיל.",
+  "mockup.detectTooMany": "יותר מדי סריקות בשעה האחרונה. נסו שוב מאוחר יותר.",
+  "mockup.markedAuto": "סומן אוטומטית",
+  "mockup.noneFound": "לא נמצאה פאה",
+  "mockup.aiLive": "הפאה זוהתה אוטומטית ומוצגת. שמירה תהפוך אותה לסימון ידני.",
+  "mockup.aiReview":
+    "הפאה זוהתה אוטומטית אך אינה מוצגת — הזיהוי לא היה בטוח מספיק. בדקו את הפינות ושמרו כדי לאשר.",
   // The row that holds the explanation, the turntable note and the
   // limitations. They used to be stacked open above the preview.
   "mockup.howItWorks": "איך ההדמיה עובדת, ומה היא לא מראה",

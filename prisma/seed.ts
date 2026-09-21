@@ -430,6 +430,13 @@ async function main() {
             // isDemo; a real listing gets its face marked by an admin looking
             // at an actual photograph.
             surfaceQuad: demoSurfaceQuad(s.assetType, dimensions, yawDeg),
+            // "admin" rather than "ai", and it is the accurate word: these
+            // corners are computed from the same constants the picture is
+            // drawn with, so they are exact by construction rather than
+            // estimated. A row with no source is shown to nobody now
+            // (lib/surface-confidence.ts), and demo listings whose preview
+            // silently vanished would look like the feature had broken.
+            surfaceSource: "admin",
           },
         }),
         prisma.mediaAssetImageBlob.create({

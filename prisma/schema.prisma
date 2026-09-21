@@ -396,6 +396,28 @@ model MediaAssetImage {
   /// displayed at a dozen different sizes.
   surfaceQuad Json?
 
+  /// Who marked that face: "admin" for a person who clicked the corners,
+  /// "ai" for a detection.
+  ///
+  /// Not cosmetic. An admin's marking is shown unconditionally; a detection
+  /// is shown only above a confidence threshold, and the screen says which
+  /// one it is looking at. A quad with no source predates detection, and is
+  /// treated as neither - see lib/surface-confidence.ts.
+  surfaceSource String?
+
+  /// What the model said about its own answer, 0..1. Null for an admin's
+  /// marking, where there is nothing a number could add.
+  surfaceConfidence Float?
+
+  /// When detection last ran on this photo, whatever the outcome.
+  ///
+  /// Separate from surfaceQuad because "nobody has looked yet" and "we looked
+  /// and found no face" are different states with different remedies, and a
+  /// null quad alone cannot tell them apart. It is also what stops the
+  /// backfill script from asking the same question about the same photo on
+  /// every run.
+  surfaceCheckedAt DateTime?
+
   /// Where the camera stood when this photo was taken, in degrees around the
   /// sign's face: 0 is straight on, negative to its left, positive to its
   /// right.
