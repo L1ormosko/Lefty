@@ -100,16 +100,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | משתני הסביבה של השירות | `VELTO_OWNER_EMAIL` | כתובת הדוא״ל שלכם |
 | משתני הסביבה של השירות | `VELTO_OWNER_PASSWORD` | סיסמה שאתם בוחרים, 12 תווים לפחות |
 
-**ופעם אחת בלבד — פקודת הבילד.** ב-Render → Settings → Build Command, להחליף
-את הקיימת בזאת (נוסף בה רק החלק האמצעי):
-
-```
-npm install --include=dev && npx prisma migrate deploy && npm run build && npm run bootstrap:owner && npm run seed:dev
-```
-
 Save → דיפלוי אוטומטי → כניסה רגילה מ-`/login` עם אותם פרטים.
 
-בלי השורה הזאת הסקריפט פשוט לא רץ, ושני המשתנים לא עושים כלום.
+הסקריפט תלוי ב-`npm run build` ולא בפקודת בילד נפרדת, כדי שלא יהיה צריך
+לגעת בהגדרות השירות בכלל. בלי שני המשתנים הוא לא עושה כלום, גם בבילד
+מקומי.
 
 ### מה זה עושה
 
