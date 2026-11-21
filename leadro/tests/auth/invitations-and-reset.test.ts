@@ -180,6 +180,7 @@ function captureResetMessages(): PasswordResetMessage[] {
     async sendPasswordReset(message) {
       sent.push(message);
     },
+    async sendInvitation() {},
   });
   return sent;
 }

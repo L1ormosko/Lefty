@@ -9,6 +9,14 @@ export interface PasswordResetMessage {
   expiresAt: Date;
 }
 
+export interface InvitationMessage {
+  tenantId: string;
+  email: string;
+  /** The raw single-use invitation token. Only the notifier ever sees it. */
+  token: string;
+  expiresAt: Date;
+}
+
 /**
  * How secrets reach people (email/SMS). No delivery provider exists yet (§28.3: no fake
  * integrations), so the default implementation only logs that a reset was requested, WITHOUT the
@@ -16,6 +24,7 @@ export interface PasswordResetMessage {
  */
 export interface AuthNotifier {
   sendPasswordReset(message: PasswordResetMessage): Promise<void>;
+  sendInvitation(message: InvitationMessage): Promise<void>;
 }
 
 const unconfiguredNotifier: AuthNotifier = {
@@ -23,6 +32,11 @@ const unconfiguredNotifier: AuthNotifier = {
     logger.warn("password reset token issued but no notifier is configured; nothing was sent", {
       tenantId: message.tenantId,
       userId: message.userId,
+    });
+  },
+  async sendInvitation(message) {
+    logger.warn("invitation token issued but no notifier is configured; nothing was sent", {
+      tenantId: message.tenantId,
     });
   },
 };

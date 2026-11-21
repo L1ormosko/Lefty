@@ -18,6 +18,13 @@ Public API (`index.ts`):
 - `explainAccess(actor, targetUserId, permission, resource?)` -> "why can this user access this record?"; needs
   `permissions.view`, target and record inside the actor's scope.
 - `assertNotSelfApproval(actorId, subjectCreatedById)`; `listAuditEventsAsActor(actor, options)` (needs `audit.view`).
+- Task 5 additions: `enforceInTx(tx, actor, permission, resource?)` (the in-transaction gate services use: 403 without the
+  capability, 404 for a record outside scope, 403 for a tenant-level `{}` record) and `enforceOnUser` (users: always 404
+  outside scope); `requireTenantLevelPermission(permission)` (route gate for company settings, roles, translations);
+  `assertMayGrantRole` (the dry run of `assignRole`, also used by invitations); `revokeRoleAssignment(tx, actor, input)`
+  (needs the same authority over the target and scopes as granting); `assertMayDefineGrants` (nobody puts a permission
+  into a role they do not hold); `assertNotHoldingRole` (nobody edits a role assigned to themselves, §21.3);
+  `holdsMfaRequiringRole` / `activeAssignmentWhere` (the single "active assignment" definition); `baseFieldMap`.
 - `provisionRoleTemplates(tx, tenantId)` creates the 12 spec 4.4 roles (idempotent, never overwrites edits);
   `assignRole(tx, actor, input)` grants a role with anti-escalation checks (not self, holds `permissions.assign` over the
   scopes, holds every permission and field set of the role; `non_sensitive_roles` enforced), rejects duplicate

@@ -35,4 +35,5 @@ export const RATE_LIMITS = {
   passwordResetPerAccount: { limit: 3, windowMs: 15 * 60 * 1000 },
   passwordResetConfirmPerIp: { limit: 20, windowMs: 15 * 60 * 1000 },
   invitationAcceptPerIp: { limit: 20, windowMs: 15 * 60 * 1000 },
+  passwordChangePerAccount: { limit: 5, windowMs: 15 * 60 * 1000 },
 } as const;

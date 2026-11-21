@@ -1,6 +1,6 @@
 import { NotFoundError } from "@/server/core";
 import { recordAudit } from "@/server/audit";
-import { withTenant } from "@/server/db";
+import { withTenant, type TenantTx } from "@/server/db";
 import type { ClientInfo } from "./client-info";
 import { recordAuthEvent } from "./events";
 import { revokeAllSessionsForUser } from "./session-service";
@@ -21,7 +21,22 @@ export async function deactivateUserAccount(
   client: ClientInfo,
   reason?: string,
 ): Promise<{ revokedSessions: number }> {
-  return withTenant(tenantId, async (tx) => {
+  return withTenant(tenantId, (tx) => deactivateUserAccountInTx(tx, tenantId, userId, actorUserId, client, reason));
+}
+
+/**
+ * `deactivateUserAccount` inside a transaction the caller owns, so the caller's permission check
+ * and this write are ONE transaction (no window between "may I?" and "do it").
+ */
+export async function deactivateUserAccountInTx(
+  tx: TenantTx,
+  tenantId: string,
+  userId: string,
+  actorUserId: string | null,
+  client: ClientInfo,
+  reason?: string,
+): Promise<{ revokedSessions: number }> {
+  {
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user || user.tenantId !== tenantId) throw new NotFoundError();
 
@@ -50,5 +65,5 @@ export async function deactivateUserAccount(
       });
     }
     return { revokedSessions };
-  });
+  }
 }

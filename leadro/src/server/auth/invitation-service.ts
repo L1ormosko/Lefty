@@ -1,5 +1,5 @@
 import type { Invitation } from "@prisma/client";
-import { ConflictError, ValidationError } from "@/server/core";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/server/core";
 import { recordAudit } from "@/server/audit";
 import { withTenant, type TenantTx } from "@/server/db";
 import { INVITATION_TTL_MS, RATE_LIMITS } from "./config";
@@ -7,9 +7,11 @@ import { enforceIpRateLimit, type ClientInfo } from "./client-info";
 import { recordAuthEvent } from "./events";
 import {
   assertInvitationScopeIsValid,
+  assertInviterMayGrant,
   createInvitedRoleAssignment,
   type InvitationScope,
 } from "./invited-role-assignment";
+import { getAuthNotifier } from "./notifier";
 import { normaliseEmail } from "./normalise-email";
 import { assertPasswordMeetsPolicy, hashPassword } from "./passwords";
 import { hashToken, issueToken, tenantIdFromToken } from "./tokens";
@@ -36,18 +38,29 @@ export interface CreatedInvitation {
 
 /**
  * Creates a single-use invitation valid for 72 hours. Earlier open invitations for the same email
- * are revoked so only the newest link works. The caller (user administration) is responsible for
- * checking the inviter's permission and for delivering the token.
+ * are revoked so only the newest link works. The token is handed to the configured `AuthNotifier`
+ * (email/SMS) after the invitation is committed; callers should not expose it to anyone else.
+ *
+ * With an inviter and a role, the inviter must be allowed to grant that role over that scope to
+ * that person (the same anti-escalation rules as `assignRole`, checked as a dry run), so an
+ * invitation can never carry more authority than its issuer holds. The caller (user
+ * administration) still checks that the inviter may invite at all (`users.create`).
  *
  * Everything the invitation points at (inviter, role, employee, scope targets) is checked to exist
  * in the tenant, so mistakes surface as validation errors rather than database errors.
  *
- * @throws ValidationError for unknown ids, a role without a scope, or a scope without a role.
+ * @throws ValidationError for unknown ids, a role without a scope, or a scope without a role;
+ *   ForbiddenError when the inviter may not grant the role.
  */
 export async function createInvitation(
   tenantId: string,
   input: CreateInvitationInput,
   client: ClientInfo,
+  /**
+   * Runs FIRST inside the creation transaction (e.g. the caller's permission check), so "may this
+   * person invite?" and the invitation are one atomic step. Throwing aborts the creation.
+   */
+  precheck?: (tx: TenantTx) => Promise<void>,
 ): Promise<CreatedInvitation> {
   const email = normaliseEmail(input.email);
   const { token, tokenHash } = issueToken(tenantId);
@@ -58,7 +71,8 @@ export async function createInvitation(
   if (input.roleId && !input.scope) throw invalid("scope", "A role can only be granted together with a data scope.");
   if (input.scope && !input.roleId) throw invalid("roleId", "A scope needs a role.");
 
-  return withTenant(tenantId, async (tx) => {
+  const created = await withTenant(tenantId, async (tx) => {
+    if (precheck) await precheck(tx);
     if (input.invitedById) {
       const inviter = await tx.user.findFirst({ where: { id: input.invitedById, tenantId, status: "ACTIVE" }, select: { id: true } });
       if (!inviter) throw invalid("invitedById", "The inviting user does not exist or is not active.");
@@ -68,6 +82,16 @@ export async function createInvitation(
       if (!role) throw invalid("roleId", "The role does not exist.");
     }
     if (input.scope) await assertInvitationScopeIsValid(tx, tenantId, input.scope);
+    if (input.invitedById && input.roleId && input.scope) {
+      await assertInviterMayGrant(tx, {
+        tenantId,
+        inviterId: input.invitedById,
+        roleId: input.roleId,
+        scope: input.scope,
+        email,
+        employeeId: input.employeeId,
+      });
+    }
     if (input.employeeId) {
       const employee = await tx.employee.findFirst({ where: { id: input.employeeId, tenantId }, select: { id: true } });
       if (!employee) throw invalid("employeeId", "The employee does not exist.");
@@ -106,6 +130,8 @@ export async function createInvitation(
     });
     return { invitationId: invitation.id, token, expiresAt };
   });
+  await getAuthNotifier().sendInvitation({ tenantId, email, token: created.token, expiresAt: created.expiresAt });
+  return created;
 }
 
 const INVALID_INVITATION_MESSAGE = "This invitation is invalid or has expired.";
@@ -192,18 +218,28 @@ export async function acceptInvitation(
       });
     }
     if (invitation.roleId && invitation.scopeType) {
-      await createInvitedRoleAssignment(tx, {
-        tenantId,
-        userId: user.id,
-        roleId: invitation.roleId,
-        grantedById: invitation.invitedById,
-        scope: {
-          type: invitation.scopeType,
-          legalEntityId: invitation.scopeLegalEntityId ?? undefined,
-          orgUnitId: invitation.scopeOrgUnitId ?? undefined,
-          includeDescendants: invitation.scopeIncludeDescendants,
-        },
-      });
+      try {
+        await createInvitedRoleAssignment(tx, {
+          tenantId,
+          userId: user.id,
+          roleId: invitation.roleId,
+          grantedById: invitation.invitedById,
+          scope: {
+            type: invitation.scopeType,
+            legalEntityId: invitation.scopeLegalEntityId ?? undefined,
+            orgUnitId: invitation.scopeOrgUnitId ?? undefined,
+            includeDescendants: invitation.scopeIncludeDescendants,
+          },
+        });
+      } catch (error) {
+        // The inviter lost the authority to grant this (permission removed, moved out of scope,
+        // target unit archived...). Do not explain why to the invitee: same answer as a dead link.
+        // Throwing rolls the transaction back, so the token is not consumed either.
+        if (error instanceof ForbiddenError || error instanceof NotFoundError || error instanceof ValidationError) {
+          throw invalidInvitation();
+        }
+        throw error;
+      }
     }
     await recordAuthEvent(tx, {
       tenantId,

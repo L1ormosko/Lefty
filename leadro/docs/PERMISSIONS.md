@@ -195,12 +195,33 @@ confirmation in `DECISIONS.md`:
 Platform modules (not in 4.5): `users` and `audit` follow `permissions`/`company_settings`
 (CEO full; others none by default); `localization` view for everyone, edit/configure for CEO.
 
-## 6. Administration (spec 4.6) - planned behaviour
+## 6. Administration (spec 4.6) - implemented in Task 5 (`src/server/roles`, `/api/v1/roles/*`)
 
-Create/clone roles, assign permissions, define scope, set temporary access (`effectiveTo`), revoke
-(`revokedAt`, never delete), review effective access, permission history (via `AuditEvent` on
-`permissions.*` actions), and the "why can this user access this record" diagnostic. Role/scope
-changes are audited with previous and new values; they may require approval (spec 21.3).
+Create/clone roles, replace a role's permissions, archive, assign with scope and expiry
+(`effectiveTo`), revoke (`revokedAt`, never delete), effective access, permission history (audit
+events `role.*` / `role_assignment.*` with previous and new values), and the "why" diagnostic
+(`explainAccess`). Permission map:
+
+| Operation | Permission | Scope |
+|---|---|---|
+| list / read roles, history, effective access | `permissions.view` | roles: TENANT; effective access: over the target user |
+| create / clone role | `permissions.create` | TENANT |
+| edit role / replace permissions | `permissions.edit` | TENANT |
+| archive role | `permissions.archive` | TENANT |
+| grant / revoke assignment | `permissions.assign` | over the target user AND every scope handed out |
+| translations save / review+delete (`i18n`) | `localization.edit` / `localization.configure` | TENANT |
+
+Rules (all enforced in code, all tested):
+- **No escalation through role definitions**: a permission (with its field sets and set qualifier) can be added to a role
+  only by someone who holds it through one of their own grants (`assertMayDefineGrants`). Removing is always allowed.
+- **Separation of duties (§21.3)**: nobody edits, re-permissions or archives a role that is assigned to themselves
+  (`assertNotHoldingRole`; future-dated and temporary assignments count, expired and revoked ones do not).
+- **Revoking needs the authority granting would**: `permissions.assign` over the target and over the assignment's scopes,
+  with the COO `non_sensitive_roles` qualifier honoured, so a City admin cannot strip a tenant-wide assignment and a COO
+  cannot revoke an Owner role. Revoking your own assignment is allowed (it only reduces access).
+- **MFA flag**: a role with `permissions.manage|assign` or any `*.configure` requires MFA, as do the Owner, Finance and HR
+  templates; the flag can be raised freely and never lowered while mandatory.
+- **Invitations obey the same rules** at creation and at acceptance (see `auth` README).
 
 ## 7. Testing obligations (spec 26.3)
 
