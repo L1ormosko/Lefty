@@ -1,0 +1,558 @@
+// LEADRO core schema (Phase 1 foundation). See docs/ERD.md and docs/DECISIONS.md.
+//
+// Conventions
+// - Every tenant-owned table has a non-null "tenantId" (FK to Tenant) and is protected by a
+//   FORCE row-level-security policy (see the hand-written rls migration).
+// - Every tenant-owned table has @@unique([id, tenantId]) so child rows can reference parents with
+//   a COMPOSITE foreign key (parentId, tenantId). The database therefore rejects a row that points
+//   at a parent of another tenant (FK checks are not subject to RLS).
+// - Timestamps are timestamptz (UTC). Internal enums are language-neutral English identifiers.
+// - Locale columns are plain strings constrained by CHECK to en-US | es-US | he-IL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum OrgUnitType {
+  BUSINESS_UNIT
+  STATE
+  REGION
+  CITY
+  BRANCH
+  DEPARTMENT
+  TEAM
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+}
+
+enum AssignmentKind {
+  PRIMARY
+  SECONDARY
+  TEMPORARY
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  LOCKED
+  DEACTIVATED
+}
+
+enum PermissionAction {
+  VIEW
+  CREATE
+  EDIT
+  ARCHIVE
+  ASSIGN
+  APPROVE
+  REJECT
+  EXPORT
+  MANAGE
+  CONFIGURE
+}
+
+enum ScopeType {
+  TENANT
+  LEGAL_ENTITY
+  ORG_UNIT
+  OWN
+  ASSIGNED
+}
+
+enum AuthEventType {
+  LOGIN_SUCCEEDED
+  LOGIN_FAILED
+  LOGOUT
+  SESSION_REVOKED
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  PASSWORD_CHANGED
+  INVITATION_ACCEPTED
+  MFA_CHALLENGE_SUCCEEDED
+  MFA_CHALLENGE_FAILED
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+}
+
+enum AuditOutcome {
+  SUCCESS
+  DENIED
+  FAILED
+}
+
+enum SourceApp {
+  WEB
+  MOBILE
+  API
+  SYSTEM
+}
+
+// ───────────────────────── Organization ─────────────────────────
+
+/// A customer company. Not RLS-protected: it is resolved by slug (company code) at login.
+/// Only non-sensitive identity and locale defaults live here.
+model Tenant {
+  id              String       @id @default(cuid())
+  slug            String       @unique
+  name            String
+  status          TenantStatus @default(ACTIVE)
+  defaultLocale   String       @default("en-US")
+  defaultTimeZone String       @default("America/New_York")
+  createdAt       DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @db.Timestamptz(3)
+
+  legalEntities   LegalEntity[]
+  orgUnits        OrgUnit[]
+  orgUnitManagers OrgUnitManager[]
+  users           User[]
+  employees       Employee[]
+  assignments     OrganizationalAssignment[]
+  roles           Role[]
+  rolePermissions RolePermission[]
+  roleAssignments RoleAssignment[]
+  accessScopes    AccessScope[]
+  sessions        Session[]
+  authEvents      AuthenticationEvent[]
+  invitations     Invitation[]
+  resetTokens     PasswordResetToken[]
+  auditEvents     AuditEvent[]
+  idempotency     IdempotencyRecord[]
+  translations    TranslationResource[]
+}
+
+model LegalEntity {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  legalName String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orgUnits  OrgUnit[]
+  employees Employee[]
+  scopes    AccessScope[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+/// One table for the whole typed hierarchy (BUSINESS_UNIT, STATE, REGION, CITY, BRANCH,
+/// DEPARTMENT, TEAM). Branch-only attributes are nullable and used when type = BRANCH.
+model OrgUnit {
+  id             String      @id @default(cuid())
+  tenantId       String
+  type           OrgUnitType
+  name           String
+  code           String?
+  parentId       String?
+  legalEntityId  String?
+  active         Boolean     @default(true)
+  // Branch attributes
+  address        Json?
+  timeZone       String?
+  defaultLocale  String?
+  operatingHours Json?
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  parent      OrgUnit?                   @relation("OrgUnitTree", fields: [parentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  children    OrgUnit[]                  @relation("OrgUnitTree")
+  legalEntity LegalEntity?               @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  managers    OrgUnitManager[]
+  assignments OrganizationalAssignment[]
+  scopes      AccessScope[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, parentId])
+  @@index([tenantId, type])
+  @@index([tenantId, legalEntityId])
+}
+
+model Employee {
+  id              String         @id @default(cuid())
+  tenantId        String
+  userId          String?
+  /// The legal employer. Operational placement is expressed by OrganizationalAssignment instead.
+  legalEntityId   String?
+  employeeNumber  String?
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  jobTitle        String?
+  status          EmployeeStatus @default(ACTIVE)
+  hireDate        DateTime?      @db.Date
+  terminationDate DateTime?      @db.Date
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  tenant       Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user         User?                      @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  legalEntity  LegalEntity?               @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignments  OrganizationalAssignment[]
+  managedUnits OrgUnitManager[]
+
+  @@unique([id, tenantId])
+  @@unique([userId, tenantId])
+  @@unique([tenantId, employeeNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, legalEntityId])
+}
+
+/// Which employees manage an org unit (many-to-many, time-bounded).
+model OrgUnitManager {
+  id            String    @id @default(cuid())
+  tenantId      String
+  orgUnitId     String
+  employeeId    String
+  isPrimary     Boolean   @default(false)
+  effectiveFrom DateTime  @default(now()) @db.Timestamptz(3)
+  effectiveTo   DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orgUnit  OrgUnit  @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([orgUnitId, employeeId, effectiveFrom])
+  @@index([tenantId, orgUnitId])
+  @@index([tenantId, employeeId])
+}
+
+/// Employee placement in the org tree over time. Rows are never overwritten: a move closes the
+/// current row (effectiveTo) and inserts a new one. This is the historical record reports use.
+model OrganizationalAssignment {
+  id            String         @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  orgUnitId     String
+  kind          AssignmentKind @default(PRIMARY)
+  effectiveFrom DateTime       @default(now()) @db.Timestamptz(3)
+  effectiveTo   DateTime?      @db.Timestamptz(3)
+  reason        String?
+  createdById   String?
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee  Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit   OrgUnit  @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy User?    @relation("AssignmentCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, effectiveFrom])
+  @@index([tenantId, orgUnitId])
+}
+
+// ───────────────────────── Identity and access ─────────────────────────
+
+model User {
+  id                 String     @id @default(cuid())
+  tenantId           String
+  /// Stored lower-cased (CHECK enforced). Unique per tenant, not globally.
+  email              String
+  passwordHash       String?
+  status             UserStatus @default(INVITED)
+  /// Nullable: falls back to org unit (branch) default, then tenant default.
+  locale             String?
+  timeZone           String?
+  mfaEnabled         Boolean    @default(false)
+  mfaSecretEncrypted String?
+  failedLoginCount   Int        @default(0)
+  lockedUntil        DateTime?  @db.Timestamptz(3)
+  lastLoginAt        DateTime?  @db.Timestamptz(3)
+  passwordChangedAt  DateTime?  @db.Timestamptz(3)
+  createdAt          DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @db.Timestamptz(3)
+
+  tenant             Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee           Employee?
+  sessions           Session[]
+  authEvents         AuthenticationEvent[]
+  roleAssignments    RoleAssignment[]           @relation("AssignmentUser")
+  grantedAssignments RoleAssignment[]           @relation("AssignmentGrantedBy")
+  revokedAssignments RoleAssignment[]           @relation("AssignmentRevokedBy")
+  resetTokens        PasswordResetToken[]
+  invitationsSent    Invitation[]
+  orgAssignmentsMade OrganizationalAssignment[] @relation("AssignmentCreatedBy")
+  translationsEdited TranslationResource[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+}
+
+model Role {
+  id               String   @id @default(cuid())
+  tenantId         String
+  name             String
+  description      String?
+  /// Template key this role was cloned from (e.g. "CEO"). Informational only: access is decided
+  /// solely by granted permissions + scopes, never by name or key.
+  templateKey      String?
+  isSystemTemplate Boolean  @default(false)
+  requiresMfa      Boolean  @default(false)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  permissions RolePermission[]
+  assignments RoleAssignment[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+/// Global permission catalog (module + action). Not tenant-owned, no RLS; written by seed only.
+model Permission {
+  id          String           @id @default(cuid())
+  /// "<module>.<action>" in lower case, e.g. "jobs.view".
+  key         String           @unique
+  module      String
+  action      PermissionAction
+  description String?
+  /// Sensitive permissions may require additional approval (spec 4.3).
+  sensitive   Boolean          @default(false)
+
+  rolePermissions RolePermission[]
+
+  @@unique([module, action])
+}
+
+model RolePermission {
+  tenantId     String
+  roleId       String
+  permissionId String
+  /// Qualifiers for "Limited" grants from the 4.5 matrix, e.g. {"fields":"financial"}.
+  conditions   Json?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  role       Role       @relation(fields: [roleId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@index([tenantId])
+}
+
+/// A user holds a role, optionally time-bounded (temporary access). Scopes decide which data.
+model RoleAssignment {
+  id            String    @id @default(cuid())
+  tenantId      String
+  userId        String
+  roleId        String
+  effectiveFrom DateTime  @default(now()) @db.Timestamptz(3)
+  effectiveTo   DateTime? @db.Timestamptz(3)
+  grantedById   String?
+  reason        String?
+  revokedAt     DateTime? @db.Timestamptz(3)
+  revokedById   String?
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user      User          @relation("AssignmentUser", fields: [userId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  role      Role          @relation(fields: [roleId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  grantedBy User?         @relation("AssignmentGrantedBy", fields: [grantedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  revokedBy User?         @relation("AssignmentRevokedBy", fields: [revokedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  scopes    AccessScope[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, userId])
+  @@index([tenantId, roleId])
+}
+
+/// Data scope of a role assignment. ORG_UNIT includes descendants when includeDescendants = true.
+model AccessScope {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  roleAssignmentId   String
+  type               ScopeType
+  legalEntityId      String?
+  orgUnitId          String?
+  includeDescendants Boolean   @default(true)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  roleAssignment RoleAssignment @relation(fields: [roleAssignmentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  legalEntity    LegalEntity?   @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit        OrgUnit?       @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, roleAssignmentId])
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  tenantId   String
+  userId     String
+  /// SHA-256 of the opaque token. The token itself is "<tenantId>.<random>" so the tenant is
+  /// known before the RLS context is opened.
+  tokenHash  String    @unique
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  lastSeenAt DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime  @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+  ipAddress  String?
+  userAgent  String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, userId])
+  @@index([expiresAt])
+}
+
+/// Login history (success, failure, lockout, reset, MFA).
+model AuthenticationEvent {
+  id             String        @id @default(cuid())
+  tenantId       String
+  userId         String?
+  emailAttempted String?
+  type           AuthEventType
+  ipAddress      String?
+  userAgent      String?
+  correlationId  String?
+  metadata       Json?
+  occurredAt     DateTime      @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User?  @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, userId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  tenantId    String
+  email       String
+  /// SHA-256 of the invitation token (token is "<tenantId>.<random>").
+  tokenHash   String    @unique
+  invitedById String?
+  roleId      String?
+  employeeId  String?
+  expiresAt   DateTime  @db.Timestamptz(3)
+  acceptedAt  DateTime? @db.Timestamptz(3)
+  revokedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  invitedBy User?  @relation(fields: [invitedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, email])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, userId])
+}
+
+// ───────────────────────── Platform ─────────────────────────
+
+/// Append-only (DB trigger rejects UPDATE/DELETE/TRUNCATE). Fields follow spec 21.2.
+/// actorUserId / targetId are deliberately NOT foreign keys: audit history must outlive, and never
+/// block changes to, the records it describes (targets are polymorphic).
+model AuditEvent {
+  id            String         @id @default(cuid())
+  tenantId      String
+  occurredAt    DateTime       @default(now()) @db.Timestamptz(3)
+  actorType     AuditActorType @default(USER)
+  actorUserId   String?
+  action        String
+  targetType    String?
+  targetId      String?
+  previousValue Json?
+  newValue      Json?
+  reason        String?
+  outcome       AuditOutcome   @default(SUCCESS)
+  sourceApp     SourceApp      @default(API)
+  correlationId String?
+  ipAddress     String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, targetType, targetId])
+  @@index([tenantId, actorUserId, occurredAt])
+  @@index([tenantId, action])
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  tenantId       String
+  key            String
+  method         String
+  path           String
+  requestHash    String
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt      DateTime @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, key])
+  @@index([expiresAt])
+}
+
+/// Optional per-tenant overrides of the built-in translation catalog.
+model TranslationResource {
+  id          String   @id @default(cuid())
+  tenantId    String
+  locale      String
+  key         String
+  value       String
+  updatedById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  updatedBy User?  @relation(fields: [updatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, locale, key])
+}
