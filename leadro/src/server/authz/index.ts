@@ -11,7 +11,8 @@ export type { AccessDecision, AccessReason, AccessSubject, AccessVia, ResourceRe
 export type { GrantConditions } from "./conditions";
 
 export { can, canInTx, canViewFields } from "./can";
-export { requirePermission } from "./require-permission";
+export { enforceInTx, enforceOnUser } from "./enforce";
+export { requirePermission, requireTenantLevelPermission } from "./require-permission";
 export type { ResourceResolver } from "./require-permission";
 export {
   scopeFilter,
@@ -25,17 +26,22 @@ export {
 export type { ScopeColumns, ScopeOptions, ResolvedScope, ScopePart, RowScopeAttributes } from "./scope-filter";
 export { employeeScopeColumns, employeeScopeSelect, employeeRowAttributes, orgUnitScopeColumns } from "./scope-columns";
 export { projectFields } from "./project-fields";
-export { EMPLOYEE_FIELD_MAP, CUSTOMER_FIELD_MAP } from "./field-maps";
+export { EMPLOYEE_FIELD_MAP, CUSTOMER_FIELD_MAP, baseFieldMap } from "./field-maps";
 export type { FieldMap } from "./project-fields";
 export { explainAccess } from "./explain-access";
 export type { AccessExplanation, AssignmentExplanation, ScopeExplanation } from "./explain-access";
-export { assertNotSelfApproval } from "./separation-of-duties";
+export { assertNotSelfApproval, assertNotHoldingRole } from "./separation-of-duties";
 export { listAuditEventsAsActor } from "./audit-access";
 
 export { ROLE_TEMPLATES, templateRequiresMfa, isMfaTriggeringPermission } from "./role-templates";
 export type { RoleTemplate, TemplateGrant } from "./role-templates";
 export { provisionRoleTemplates, syncPermissionCatalog } from "./provision-role-templates";
 export { bootstrapRoleAssignment } from "./assign-role";
-export { assignRole } from "./assign-role-as-actor";
-export type { ActorAssignRoleInput } from "./assign-role-as-actor";
+export { assignRole, assertMayGrantRole } from "./assign-role-as-actor";
+export type { ActorAssignRoleInput, GrantTarget } from "./assign-role-as-actor";
+export { revokeRoleAssignment } from "./revoke-role-assignment";
+export type { RevokeRoleAssignmentInput } from "./revoke-role-assignment";
+export { assertMayDefineGrants } from "./define-grants";
+export type { RoleGrantDefinition } from "./define-grants";
+export { activeAssignmentWhere, holdsMfaRequiringRole } from "./active-assignments";
 export type { AssignRoleInput, ScopeInput } from "./assign-role";

@@ -1,4 +1,4 @@
-import { withTenant } from "@/server/db";
+import { withTenant, type TenantTx } from "@/server/db";
 import { CATALOGS, isSupportedLocale, type Locale, type TranslationOverrides } from "@/lib/i18n";
 
 /** Raised for invalid override requests. Wrap/map to the core AppError VALIDATION_FAILED / NOT_FOUND at the API layer. */
@@ -48,7 +48,12 @@ export async function loadReviewedOverrides(tenantId: string): Promise<Translati
  * an edit can never go live without a fresh human review. The key must exist in the built-in
  * catalog and keep the same {placeholders}, otherwise the UI would render broken text.
  */
-export async function saveOverride(tenantId: string, input: OverrideInput): Promise<{ id: string }> {
+export function saveOverride(tenantId: string, input: OverrideInput): Promise<{ id: string }> {
+  return withTenant(tenantId, (tx) => saveOverrideInTx(tx, tenantId, input));
+}
+
+/** `saveOverride` inside a transaction the caller owns (so an audit event can share it). */
+export async function saveOverrideInTx(tx: TenantTx, tenantId: string, input: OverrideInput): Promise<{ id: string }> {
   if (!isSupportedLocale(input.locale)) {
     throw new TranslationOverrideError("UNSUPPORTED_LOCALE", `Unsupported locale: ${input.locale}`);
   }
@@ -61,14 +66,12 @@ export async function saveOverride(tenantId: string, input: OverrideInput): Prom
   }
   const locale: Locale = input.locale;
   const unreviewed = { reviewed: false, reviewedAt: null, reviewedById: null };
-  return withTenant(tenantId, (tx) =>
-    tx.translationResource.upsert({
-      where: { tenantId_locale_key: { tenantId, locale, key: input.key } },
-      create: { tenantId, locale, key: input.key, value: input.value, updatedById: input.editorUserId, ...unreviewed },
-      update: { value: input.value, updatedById: input.editorUserId, ...unreviewed },
-      select: { id: true },
-    }),
-  );
+  return tx.translationResource.upsert({
+    where: { tenantId_locale_key: { tenantId, locale, key: input.key } },
+    create: { tenantId, locale, key: input.key, value: input.value, updatedById: input.editorUserId, ...unreviewed },
+    update: { value: input.value, updatedById: input.editorUserId, ...unreviewed },
+    select: { id: true },
+  });
 }
 
 /**
@@ -82,26 +85,41 @@ export async function markOverrideReviewed(
   tenantId: string,
   input: { locale: string; key: string; reviewedValue: string; reviewerUserId: string },
 ): Promise<void> {
+  await withTenant(tenantId, (tx) => markOverrideReviewedInTx(tx, tenantId, input));
+}
+
+/** `markOverrideReviewed` inside a transaction the caller owns. */
+export async function markOverrideReviewedInTx(
+  tx: TenantTx,
+  tenantId: string,
+  input: { locale: string; key: string; reviewedValue: string; reviewerUserId: string },
+): Promise<void> {
   if (!isSupportedLocale(input.locale)) {
     throw new TranslationOverrideError("UNSUPPORTED_LOCALE", `Unsupported locale: ${input.locale}`);
   }
   const locale: Locale = input.locale;
-  await withTenant(tenantId, async (tx) => {
-    const result = await tx.translationResource.updateMany({
-      where: { tenantId, locale, key: input.key, value: input.reviewedValue },
-      data: { reviewed: true, reviewedAt: new Date(), reviewedById: input.reviewerUserId },
-    });
-    if (result.count > 0) return;
-    const exists = await tx.translationResource.findFirst({ where: { tenantId, locale, key: input.key }, select: { id: true } });
-    throw exists
-      ? new TranslationOverrideError("CONFLICT", "The override changed after it was loaded; review the current text")
-      : new TranslationOverrideError("NOT_FOUND", "No such translation override");
+  const result = await tx.translationResource.updateMany({
+    where: { tenantId, locale, key: input.key, value: input.reviewedValue },
+    data: { reviewed: true, reviewedAt: new Date(), reviewedById: input.reviewerUserId },
   });
+  if (result.count > 0) return;
+  const exists = await tx.translationResource.findFirst({ where: { tenantId, locale, key: input.key }, select: { id: true } });
+  throw exists
+    ? new TranslationOverrideError("CONFLICT", "The override changed after it was loaded; review the current text")
+    : new TranslationOverrideError("NOT_FOUND", "No such translation override");
 }
 
 /** Removes an override so the built-in text is used again. */
 export async function deleteOverride(tenantId: string, input: { locale: string; key: string }): Promise<void> {
-  await withTenant(tenantId, (tx) =>
-    tx.translationResource.deleteMany({ where: { tenantId, locale: input.locale, key: input.key } }),
-  );
+  await withTenant(tenantId, (tx) => deleteOverrideInTx(tx, tenantId, input));
+}
+
+/** `deleteOverride` inside a transaction the caller owns. @returns how many rows were removed. */
+export async function deleteOverrideInTx(
+  tx: TenantTx,
+  tenantId: string,
+  input: { locale: string; key: string },
+): Promise<number> {
+  const result = await tx.translationResource.deleteMany({ where: { tenantId, locale: input.locale, key: input.key } });
+  return result.count;
 }

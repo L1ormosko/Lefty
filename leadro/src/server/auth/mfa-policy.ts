@@ -1,25 +1,13 @@
+import { holdsMfaRequiringRole } from "@/server/authz";
 import type { TenantTx } from "@/server/db";
 
 /**
  * Does this user have to pass an MFA challenge to log in? Yes when ANY currently active role
  * assignment points at an active role with `requiresMfa` (§22.1 "MFA for sensitive roles").
  *
- * "Active" = not revoked, `effectiveFrom <= now` and (`effectiveTo` is null or `> now`).
- *
- * This queries Role/RoleAssignment directly so auth does not depend on the authorization engine.
- * It is the single place to repoint at `src/server/authz` later.
+ * What counts as an "active assignment" is decided in ONE place, the authorization module
+ * (`holdsMfaRequiringRole`), so login and access checks can never disagree about it.
  */
-export async function userRequiresMfa(tx: TenantTx, tenantId: string, userId: string, now = new Date()): Promise<boolean> {
-  const matching = await tx.roleAssignment.findFirst({
-    where: {
-      tenantId,
-      userId,
-      revokedAt: null,
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-      role: { active: true, requiresMfa: true },
-    },
-    select: { id: true },
-  });
-  return matching !== null;
+export function userRequiresMfa(tx: TenantTx, tenantId: string, userId: string, now = new Date()): Promise<boolean> {
+  return holdsMfaRequiringRole(tx, tenantId, userId, now);
 }

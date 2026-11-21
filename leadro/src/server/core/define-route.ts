@@ -49,18 +49,22 @@ export interface RouteHandlerArgs<S extends RouteSchemas> {
   log: Logger;
 }
 
+/** What is known before authentication: the id defineRoute generated/accepted and the client app. */
+export type PreAuthContext = Pick<RequestContext, "correlationId" | "sourceApp">;
+
 export interface RouteDefinition<S extends RouteSchemas> {
   schemas?: S;
   /**
    * Resolves the caller from the request (Task 3 plugs the session check in here) or throws
    * `UnauthenticatedError`. Omit for public routes: `ctx.actor` is then null.
    */
-  authenticate?: (req: Request) => Promise<Actor>;
+  authenticate?: (req: Request, ctx: PreAuthContext) => Promise<Actor>;
   /**
    * Permission/scope check (Task 4). Runs after authentication and input validation, so it can
-   * look at the target ids. Throws `ForbiddenError` or `NotFoundError`.
+   * look at the target ids. Throws `ForbiddenError` or `NotFoundError`. It receives the request
+   * context so denials can be audited with the same correlation id the client sees.
    */
-  authorize?: (actor: Actor, input: RouteInput<S>) => Promise<void>;
+  authorize?: (actor: Actor, input: RouteInput<S>, ctx: RequestContext) => Promise<void>;
   /**
    * When true and the request carries `Idempotency-Key`, the handler runs through
    * `withIdempotency` (requires `authenticate`). The handler's JSON result is stored and replayed.
@@ -71,10 +75,19 @@ export interface RouteDefinition<S extends RouteSchemas> {
 
 /** Next.js passes dynamic route params (a Promise in Next 15) as the second argument. */
 export interface NextRouteContext {
-  params?: Promise<Record<string, string | string[]>>;
+  params: Promise<Record<string, string | string[]>>;
 }
 
-export type RouteHandler = (req: Request, routeContext?: NextRouteContext) => Promise<Response>;
+/**
+ * A Next.js route handler. Written as overloads on purpose: Next's build-time route validator reads
+ * the LAST signature and rejects an optional second parameter ("NextRouteContext | undefined is not a
+ * valid type"), while tests and server code may call a static route with just the request. Keep the
+ * two-argument signature last.
+ */
+export interface RouteHandler {
+  (req: Request): Promise<Response>;
+  (req: Request, routeContext: NextRouteContext): Promise<Response>;
+}
 
 /** Informational only (audit `sourceApp`): the client declares itself; it is not a security claim. */
 function resolveSourceApp(req: Request): SourceApp {
@@ -149,20 +162,23 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
     throw new Error("defineRoute: `idempotent` requires `authenticate` (idempotency keys are per tenant)");
   }
 
-  return async (req, routeContext) => {
+  const handler = async (req: Request, routeContext?: NextRouteContext): Promise<Response> => {
     const startedAt = Date.now();
     const correlationId = resolveCorrelationId(req.headers);
+    const sourceApp = resolveSourceApp(req);
     let log = logger.child({ correlationId, method: req.method, path: new URL(req.url).pathname });
 
     try {
-      const actor = definition.authenticate ? await definition.authenticate(req) : null;
+      // The hooks get defineRoute's own correlation id (never the raw header, which may be absent
+      // or malformed) so their audit events line up with the response header.
+      const actor = definition.authenticate ? await definition.authenticate(req, { correlationId, sourceApp }) : null;
       if (definition.authenticate && !actor) throw new UnauthenticatedError();
       if (actor) log = log.child({ tenantId: actor.tenantId, userId: actor.userId });
 
       const input = await parseInput(definition.schemas, req, routeContext);
-      if (actor && definition.authorize) await definition.authorize(actor, input);
+      const ctx: RequestContext = { correlationId, actor, sourceApp };
+      if (actor && definition.authorize) await definition.authorize(actor, input, ctx);
 
-      const ctx: RequestContext = { correlationId, actor, sourceApp: resolveSourceApp(req) };
       const run = (): Promise<RouteResult> => definition.handler({ req, ctx, input, log });
 
       const idempotencyKey = definition.idempotent ? req.headers.get(IDEMPOTENCY_HEADER) : null;
@@ -187,4 +203,5 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
       return toErrorResponse(error, correlationId, log);
     }
   };
+  return handler;
 }

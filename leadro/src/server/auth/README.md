@@ -8,9 +8,12 @@ Public API (`index.ts`):
   `authenticateMfaRequest(req)` is the same but also accepts a session still waiting for MFA
   (MFA endpoints and logout ONLY). `requireSession()` is the server component/action equivalent.
 - `login`, `logout`, `listOwnSessions`, `revokeOwnSession`, `deactivateUserAccount`.
-- `startMfaEnrollment`, `confirmMfaEnrollment`, `verifyMfaChallenge`, `userRequiresMfa`.
+- `startMfaEnrollment`, `confirmMfaEnrollment`, `verifyMfaChallenge`, `userRequiresMfa` (delegates to authz
+  `holdsMfaRequiringRole`: ONE definition of an active assignment).
+- `changeOwnPassword(actor, { currentPassword, newPassword }, client)` — needs the current password, policy-checked,
+  rate limited per account (5 / 15 min), revokes every OTHER session, audited (`auth.password_change`).
 - `createInvitation`, `acceptInvitation`, `requestPasswordReset`, `completePasswordReset`.
-- `setAuthNotifier` — plug in email/SMS delivery for reset tokens (default only logs, no token).
+- `setAuthNotifier` — plug in email/SMS delivery for reset and invitation tokens (default only logs, no token).
 - `withSessionCookie` / `queueSessionCookie` — lets thin routes set the cookie (core's `RouteResult` has no headers).
 
 Routes (`src/app/api/v1/auth/`): `login`, `logout`, `mfa/enroll|confirm|verify`, `invitations/accept`,
@@ -47,8 +50,11 @@ Rules and invariants:
 - MFA promotion rotates the session token (the pre-MFA token stops working); the MFA routes set the new cookie.
   A TOTP code is accepted only for a step newer than `User.mfaLastUsedStep` (atomic conditional UPDATE).
 - bcrypt never runs inside a transaction: login, invitation accept and reset do read -> hash/verify -> short write.
-- Invitations with a role must carry a data scope (`InvitationScope`); the assignment is created in
-  `createInvitedRoleAssignment()` (repoint at authz `assignRole` after merge). Accept re-checks that
-  the inviter is still active and the role still exists.
-- Not done here: user CRUD/invitation delivery (users module), password change for logged-in users,
+- Invitations with a role must carry a data scope (`InvitationScope`). With an inviter, authz's anti-escalation rules
+  run twice: at CREATE time as a dry run (`assertMayGrantRole`, inviter -> invitee's employee, role, scope) and at
+  ACCEPT time through `assignRole` AS the inviter (so a lost permission, a scope that moved out of reach or an
+  archived scope target kills the invitation: generic "invalid invitation", token not consumed). An inviter-less
+  (system) invitation uses `bootstrapRoleAssignment`. The token is handed to `AuthNotifier.sendInvitation` after
+  commit and is never returned by the API.
+- Not done here: user CRUD (users module), a real email/SMS notifier (no provider yet: §28.3),
   MFA disable/recovery codes, CSRF tokens (SameSite=Lax + JSON bodies is the defence).

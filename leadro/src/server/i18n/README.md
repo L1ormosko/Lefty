@@ -19,8 +19,13 @@ overrides. Implements spec §16.2, §16.5, §16.6. Pure logic is in `src/lib/i18
 - All access goes through `withTenant` (RLS); overrides never cross tenants.
 - DB CHECK `translation_review_consistent`: reviewed rows carry `reviewedAt`; unreviewed rows carry none.
 
-## Not done here (integration notes)
-- Mutations do not yet write audit events (the audit module lands in parallel); call the audit service from the
-  API route that wraps `saveOverride` / `markOverrideReviewed`.
-- `TranslationOverrideError` should be mapped to core `AppError` (`VALIDATION_FAILED` / `NOT_FOUND`) at the API layer.
-- Permission checks (`localization.edit` to save, `localization.configure` to review) belong to the API layer.
+## Permission-checked administration (Task 5)
+`saveOverrideAsActor`, `reviewOverrideAsActor`, `deleteOverrideAsActor` (actor + request context) are the entry points
+for API routes/server actions:
+- `localization.edit` saves an override (it lands unreviewed); `localization.configure` reviews or deletes one. Two
+  permissions keep the §16.6 review meaningful (translators edit, a reviewer approves). Translations are tenant-level,
+  so a TENANT scope is required. No new catalog permission was needed.
+- Each write is audited in the same transaction (`translation.save|review|delete`, previous/new text).
+- `TranslationOverrideError` is mapped to core errors: unsupported locale / unknown key / placeholder mismatch ->
+  `ValidationError` (field `locale` / `key` / `value`), missing -> `NotFoundError`, changed-after-load -> `ConflictError`.
+The low-level `saveOverride` / `markOverrideReviewed` / `deleteOverride` remain for seeds and tests (no permission check).

@@ -31,15 +31,18 @@ included in error bodies.
 
 - Single: `200/201` with `{ "data": { ... } }`.
 - Collection: `{ "data": [ ... ], "page": { "nextCursor": "opaque|null", "limit": 50 } }`.
-  Cursor pagination, default limit 50, max 200. Sorting via `sort=field` / `sort=-field` on
-  allow-listed fields. Filters are explicit query params validated by Zod.
+  Cursor pagination (`?cursor=&limit=`), default limit 50, max 200; the cursor is opaque to clients
+  (`src/lib/pagination.ts`). Every list is filtered to the caller's data scope IN THE QUERY and each row
+  is field-projected to what the caller's grant reveals, so a page can hold fewer fields than the
+  model has. Order is fixed per endpoint (documented on the route). Filters are explicit query params
+  validated by Zod.
 - `204` for actions with no body. Locale-dependent display strings are not returned by the API;
   clients render by translation key.
 
 ## Error shape (spec 20.4)
 
 ```json
-{ "error": { "code": "PERMISSION_DENIED", "message": "You do not have access to this action.",
+{ "error": { "code": "FORBIDDEN", "message": "You do not have access to this action.",
              "field": "email", "retryable": false, "correlationId": "5b0c..." } }
 ```
 
@@ -49,29 +52,34 @@ human-readable, contains no internal detail, and is a stable English default (cl
 `code`). Stack traces, SQL, Prisma errors, and file paths are never returned; they are logged with
 the correlation id.
 
+The codes below are exactly `ERROR_CODES` in `src/server/core/errors.ts`; a test pins the table to
+the code, so a new code must be added in both places.
+
 | HTTP | code | retryable | Meaning |
 |---|---|---|---|
-| 400 | `VALIDATION_FAILED` | false | Zod input validation failed |
-| 401 | `UNAUTHENTICATED` | false | missing/expired/revoked session |
-| 403 | `PERMISSION_DENIED` | false | authenticated, lacks permission or scope (also `MFA_REQUIRED`) |
+| 400 | `VALIDATION_FAILED` | false | Zod input validation failed, or a business-state rule on the input (bad parent type, cycle, ...) |
+| 401 | `UNAUTHENTICATED` | false | missing/expired/revoked session, and every failed login (never says which part was wrong) |
+| 403 | `FORBIDDEN` | false | authenticated, lacks the permission or the data scope for a capability or tenant-level record |
 | 404 | `NOT_FOUND` | false | missing **or out of scope** (existence not leaked) |
-| 409 | `CONFLICT` | false | uniqueness/state conflict (`INVALID_STATE_TRANSITION`, `DUPLICATE`) |
-| 409 | `IDEMPOTENCY_KEY_REUSED` | false | same key, different request body |
-| 422 | `BUSINESS_RULE_VIOLATION` | false | valid shape, violates a domain rule |
-| 423 | `ACCOUNT_LOCKED` | false | lockout protection |
+| 409 | `CONFLICT` | false | uniqueness conflict, concurrent change, same `Idempotency-Key` with a different request, or an in-flight duplicate (retryable) |
+| 409 | `INVALID_STATE_TRANSITION` | false | the resource's current status does not allow this change (archived unit, terminated employee, ...) |
 | 429 | `RATE_LIMITED` | true | honour `Retry-After` |
-| 500 | `INTERNAL_ERROR` | true | generic; details only in logs |
-| 503 | `SERVICE_UNAVAILABLE` | true | dependency down / transaction timeout |
+| 500 | `INTERNAL` | true | generic; details only in logs |
 
-Login failures return the same `INVALID_CREDENTIALS` (401) for unknown company code, unknown email
-and wrong password, to avoid account enumeration.
+Not used (earlier drafts listed them): `PERMISSION_DENIED` (it is `FORBIDDEN`), `INTERNAL_ERROR` (it
+is `INTERNAL`), `INVALID_CREDENTIALS` (failed logins are `UNAUTHENTICATED`), `IDEMPOTENCY_KEY_REUSED`
+(it is `CONFLICT`), `BUSINESS_RULE_VIOLATION`, `ACCOUNT_LOCKED`, `MFA_REQUIRED`, `SERVICE_UNAVAILABLE`.
+When a client needs to tell such cases apart, add a code to `ERROR_CODES` first, then to this table.
+
+Login failures return the same `UNAUTHENTICATED` (401) for unknown company code, unknown email,
+wrong password and a locked account, to avoid account enumeration.
 
 ## Idempotency (spec 20.3)
 
 Mutations that may be retried (job creation, financial transactions, invitations, imports) accept
 `Idempotency-Key: <opaque, <=128 chars>`. Stored per tenant in `IdempotencyRecord` with a hash of
 method + path + body. Same key + same hash replays the stored response (status and body, header
-`Idempotent-Replayed: true`); same key + different hash -> `409 IDEMPOTENCY_KEY_REUSED`; an
+`Idempotent-Replayed: true`); same key + different hash -> `409 CONFLICT`; an
 in-flight duplicate -> `409 CONFLICT` retryable. Records expire after 24 h.
 
 ## Audit (spec 21)
@@ -85,10 +93,10 @@ serialisation.
 
 ## Authentication transport
 
-Opaque session token in an `HttpOnly; Secure; SameSite=Lax` cookie (web) or `Authorization:
-Bearer` (non-browser clients). Tokens are `<tenantId>.<random>`; only the SHA-256 is stored. CSRF:
-mutations from browsers require a same-origin check / custom header. Login body:
-`{ companyCode, email, password }`.
+Opaque session token in the `leadro_session` `HttpOnly; Secure; SameSite=Lax` cookie (the only
+transport implemented; a bearer header for non-browser clients is not built yet). Tokens are
+`<tenantId>.<random>`; only the SHA-256 is stored. CSRF defence: SameSite=Lax plus JSON-only bodies.
+Login body: `{ tenantSlug, email, password }` (`tenantSlug` is the company code).
 
 ## Localization
 

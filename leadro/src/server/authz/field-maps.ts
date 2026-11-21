@@ -43,3 +43,9 @@ export const CUSTOMER_FIELD_MAP: FieldMap = buildFieldMap(
   ["id", "name", "email", "phone", "address", "status", "createdAt", "updatedAt"],
   { billing: ["billingAddress", "billingEmail", "paymentMethod", "taxId"] },
 );
+
+/**
+ * Field map for records that have no sensitive field sets (users, org units, roles, ...): every
+ * listed field is `base`. Unlisted fields stay hidden, so a new column must be added here on purpose.
+ */
+export const baseFieldMap = (fields: readonly string[]): FieldMap => buildFieldMap(fields, {});

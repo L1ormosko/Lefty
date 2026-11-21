@@ -1,4 +1,4 @@
-import type { RouteHandler } from "@/server/core";
+import type { NextRouteContext, RouteHandler } from "@/server/core";
 import { buildClearedSessionCookie, buildSessionCookie } from "./cookies";
 
 /**
@@ -24,8 +24,8 @@ export function queueClearSessionCookie(req: Request): void {
 
 /** Wraps a `defineRoute` handler so queued cookies are added to its response. */
 export function withSessionCookie(handler: RouteHandler): RouteHandler {
-  return async (req, routeContext) => {
-    const response = await handler(req, routeContext);
+  return async (req: Request, routeContext?: NextRouteContext) => {
+    const response = await (routeContext ? handler(req, routeContext) : handler(req));
     for (const headerValue of pendingSetCookies.get(req) ?? []) response.headers.append("set-cookie", headerValue);
     pendingSetCookies.delete(req);
     return response;
