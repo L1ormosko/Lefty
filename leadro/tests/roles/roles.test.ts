@@ -242,7 +242,7 @@ describe("editing a role that is already assigned", () => {
   /** An editor who may edit roles tenant-wide but holds employees.view only over City A. */
   async function narrowEditor() {
     const editRole = await makeRole(w.tenantId, "Role editor", [{ permission: "permissions.view" }, { permission: "permissions.edit" }]);
-    const viewRole = await makeRole(w.tenantId, "City A employee viewer", [{ permission: "employees.view" }]);
+    const viewRole = await makeRole(w.tenantId, "City A employee viewer", [{ permission: "employees.view" }, { permission: "customers.view" }]);
     const editor = await createPerson(w.tenantId, "narrow-editor", { withEmployee: false });
     await grantTemplate(w.tenantId, editor, editRole, [{ type: "TENANT" }]);
     await grantTemplate(w.tenantId, editor, viewRole, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
@@ -274,11 +274,19 @@ describe("editing a role that is already assigned", () => {
     const result = await call(putPermissions, "PUT", "/x", { cookie, params: { id: role.id }, body: { permissions: withEmployeeView } });
     expect(result.status).toBe(200);
 
-    // and a new tenant-wide holder afterwards makes the same edit impossible
+    // and a new tenant-wide holder afterwards makes the next edit impossible. The editor DOES hold
+    // customers.view (over City A), so the permission itself passes assertMayDefineGrants; only the holder
+    // check (assertMayGrantToExistingHolders) can refuse it.
     const wide = await createPerson(w.tenantId, "late-holder", { withEmployee: false });
     await grantTemplate(w.tenantId, wide, role.id, [{ type: "TENANT" }]);
     const more = await call(putPermissions, "PUT", "/x", { cookie, params: { id: role.id }, body: { permissions: [...withEmployeeView, { permission: "customers.view" }] } });
     expect(more.status).toBe(403);
+    expect(more.json.error.message).toMatch(/assigned over scopes/); // the holder check, not "do not hold"
+    // control: the same addition on a role with only a City A holder is fine
+    const control = (await create(ceo, { name: unique("Control"), permissions: [{ permission: "jobs.view" }] })).json.data;
+    const local = await createPerson(w.tenantId, "control-holder", { orgUnitId: w.units.cityA });
+    await grantTemplate(w.tenantId, local, control.id, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
+    expect((await call(putPermissions, "PUT", "/x", { cookie, params: { id: control.id }, body: { permissions: [{ permission: "jobs.view" }, { permission: "customers.view" }] } })).status).toBe(200);
   });
 
   it("a tenant-wide editor who holds the permission tenant-wide may edit any role", async () => {

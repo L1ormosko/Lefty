@@ -136,7 +136,13 @@ export async function seedTenant(spec: TenantSpec, passwordHash: string): Promis
       { timeout: 60_000 },
     );
   } catch (error) {
-    await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => undefined);
+    // Never swallow a cleanup failure: say that an empty tenant may remain, then rethrow the ORIGINAL error.
+    await prisma.tenant.delete({ where: { id: tenantId } }).catch((cleanupError: unknown) => {
+      console.error(
+        `seed cleanup failed: tenant "${spec.slug}" (${tenantId}) may remain empty and must be deleted by hand:`,
+        cleanupError instanceof Error ? cleanupError.message : cleanupError,
+      );
+    });
     throw error;
   }
 

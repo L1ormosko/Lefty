@@ -19,3 +19,4 @@ Invariants:
   (`auth.deactivateUserAccount`). `/users/me` and password change are self-service (no permission, own row only).
 - Password change needs the current password, enforces the password policy, is rate limited per account and
   signs out every other session.
+- `employeeStatus` / `loginPendingDeactivation` mark ACTIVE logins of TERMINATED employees (filter `?pendingDeactivation=true`); only tenant-wide user administrators see them.

@@ -382,3 +382,11 @@ No new dependencies (Zod already present). No schema change and no migration: ev
 - **i18n**: ungated override functions are no longer exported from `index.ts`; the reviewer must not be the last editor.
 - **Corrections of the past**: an assignment start/end more than 5 minutes in the past needs a `reason` and is audited with `correction: true`.
 
+### Task 5 fix round 2
+- Termination ALWAYS revokes every session of the linked user (no user-administration authority needed; it follows from ending employment) and
+  is audited (`revokedSessions`). Nobody can terminate their own employee record.
+- The users API exposes `employeeStatus` and `loginPendingDeactivation` (employee TERMINATED and user ACTIVE) and `?pendingDeactivation=true`.
+  Visibility choice: such users are treated as tenant-level (termination closes their placements), so only tenant-wide user administrators see
+  and can deactivate them; unit-scoped administrators do not (keeping them reachable through their last unit would need history-based scopes in authz).
+- Seed cleanup failures are logged (the original error is still rethrown).
+
