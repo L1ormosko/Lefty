@@ -47,8 +47,9 @@ async function enrol(user: TestUser) {
   const secret = base32Decode(enrollment.secret);
   // Codes for the adjacent step avoid the replay guard when the test needs several valid codes.
   const codeAt = (stepOffset: number) => hotp(secret, totpTimeStep(Date.now()) + stepOffset);
-  await confirmMfaEnrollment(actor, codeAt(0), testClient());
-  return { actor, token, secret, codeAt, enrollment };
+  const promoted = await confirmMfaEnrollment(actor, codeAt(0), testClient());
+  if (!promoted) throw new Error("expected the pending session to be promoted");
+  return { actor, pendingToken: token, token: promoted.token, secret, codeAt, enrollment };
 }
 
 describe("MFA policy", () => {
@@ -102,8 +103,11 @@ describe("MFA enrollment", () => {
 
   it("completes the pending session when enrollment is confirmed", async () => {
     const user = await createTenantWithUser();
-    const { token } = await enrol(user);
+    const { token, pendingToken } = await enrol(user);
     await expect(authenticateRequest(requestWithToken(token))).resolves.toMatchObject({ userId: user.userId });
+    // Session fixation hardening: the token used before MFA stops working once the session is promoted.
+    expect(token).not.toBe(pendingToken);
+    await expect(authenticateMfaRequest(requestWithToken(pendingToken))).rejects.toBeInstanceOf(UnauthenticatedError);
   });
 
   it("refuses MFA features without LEADRO_ENCRYPTION_KEY", async () => {
@@ -136,8 +140,14 @@ describe("MFA login path", () => {
     await expect(authenticateRequest(requestWithToken(login.token))).rejects.toBeInstanceOf(UnauthenticatedError);
 
     // The next step's code differs from the one used during enrollment (replay guard).
-    await verifyMfaChallenge(actor, hotp(secret, totpTimeStep(Date.now()) + 1), testClient());
-    await expect(authenticateRequest(requestWithToken(login.token))).resolves.toMatchObject({ userId: user.userId });
+    const promoted = await verifyMfaChallenge(actor, hotp(secret, totpTimeStep(Date.now()) + 1), testClient());
+    expect(promoted?.token).toBeTruthy();
+    // The pre-MFA token is dead; the rotated one works, and the session id is unchanged.
+    await expect(authenticateRequest(requestWithToken(login.token))).rejects.toBeInstanceOf(UnauthenticatedError);
+    await expect(authenticateRequest(requestWithToken(promoted!.token))).resolves.toMatchObject({
+      userId: user.userId,
+      sessionId: actor.sessionId,
+    });
 
     const failures = await withTenant(user.tenantId, (tx) =>
       tx.authenticationEvent.count({ where: { userId: user.userId, type: "MFA_CHALLENGE_FAILED" } }),
@@ -153,8 +163,24 @@ describe("MFA login path", () => {
 
     // codeAt(0) was consumed by the enrollment confirmation.
     await expect(verifyMfaChallenge(actor, codeAt(0), testClient())).rejects.toBeInstanceOf(ValidationError);
-    await verifyMfaChallenge(actor, hotp(secret, totpTimeStep(Date.now()) - 1), testClient());
-    await expect(authenticateRequest(requestWithToken(login.token))).resolves.toBeTruthy();
+    // An older in-window step is refused once a newer one was accepted, so it is refused here too.
+    await expect(verifyMfaChallenge(actor, hotp(secret, totpTimeStep(Date.now()) - 1), testClient())).rejects.toBeInstanceOf(ValidationError);
+    const promoted = await verifyMfaChallenge(actor, codeAt(1), testClient());
+    await expect(authenticateRequest(requestWithToken(promoted!.token))).resolves.toBeTruthy();
+  });
+
+  it("lets only one of two concurrent requests use the same fresh code", async () => {
+    const user = await createTenantWithUser();
+    const { codeAt } = await enrol(user);
+    const first = await authenticateMfaRequest(requestWithToken((await loginAs(user)).token));
+    const second = await authenticateMfaRequest(requestWithToken((await loginAs(user)).token));
+
+    const results = await Promise.allSettled([
+      verifyMfaChallenge(first, codeAt(1), testClient()),
+      verifyMfaChallenge(second, codeAt(1), testClient()),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 
   it("locks the account after 5 wrong codes, so a stolen password cannot brute-force the code", async () => {

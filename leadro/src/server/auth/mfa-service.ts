@@ -17,12 +17,13 @@ import {
   generateTotpSecret,
   verifyTotp,
 } from "@/lib/totp";
-import { LOCKOUT_DURATION_MS, MFA_ISSUER, RATE_LIMITS, TOTP_REPLAY_WINDOW_MS } from "./config";
+import { LOCKOUT_DURATION_MS, MFA_ISSUER, RATE_LIMITS } from "./config";
 import type { ClientInfo } from "./client-info";
 import { recordAuthEvent } from "./events";
 import { isLockedOut, lockIfTooManyFailures } from "./lockout";
 import { enforceRateLimit } from "./rate-limiter";
 import { decryptSecret, encryptSecret } from "./secret-box";
+import { issueToken } from "./tokens";
 
 export interface MfaEnrollment {
   /** Base32 seed for manual entry. Returned only here, never again. */
@@ -92,18 +93,16 @@ async function checkCode(
   }
 
   const timeStep = verifyTotp(decryptSecret(user.mfaSecretEncrypted), code, now.getTime());
+  // Replay guard: accept a step only if it is newer than the last accepted one. Doing it as one
+  // conditional UPDATE (not read-then-write) means two concurrent requests with the same code
+  // cannot both pass: the second waits for the row lock, re-evaluates the WHERE and matches nothing.
+  // It also refuses older in-window steps after a newer one was used.
   const alreadyUsed =
     timeStep !== null &&
-    (await tx.authenticationEvent.findFirst({
-      where: {
-        tenantId: actor.tenantId,
-        userId: user.id,
-        type: "MFA_CHALLENGE_SUCCEEDED",
-        occurredAt: { gt: new Date(now.getTime() - TOTP_REPLAY_WINDOW_MS) },
-        metadata: { path: ["timeStep"], equals: timeStep },
-      },
-      select: { id: true },
-    })) !== null;
+    (await tx.user.updateMany({
+      where: { id: user.id, tenantId: actor.tenantId, OR: [{ mfaLastUsedStep: null }, { mfaLastUsedStep: { lt: timeStep } }] },
+      data: { mfaLastUsedStep: timeStep },
+    })).count === 0;
 
   if (timeStep === null || alreadyUsed) {
     await recordAuthEvent(tx, {
@@ -127,53 +126,70 @@ async function checkCode(
   return true;
 }
 
-/** Marks the caller's session as fully authenticated (if it was waiting on MFA). */
-async function completePendingSession(tx: TenantTx, actor: Actor): Promise<void> {
-  const completed = await tx.session.updateMany({
+/** Replacement session credentials handed out when an MFA-pending session becomes a full one. */
+export interface PromotedSession {
+  /** The new raw token; the cookie must be replaced with it. The pending token no longer works. */
+  token: string;
+  expiresAt: Date;
+}
+
+/**
+ * Marks the caller's session as fully authenticated (if it was waiting on MFA) and ROTATES its
+ * token. The pre-MFA token may have been exposed in places the post-MFA one must not be (session
+ * fixation hardening), so the privilege change gets a fresh secret. The row, its id and its
+ * absolute expiry stay the same.
+ * @returns the new credentials, or null when the session was not pending (nothing changed).
+ */
+async function promotePendingSession(tx: TenantTx, actor: Actor): Promise<PromotedSession | null> {
+  const { token, tokenHash } = issueToken(actor.tenantId);
+  const promoted = await tx.session.updateMany({
     where: { id: actor.sessionId, tenantId: actor.tenantId, mfaPending: true },
-    data: { mfaPending: false },
+    data: { mfaPending: false, tokenHash },
   });
-  if (completed.count > 0) {
-    // Deferred from login: the login is only complete now, so this is where the failure count resets.
-    await tx.user.update({ where: { id: actor.userId }, data: { lastLoginAt: new Date(), failedLoginCount: 0 } });
-  }
+  if (promoted.count === 0) return null;
+  // Deferred from login: the login is only complete now, so this is where the failure count resets.
+  await tx.user.update({ where: { id: actor.userId }, data: { lastLoginAt: new Date(), failedLoginCount: 0 } });
+  const session = await tx.session.findUniqueOrThrow({ where: { id: actor.sessionId }, select: { expiresAt: true } });
+  return { token, expiresAt: session.expiresAt };
 }
 
 /**
  * Finishes enrollment: if `code` is valid, MFA is switched on and the caller's session (if it was
- * waiting on MFA) becomes fully authenticated.
+ * waiting on MFA) becomes fully authenticated under a new token.
  *
+ * @returns the rotated session credentials, or null if the session was already complete.
  * @throws ValidationError (field `code`) for a wrong code, InvalidStateTransitionError if enrollment was never started.
  */
-export async function confirmMfaEnrollment(actor: Actor, code: string, client: ClientInfo): Promise<void> {
+export async function confirmMfaEnrollment(actor: Actor, code: string, client: ClientInfo): Promise<PromotedSession | null> {
   enforceRateLimit(`mfa:session:${actor.sessionId}`, RATE_LIMITS.mfaPerSession);
-  const valid = await withTenant(actor.tenantId, async (tx) => {
+  const outcome = await withTenant(actor.tenantId, async (tx) => {
     const user = await loadUser(tx, actor);
     if (user.mfaEnabled) throw new ConflictError({ message: "Multi-factor authentication is already enabled." });
-    if (!(await checkCode(tx, actor, code, client, { enrolling: true }))) return false;
+    if (!(await checkCode(tx, actor, code, client, { enrolling: true }))) return { valid: false as const };
     await tx.user.update({ where: { id: user.id }, data: { mfaEnabled: true } });
-    await completePendingSession(tx, actor);
-    return true;
+    return { valid: true as const, promoted: await promotePendingSession(tx, actor) };
   });
-  if (!valid) throw new ValidationError({ message: INVALID_CODE_MESSAGE, field: "code" });
+  if (!outcome.valid) throw new ValidationError({ message: INVALID_CODE_MESSAGE, field: "code" });
+  return outcome.promoted;
 }
 
 /**
- * Login step 2: verifies a TOTP code and promotes the caller's `mfaPending` session.
+ * Login step 2: verifies a TOTP code and promotes the caller's `mfaPending` session (new token).
  * Also usable on an already complete session as a step-up check (it just stays complete).
  *
+ * @returns the rotated session credentials, or null if the session was already complete.
  * @throws ValidationError (field `code`) for a wrong or reused code, RateLimitedError while locked or throttled.
  */
-export async function verifyMfaChallenge(actor: Actor, code: string, client: ClientInfo): Promise<void> {
+export async function verifyMfaChallenge(actor: Actor, code: string, client: ClientInfo): Promise<PromotedSession | null> {
   enforceRateLimit(`mfa:session:${actor.sessionId}`, RATE_LIMITS.mfaPerSession);
-  const valid = await withTenant(actor.tenantId, async (tx) => {
+  const outcome = await withTenant(actor.tenantId, async (tx) => {
     const user = await loadUser(tx, actor);
     if (!user.mfaEnabled) {
       throw new InvalidStateTransitionError({ message: "Multi-factor authentication is not enabled; enroll first." });
     }
-    if (!(await checkCode(tx, actor, code, client, { enrolling: false }))) return false;
-    await completePendingSession(tx, actor);
-    return true;
+    if (!(await checkCode(tx, actor, code, client, { enrolling: false }))) return { valid: false as const };
+    return { valid: true as const, promoted: await promotePendingSession(tx, actor) };
   });
-  if (!valid) throw new ValidationError({ message: INVALID_CODE_MESSAGE, field: "code" });
+  if (!outcome.valid) throw new ValidationError({ message: INVALID_CODE_MESSAGE, field: "code" });
+  return outcome.promoted;
 }

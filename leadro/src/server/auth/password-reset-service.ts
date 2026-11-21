@@ -1,12 +1,12 @@
 import { ValidationError } from "@/server/core";
 import { prisma, withTenant } from "@/server/db";
 import { PASSWORD_RESET_TTL_MS, RATE_LIMITS } from "./config";
-import { clientKey, type ClientInfo } from "./client-info";
+import { enforceIpRateLimit, type ClientInfo } from "./client-info";
 import { recordAuthEvent } from "./events";
 import { normaliseEmail } from "./normalise-email";
 import { getAuthNotifier } from "./notifier";
 import { assertPasswordMeetsPolicy, hashPassword } from "./passwords";
-import { enforceRateLimit, hitRateLimit } from "./rate-limiter";
+import { hitRateLimit } from "./rate-limiter";
 import { revokeAllSessionsForUser } from "./session-service";
 import { hashToken, issueToken, tenantIdFromToken } from "./tokens";
 
@@ -23,7 +23,7 @@ export async function requestPasswordReset(
   input: { tenantSlug: string; email: string },
   client: ClientInfo,
 ): Promise<void> {
-  enforceRateLimit(`reset:ip:${clientKey(client)}`, RATE_LIMITS.passwordResetPerIp);
+  enforceIpRateLimit(client, "reset:ip", RATE_LIMITS.passwordResetPerIp);
   const email = normaliseEmail(input.email);
   const tenantSlug = input.tenantSlug.trim().toLowerCase();
   if (!hitRateLimit(`reset:account:${tenantSlug}:${email}`, RATE_LIMITS.passwordResetPerAccount).allowed) return;
@@ -71,36 +71,46 @@ export async function completePasswordReset(
   input: { token: string; newPassword: string },
   client: ClientInfo,
 ): Promise<void> {
-  enforceRateLimit(`reset-confirm:ip:${clientKey(client)}`, RATE_LIMITS.passwordResetConfirmPerIp);
+  enforceIpRateLimit(client, "reset-confirm:ip", RATE_LIMITS.passwordResetConfirmPerIp);
   const tenantId = tenantIdFromToken(input.token);
   if (!tenantId) throw new ValidationError({ message: INVALID_RESET_MESSAGE });
+  const tokenHash = hashToken(input.token);
+  const invalid = () => new ValidationError({ message: INVALID_RESET_MESSAGE });
 
+  // Step 1: short read, so a dead token is rejected before spending bcrypt time on it.
   const now = new Date();
+  const record = await withTenant(tenantId, (tx) =>
+    tx.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: { select: { email: true, status: true } } },
+    }),
+  );
+  if (!record || record.tenantId !== tenantId || record.usedAt || record.expiresAt <= now || record.user.status !== "ACTIVE") {
+    throw invalid();
+  }
+
+  // Step 2: hash outside any transaction (bcrypt cost 12 is deliberately slow).
+  assertPasswordMeetsPolicy(input.newPassword, record.user.email);
+  const passwordHash = await hashPassword(input.newPassword);
+
+  // Step 3: short write transaction. The conditional UPDATE is what makes the token single-use.
   await withTenant(tenantId, async (tx) => {
-    const record = await tx.passwordResetToken.findUnique({
-      where: { tokenHash: hashToken(input.token) },
-      include: { user: { select: { id: true, email: true, status: true } } },
-    });
-    if (!record || record.tenantId !== tenantId) throw new ValidationError({ message: INVALID_RESET_MESSAGE });
-
-    assertPasswordMeetsPolicy(input.newPassword, record.user.email);
-    const passwordHash = await hashPassword(input.newPassword);
-
     const consumed = await tx.passwordResetToken.updateMany({
-      where: { id: record.id, usedAt: null, expiresAt: { gt: now } },
-      data: { usedAt: now },
+      where: { id: record.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
     });
-    // A deactivated user cannot regain access through a reset issued earlier.
-    if (consumed.count === 0 || record.user.status !== "ACTIVE") throw new ValidationError({ message: INVALID_RESET_MESSAGE });
+    if (consumed.count === 0) throw invalid();
+    // A user deactivated since step 1 cannot regain access (throwing rolls the token use back).
+    const updated = await tx.user.updateMany({
+      where: { id: record.userId, tenantId, status: "ACTIVE" },
+      data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null },
+    });
+    if (updated.count === 0) throw invalid();
 
-    await tx.user.update({
-      where: { id: record.user.id },
-      data: { passwordHash, passwordChangedAt: now, failedLoginCount: 0, lockedUntil: null },
-    });
-    const revokedSessions = await revokeAllSessionsForUser(tx, tenantId, record.user.id);
+    const revokedSessions = await revokeAllSessionsForUser(tx, tenantId, record.userId);
     await recordAuthEvent(tx, {
       tenantId,
-      userId: record.user.id,
+      userId: record.userId,
       type: "PASSWORD_RESET_COMPLETED",
       client,
       metadata: { revokedSessions },

@@ -5,10 +5,10 @@ export { listOwnSessions, revokeOwnSession, revokeAllSessionsForUser } from "./s
 export type { SessionSummary } from "./session-service";
 export { deactivateUserAccount } from "./account-lifecycle";
 export { startMfaEnrollment, confirmMfaEnrollment, verifyMfaChallenge } from "./mfa-service";
-export type { MfaEnrollment } from "./mfa-service";
+export type { MfaEnrollment, PromotedSession } from "./mfa-service";
 export { userRequiresMfa } from "./mfa-policy";
 export { createInvitation, acceptInvitation } from "./invitation-service";
-export type { CreateInvitationInput, CreatedInvitation } from "./invitation-service";
+export type { CreateInvitationInput, CreatedInvitation, InvitationScope } from "./invitation-service";
 export { requestPasswordReset, completePasswordReset } from "./password-reset-service";
 export { assertPasswordMeetsPolicy, hashPassword, verifyPassword } from "./passwords";
 export { setAuthNotifier, resetAuthNotifier } from "./notifier";

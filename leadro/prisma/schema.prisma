@@ -284,6 +284,8 @@ model User {
   timeZone           String?
   mfaEnabled         Boolean    @default(false)
   mfaSecretEncrypted String?
+  /// Highest TOTP time step already accepted; a code for an older or equal step is a replay.
+  mfaLastUsedStep    Int?
   failedLoginCount   Int        @default(0)
   lockedUntil        DateTime?  @db.Timestamptz(3)
   lastLoginAt        DateTime?  @db.Timestamptz(3)
@@ -456,18 +458,24 @@ model AuthenticationEvent {
 }
 
 model Invitation {
-  id          String    @id @default(cuid())
-  tenantId    String
-  email       String
+  id                      String     @id @default(cuid())
+  tenantId                String
+  email                   String
   /// SHA-256 of the invitation token (token is "<tenantId>.<random>").
-  tokenHash   String    @unique
-  invitedById String?
-  roleId      String?
-  employeeId  String?
-  expiresAt   DateTime  @db.Timestamptz(3)
-  acceptedAt  DateTime? @db.Timestamptz(3)
-  revokedAt   DateTime? @db.Timestamptz(3)
-  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  tokenHash               String     @unique
+  invitedById             String?
+  roleId                  String?
+  /// Data scope granted with `roleId` (required whenever roleId is set: a role without a scope
+  /// grants nothing). Targets are validated in the service; no FK so OrgUnit/LegalEntity stay untouched.
+  scopeType               ScopeType?
+  scopeLegalEntityId      String?
+  scopeOrgUnitId          String?
+  scopeIncludeDescendants Boolean    @default(true)
+  employeeId              String?
+  expiresAt               DateTime   @db.Timestamptz(3)
+  acceptedAt              DateTime?  @db.Timestamptz(3)
+  revokedAt               DateTime?  @db.Timestamptz(3)
+  createdAt               DateTime   @default(now()) @db.Timestamptz(3)
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   invitedBy User?  @relation(fields: [invitedById, tenantId], references: [id, tenantId], onDelete: Restrict)

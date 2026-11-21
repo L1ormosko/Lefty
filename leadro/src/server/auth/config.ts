@@ -24,9 +24,6 @@ export const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 export const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
 export const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 
-/** A reused TOTP code is refused for this long (covers the whole accepted drift window). */
-export const TOTP_REPLAY_WINDOW_MS = 2 * 60 * 1000;
-
 export const MFA_ISSUER = "LEADRO";
 
 /** Fixed-window rate limits, see rate-limiter.ts. */

@@ -172,3 +172,15 @@ Requested by the Task 3 brief (cost 12). TOTP and AES-256-GCM use `node:crypto`;
     last 2 minutes (JSON path query on `AuthenticationEvent.metadata`).
 11. **`LEADRO_ENCRYPTION_KEY`** is read lazily: the app boots without it, but every MFA code path
     throws `EncryptionKeyError` (HTTP 500 generic) instead of ever storing plaintext.
+
+### Task 3 fix round 1
+12. **Client IP trust:** `LEADRO_TRUSTED_PROXY_HOPS` (default 0 = ignore `x-forwarded-for`, store no IP;
+    N = Nth entry from the right). Per-IP limits are skipped (with a log) when no IP is known.
+13. **TOTP replay** is now `User.mfaLastUsedStep` + conditional UPDATE (replaces decision 10): atomic,
+    and refuses older in-window steps after a newer one.
+14. **Session token rotation** when an MFA-pending session is promoted (same row, new token hash).
+15. **Invitations** validate inviter/role/employee/scope targets, require a scope with a role
+    (columns `scopeType/scopeLegalEntityId/scopeOrgUnitId/scopeIncludeDescendants`, no FKs to avoid
+    touching org models), and re-check inviter and role at accept. Migration `*_auth_fix_round_1`
+    (columns only, RLS unchanged).
+16. **bcrypt outside transactions** in login, invitation accept and password reset.

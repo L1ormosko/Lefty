@@ -110,10 +110,51 @@ describe("invitations", () => {
     const role = await withTenant(tenant.id, (tx) =>
       tx.role.create({ data: { tenantId: tenant.id, name: "Finance approver", requiresMfa: true } }),
     );
-    const invitation = await createInvitation(tenant.id, { email, invitedById: null, roleId: role.id }, testClient());
-    await acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient());
+    const orgUnit = await withTenant(tenant.id, (tx) =>
+      tx.orgUnit.create({ data: { tenantId: tenant.id, type: "BRANCH", name: "Main branch" } }),
+    );
+    const invitation = await createInvitation(
+      tenant.id,
+      { email, invitedById: null, roleId: role.id, scope: { type: "ORG_UNIT", orgUnitId: orgUnit.id, includeDescendants: false } },
+      testClient(),
+    );
+    const { userId } = await acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient());
+
+    // The role is granted WITH its scope (a scope-less assignment would grant nothing).
+    const scopes = await withTenant(tenant.id, (tx) =>
+      tx.accessScope.findMany({ where: { roleAssignment: { userId, roleId: role.id } } }),
+    );
+    expect(scopes).toHaveLength(1);
+    expect(scopes[0]).toMatchObject({ type: "ORG_UNIT", orgUnitId: orgUnit.id, includeDescendants: false });
+
     const result = await login({ tenantSlug: tenant.slug, email, password: NEW_PASSWORD }, testClient());
     expect(result.mfaRequired).toBe(true);
+  });
+
+  it("validates role, scope, employee and inviter at creation instead of failing in the database", async () => {
+    const tenant = await createTenant("auth-invite-val");
+    const other = await createTenant("auth-invite-val-other");
+    const foreignRole = await withTenant(other.id, (tx) => tx.role.create({ data: { tenantId: other.id, name: "Foreign" } }));
+    const role = await withTenant(tenant.id, (tx) => tx.role.create({ data: { tenantId: tenant.id, name: "Local" } }));
+    const create = (extra: object) => createInvitation(tenant.id, { email: uniqueEmail(), invitedById: null, ...extra }, testClient());
+
+    await expect(create({ roleId: "nope", scope: { type: "TENANT" } })).rejects.toMatchObject({ field: "roleId" });
+    await expect(create({ roleId: foreignRole.id, scope: { type: "TENANT" } })).rejects.toMatchObject({ field: "roleId" });
+    await expect(create({ roleId: role.id })).rejects.toMatchObject({ field: "scope" });
+    await expect(create({ scope: { type: "TENANT" } })).rejects.toMatchObject({ field: "roleId" });
+    await expect(create({ roleId: role.id, scope: { type: "ORG_UNIT" } })).rejects.toMatchObject({ field: "scope" });
+    await expect(create({ roleId: role.id, scope: { type: "ORG_UNIT", orgUnitId: "nope" } })).rejects.toMatchObject({ field: "scope" });
+    await expect(create({ employeeId: "nope" })).rejects.toMatchObject({ field: "employeeId" });
+    await expect(create({ invitedById: "nope" })).rejects.toMatchObject({ field: "invitedById" });
+    await expect(create({ roleId: role.id, scope: { type: "TENANT" } })).resolves.toBeTruthy();
+  });
+
+  it("is refused at accept time when the inviter was deactivated in the meantime", async () => {
+    const tenant = await createTenant("auth-invite-inviter");
+    const inviter = await createActiveUser(tenant);
+    const invitation = await createInvitation(tenant.id, { email: uniqueEmail(), invitedById: inviter.userId }, testClient());
+    await withTenant(tenant.id, (tx) => tx.user.update({ where: { id: inviter.userId }, data: { status: "DEACTIVATED" } }));
+    await expect(acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient())).rejects.toBeInstanceOf(ValidationError);
   });
 
   it("does not let an invitation take over an existing active account", async () => {

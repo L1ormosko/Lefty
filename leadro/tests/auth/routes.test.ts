@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { POST as loginRoute } from "@/app/api/v1/auth/login/route";
 import { POST as logoutRoute } from "@/app/api/v1/auth/logout/route";
 import { POST as resetRequestRoute } from "@/app/api/v1/auth/password-reset/request/route";
@@ -8,6 +8,16 @@ import { POST as mfaVerifyRoute } from "@/app/api/v1/auth/mfa/verify/route";
 import { createTenantWithUser, resetAuthTestState, TEST_PASSWORD, uniqueEmail } from "./auth-helpers";
 
 resetAuthTestState();
+
+// These tests behave as if one trusted reverse proxy sits in front of the app (see client-info.ts).
+const originalHops = process.env.LEADRO_TRUSTED_PROXY_HOPS;
+beforeAll(() => {
+  process.env.LEADRO_TRUSTED_PROXY_HOPS = "1";
+});
+afterAll(() => {
+  if (originalHops === undefined) delete process.env.LEADRO_TRUSTED_PROXY_HOPS;
+  else process.env.LEADRO_TRUSTED_PROXY_HOPS = originalHops;
+});
 
 const ip = () => `198.51.100.${Math.floor(Math.random() * 250)}`;
 const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -98,9 +108,11 @@ describe("auth API routes", () => {
   });
 
   it("login is throttled with 429 and Retry-After once a client floods it", async () => {
-    const flooder = { "x-forwarded-for": "192.0.2.77" };
     let last: Response | undefined;
     for (let attempt = 0; attempt < 31; attempt++) {
+      // The attacker varies the forgeable leading X-Forwarded-For entry on every request; the entry
+      // appended by the trusted proxy (last) is the same, so the per-IP bucket must not reset.
+      const flooder = { "x-forwarded-for": `203.0.113.${attempt}, 192.0.2.77` };
       last = await loginRoute(post("/api/v1/auth/login", { tenantSlug: "nope", email: uniqueEmail("flood"), password: "x" }, flooder));
     }
     expect(last?.status).toBe(429);

@@ -2,11 +2,11 @@ import type { Actor } from "@/server/core";
 import { UnauthenticatedError } from "@/server/core";
 import { prisma, withTenant } from "@/server/db";
 import { RATE_LIMITS } from "./config";
-import { clientKey, type ClientInfo } from "./client-info";
+import { enforceIpRateLimit, type ClientInfo } from "./client-info";
 import { recordAuthEvent } from "./events";
-import { normaliseEmail } from "./normalise-email";
 import { isLockedOut, lockIfTooManyFailures } from "./lockout";
 import { userRequiresMfa } from "./mfa-policy";
+import { normaliseEmail } from "./normalise-email";
 import { burnPasswordCheck, verifyPassword } from "./passwords";
 import { enforceRateLimit } from "./rate-limiter";
 import { createSession } from "./session-service";
@@ -43,7 +43,12 @@ type FailureReason = "unknown_user" | "no_password" | "inactive_account" | "lock
  * history and audit log. A throw-away bcrypt check runs on every path that has no password hash to
  * test, so timing does not reveal which accounts exist either.
  *
- * Tenant resolution comes first (Tenant has no RLS); everything else runs inside `withTenant`.
+ * Three steps so the slow bcrypt comparison never holds a database transaction open:
+ * (1) short read of the user, (2) password check outside any transaction, (3) short write
+ * transaction that re-reads the user (it may have been deactivated or locked meanwhile) and records
+ * the outcome. Tenant resolution comes first (Tenant has no RLS); user data is only touched
+ * inside `withTenant`.
+ *
  * If any of the user's active roles require MFA (or the user enrolled MFA), the returned session
  * is `mfaPending` and only works for the MFA endpoints until a code is verified.
  *
@@ -52,7 +57,7 @@ type FailureReason = "unknown_user" | "no_password" | "inactive_account" | "lock
 export async function login(input: LoginInput, client: ClientInfo): Promise<LoginResult> {
   const email = normaliseEmail(input.email);
   const tenantSlug = input.tenantSlug.trim().toLowerCase();
-  enforceRateLimit(`login:ip:${clientKey(client)}`, RATE_LIMITS.loginPerIp);
+  enforceIpRateLimit(client, "login:ip", RATE_LIMITS.loginPerIp);
   enforceRateLimit(`login:account:${tenantSlug}:${email}`, RATE_LIMITS.loginPerAccount);
 
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true, status: true } });
@@ -61,6 +66,17 @@ export async function login(input: LoginInput, client: ClientInfo): Promise<Logi
     throw invalidCredentials();
   }
 
+  // Step 1: read.
+  const snapshot = await withTenant(tenant.id, (tx) =>
+    tx.user.findUnique({ where: { tenantId_email: { tenantId: tenant.id, email } }, select: { passwordHash: true } }),
+  );
+
+  // Step 2: password check, no transaction open.
+  let passwordOk = false;
+  if (snapshot?.passwordHash) passwordOk = await verifyPassword(input.password, snapshot.passwordHash);
+  else await burnPasswordCheck(input.password);
+
+  // Step 3: decide and record.
   const now = new Date();
   const outcome = await withTenant(tenant.id, async (tx) => {
     const user = await tx.user.findUnique({ where: { tenantId_email: { tenantId: tenant.id, email } } });
@@ -78,23 +94,13 @@ export async function login(input: LoginInput, client: ClientInfo): Promise<Logi
       return { ok: false as const };
     };
 
-    if (!user) {
-      await burnPasswordCheck(input.password);
-      return fail("unknown_user");
-    }
-    if (!user.passwordHash) {
-      await burnPasswordCheck(input.password);
-      return fail("no_password");
-    }
-    if (user.status !== "ACTIVE") {
-      await burnPasswordCheck(input.password);
-      return fail("inactive_account");
-    }
-    if (isLockedOut(user, now)) {
-      await burnPasswordCheck(input.password);
-      return fail("locked");
-    }
-    if (!(await verifyPassword(input.password, user.passwordHash))) return fail("bad_password");
+    if (!user) return fail("unknown_user");
+    if (!user.passwordHash) return fail("no_password");
+    if (user.status !== "ACTIVE") return fail("inactive_account");
+    if (isLockedOut(user, now)) return fail("locked");
+    // The hash may have changed between step 1 and now (e.g. password reset): then the result of
+    // step 2 is stale and the attempt counts as failed.
+    if (!passwordOk || user.passwordHash !== snapshot?.passwordHash) return fail("bad_password");
 
     const mfaRequired = user.mfaEnabled || (await userRequiresMfa(tx, tenant.id, user.id, now));
     const session = await createSession(tx, { tenantId: tenant.id, userId: user.id, mfaPending: mfaRequired, client });

@@ -40,6 +40,15 @@ Rules and invariants:
 - Rate limiting: in-memory fixed windows per process (`rate-limiter.ts`): login 30/min per IP and
   10/min per account, reset request 10 per 15 min per IP (and 3 per 15 min per account, silently),
   MFA 10/min per session. With several instances the limit multiplies; the DB lockout is the real
-  brute-force control. Deployment must put a proxy in front that overwrites `x-forwarded-for`.
+  brute-force control.
+- Client IP: `x-forwarded-for` is attacker-controlled on the left, so by default (`LEADRO_TRUSTED_PROXY_HOPS=0`)
+  it is ignored and no IP is stored. With N trusted proxies the Nth entry from the right is used.
+  Without an IP the per-IP limits are skipped (and logged) rather than shared by all clients.
+- MFA promotion rotates the session token (the pre-MFA token stops working); the MFA routes set the new cookie.
+  A TOTP code is accepted only for a step newer than `User.mfaLastUsedStep` (atomic conditional UPDATE).
+- bcrypt never runs inside a transaction: login, invitation accept and reset do read -> hash/verify -> short write.
+- Invitations with a role must carry a data scope (`InvitationScope`); the assignment is created in
+  `createInvitedRoleAssignment()` (repoint at authz `assignRole` after merge). Accept re-checks that
+  the inviter is still active and the role still exists.
 - Not done here: user CRUD/invitation delivery (users module), password change for logged-in users,
   MFA disable/recovery codes, CSRF tokens (SameSite=Lax + JSON bodies is the defence).
