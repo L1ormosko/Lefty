@@ -56,3 +56,37 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 
 export const permissionKey = (p: Pick<PermissionDef, "module" | "action">) =>
   `${p.module}.${p.action.toLowerCase()}`;
+
+const KNOWN_PERMISSION_KEYS: ReadonlySet<string> = new Set(PERMISSION_CATALOG.map(permissionKey));
+
+/** True when `key` (`module.action`) is in the catalog. Unknown keys are never granted. */
+export const isPermissionKey = (key: string): boolean => KNOWN_PERMISSION_KEYS.has(key);
+
+/**
+ * Field-level sensitive categories (spec 4.2 "sensitive data category"). A category is a named set
+ * of fields inside a module's records. Access is decided by the module's VIEW grant plus its
+ * `conditions` (see conditions.ts): a grant limited to another field set, or one that excludes this
+ * set, does not reveal these fields. Keep docs/PERMISSIONS.md in sync.
+ */
+export const SENSITIVE_FIELD_CATEGORIES = [
+  {
+    key: "employees.financial_fields",
+    module: "employees",
+    tag: "financial",
+    description: "Pay, bank and other financial fields of employee records",
+  },
+  {
+    key: "customers.billing_fields",
+    module: "customers",
+    tag: "billing",
+    description: "Billing and payment fields of customer records",
+  },
+  {
+    key: "jobs.financial_fields",
+    module: "jobs",
+    tag: "financial",
+    description: "Prices, margins and other financial fields of jobs",
+  },
+] as const;
+
+export type FieldCategoryKey = (typeof SENSITIVE_FIELD_CATEGORIES)[number]["key"];

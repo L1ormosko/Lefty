@@ -20,6 +20,11 @@ document must match it). Per ruling, the spec 4.5 matrix is the approved **defau
 - Separation of duties: APPROVE/REJECT on one's own submitted change is refused where the module
   requires it (spec 21.3).
 - Sensitive permissions (`*` below) may require extra approval or MFA (`Role.requiresMfa`).
+- **Active** means: assignment not revoked, `effectiveFrom <= now`, `effectiveTo` null or in the future,
+  role `active`, user `ACTIVE`, and the linked employee (if any) not `TERMINATED`. Expired and revoked
+  assignments are ignored. Every check re-reads the database; there is no cache across requests.
+- **Engine API** (`src/server/authz`): `can`, `requirePermission`, `scopeFilter`, `canViewFields`,
+  `explainAccess`, `assertNotSelfApproval`, `provisionRoleTemplates`, `assignRole`. See the module README.
 
 ## 2. Action semantics (spec 4.3)
 
@@ -54,6 +59,29 @@ Jobs -> `jobs`; Compensation -> `compensation`; Financial reports -> `financial_
 Performance -> `performance`; Permissions -> `permissions`. `users`, `audit`, `localization` are
 platform modules not in the 4.5 table (see section 5).
 
+### 3.1 Sensitive field categories
+
+Field-level protection inside a module's records (spec 4.2 "sensitive data category"). Defined in code
+as `SENSITIVE_FIELD_CATEGORIES`; checked with `canViewFields`, which needs the module's `view` on the
+record plus a grant whose conditions do not hide the set.
+
+| Category | Module | Field set tag |
+|---|---|---|
+| `employees.financial_fields` | employees | `financial` |
+| `customers.billing_fields` | customers | `billing` |
+| `jobs.financial_fields` | jobs | `financial` |
+
+### 3.2 Grant conditions (`RolePermission.conditions`)
+
+| Key | Meaning |
+|---|---|
+| `fields: "x"` | The grant reveals only field set `x` (Finance: `financial`; Dispatcher: `availability`). |
+| `excludeFields: ["x"]` | The grant reveals everything except these field sets (HR: `financial`). |
+| `set: "x"` | The grant covers only records of named set `x` (`job_related`, `lead_team`...). The caller states which sets a record belongs to; list filters ignore the grant unless the caller passes `satisfiedSets`. |
+
+Unknown keys make the grant unusable (fail closed). A `fields`-limited grant still passes the
+capability check for its action; sensitive field sets are gated with `canViewFields`.
+
 ## 4. Scopes (ABAC)
 
 | ScopeType | Meaning | Resolution |
@@ -65,6 +93,12 @@ platform modules not in the 4.5 table (see section 5).
 | `ASSIGNED` | Only records explicitly assigned to the caller | target has an active assignment row to the caller's employee (jobs, customers via job) |
 
 Rules:
+
+0. **Scopes belong to the role assignment**, so every permission of a role uses the assignment's scopes
+   (see section 5 and DECISIONS.md "Task 4"). A record with no org placement (audit log, company settings)
+   is "tenant-level": only `TENANT` scopes match it. Ids of employees, units and legal entities are
+   verified to exist in the caller's tenant before matching, so forged cross-tenant ids never match.
+   Archived units (and everything beneath them) grant nothing.
 
 1. Scope target must match type (DB CHECK): `LEGAL_ENTITY` needs `legalEntityId`; `ORG_UNIT` needs
    `orgUnitId`; the rest carry neither.
@@ -113,6 +147,22 @@ Cell vocabulary from the spec -> grants:
 T = scope `TENANT`. "Limited" is deliberately narrower than "Scoped" and is expressed as a smaller
 action subset and/or a `conditions` qualifier; the exact condition vocabulary is finalised with the
 modules that consume it (Phase 2/3) and is recorded then.
+
+**Scope per template.** Because scopes live on the assignment, a template carries
+`suggestedScopeTypes`: Owner/CEO, COO, Finance, HR -> `TENANT`; State/Regional/City Manager, Team Leader,
+Dispatcher, Lead Ops, Customer Relations -> `ORG_UNIT` (Dispatcher and Lead Ops are narrower than the
+matrix's "Full scope"; assign `TENANT` when a company wants that); Technician -> `OWN` + `ASSIGNED`.
+Technician-specific qualifiers use `fields` (`necessary`, `status`, `execution`); the COO's
+`permissions.assign` carries `{ set: "non_sensitive_roles" }`, to be enforced by the permissions module.
+
+**MFA.** `Role.requiresMfa = true` for the Owner/CEO, Finance Director and HR Manager templates and for
+any role holding `permissions.manage`, `permissions.assign` or a `*.configure` permission (this makes the
+COO template MFA-required too). Authentication enforces it at login; the authz engine exposes it as
+`via.requiresMfa`.
+
+**Duplicate assignments.** `assignRole` rejects a second active assignment of the same (user, role,
+scope) over an overlapping period (service check with an advisory lock; not expressible as a DB
+constraint because scopes are a child table).
 
 Additional 4.4 role templates not in the 4.5 table are derived by analogy and flagged for
 confirmation in `DECISIONS.md`:
