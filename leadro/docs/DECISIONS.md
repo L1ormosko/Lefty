@@ -109,3 +109,32 @@ All versions are pinned exactly and identical to the root VELTO `package.json` w
 
 Not added (deliberate): `bcryptjs` or another password hasher (arrives with the auth task), any
 queue/storage/map/notification SDK (spec 28.3: no fake integrations).
+
+## Task 2 decisions (core request pipeline, audit, logging)
+
+No new dependencies (uses node:crypto, Zod, Prisma already in the stack).
+
+1. **Error codes follow the Task 2 brief**, not the longer table in `API_CONVENTIONS.md`:
+   `UNAUTHENTICATED 401`, `FORBIDDEN 403` (docs say `PERMISSION_DENIED`), `NOT_FOUND 404`,
+   `VALIDATION_FAILED 400`, `CONFLICT 409`, `INVALID_STATE_TRANSITION 409`, `RATE_LIMITED 429`,
+   `INTERNAL 500` (docs say `INTERNAL_ERROR`). `API_CONVENTIONS.md` should be aligned by the manager.
+   Idempotency key reuse with a different payload is a plain `CONFLICT` (not `IDEMPOTENCY_KEY_REUSED`).
+2. **`withIdempotency(tenantId, key, scope, fn)`**: `scope` is `{ method, path, body }` (hashed with
+   sorted keys, SHA-256). The claim row is committed before `fn` runs via `INSERT ... ON CONFLICT DO
+   NOTHING`, so exactly one concurrent duplicate runs; the others get a retryable `CONFLICT`
+   (they are not blocked waiting). An unfinished claim blocks for only 2 minutes (not 24 h) so a
+   crashed process does not lock the client out; a finished record is kept 24 h. If `fn` throws,
+   the claim is released (errors are not cached). No schema change was needed.
+3. **`defineRoute` order**: correlation id -> `authenticate` -> Zod parse -> `authorize(actor, input)`
+   -> handler. Authenticating first keeps the input contract hidden from anonymous callers.
+   `authorize` without `authenticate` fails closed (500). `idempotent: true` opts a route into
+   `withIdempotency` when an `Idempotency-Key` header is sent; replays carry `Idempotent-Replayed: true`.
+4. **Source app** is derived from an informational `x-leadro-client: web|mobile` header (default
+   `API`). It is for audit context only, not a security claim.
+5. **Shared redaction lives in `src/lib/redact.ts`** (pure) and is used by both audit and logging.
+   Matching is by normalised key fragment (`password`, `secret`, `token`, `apikey`, `authorization`,
+   `cookie`, `credential`, `privatekey`, `recoverycode`), deliberately over-inclusive.
+6. **Tests live in `tests/<module>/`** (not beside the source) because `vitest.config.ts` only
+   includes `tests/**/*.test.ts`.
+7. **Audit read API** is `listAuditEvents(tenantId, { filter, cursor, limit })`; it does no
+   permission check (caller enforces `audit.read`, Task 4). Cursor is keyset on (occurredAt, id).
