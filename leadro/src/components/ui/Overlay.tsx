@@ -12,6 +12,26 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+/**
+ * Open overlays, oldest first. Each overlay registers a document-level key listener, so every
+ * handler checks it is the topmost; otherwise a confirm opened from a dialog would close both
+ * on Escape and the two focus traps would fight.
+ */
+const openPanels: HTMLElement[] = [];
+let openCount = 0;
+let overflowBeforeLock = "";
+
+/** Ref-counted so closing an outer overlay first does not unlock scroll under an inner one. */
+function lockScroll() {
+  if (openCount++ === 0) {
+    overflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+}
+function unlockScroll() {
+  if (--openCount === 0) document.body.style.overflow = overflowBeforeLock;
+}
+
 export interface OverlayProps {
   open: boolean;
   /** Called on Escape or backdrop click. */
@@ -62,12 +82,12 @@ export function Overlay({
     const focusables = () => Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
     (focusables()[0] ?? panel).focus();
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    openPanels.push(panel);
+    lockScroll();
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (openPanels[openPanels.length - 1] !== panel) return;
       if (event.key === "Escape") {
-        event.stopPropagation();
         onCloseRef.current();
         return;
       }
@@ -80,7 +100,9 @@ export function Overlay({
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
-      if (event.shiftKey && (active === first || !panel.contains(active))) {
+      // The panel itself is focusable (tabIndex -1) when non-focusable text is clicked; treat it
+      // as "before the first item" so Shift+Tab wraps instead of leaving the dialog.
+      if (event.shiftKey && (active === first || active === panel || !panel.contains(active))) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && (active === last || !panel.contains(active))) {
@@ -92,7 +114,8 @@ export function Overlay({
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = previousOverflow;
+      openPanels.splice(openPanels.indexOf(panel), 1);
+      unlockScroll();
       previouslyFocused?.focus?.();
     };
   }, [open]);

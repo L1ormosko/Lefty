@@ -46,7 +46,7 @@ export function ConfirmDialog({
       labelledBy={titleId}
       describedBy={descriptionId}
       backdropClassName="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
-      panelClassName="w-full max-w-md rounded-lg bg-surface p-6 shadow-overlay focus:outline-none"
+      panelClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-surface p-6 shadow-overlay focus:outline-none"
     >
       <h2 id={titleId} className="text-lg font-semibold text-ink">
         {title}

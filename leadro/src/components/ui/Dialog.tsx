@@ -30,7 +30,7 @@ export function Dialog({ open, dir, onClose, title, description, closeLabel, chi
       labelledBy={titleId}
       describedBy={description ? descriptionId : undefined}
       backdropClassName="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
-      panelClassName="w-full max-w-lg rounded-lg bg-surface p-6 shadow-overlay focus:outline-none"
+      panelClassName="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-surface p-6 shadow-overlay focus:outline-none"
     >
       <div className="flex items-start justify-between gap-4">
         <h2 id={titleId} className="text-lg font-semibold text-ink">

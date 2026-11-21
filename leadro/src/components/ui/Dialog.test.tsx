@@ -59,6 +59,67 @@ describe("Dialog", () => {
   });
 });
 
+describe("stacked overlays", () => {
+  function Stack({ onOuterClose }: { onOuterClose: () => void }) {
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    return (
+      <Dialog
+        open
+        onClose={onOuterClose}
+        title="Outer"
+        closeLabel="Close outer"
+        footer={<button onClick={() => setConfirmOpen(true)}>Delete</button>}
+      >
+        <ConfirmDialog
+          open={confirmOpen}
+          title="Sure?"
+          description="d"
+          confirmLabel="Yes"
+          cancelLabel="No"
+          onConfirm={() => {}}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      </Dialog>
+    );
+  }
+
+  it("Escape closes only the topmost overlay", async () => {
+    const onOuterClose = vi.fn();
+    render(<Stack onOuterClose={onOuterClose} />);
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(onOuterClose).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    expect(onOuterClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Tab focus inside the topmost overlay and locks scroll until all close", async () => {
+    render(<Stack onOuterClose={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const no = screen.getByRole("button", { name: "No" });
+    const yes = screen.getByRole("button", { name: "Yes" });
+    expect(no).toHaveFocus();
+    await userEvent.tab();
+    expect(yes).toHaveFocus();
+    await userEvent.tab();
+    expect(no).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
+    await userEvent.keyboard("{Escape}");
+    expect(document.body.style.overflow).toBe("hidden");
+  });
+});
+
+describe("focus trap edge cases", () => {
+  it("wraps Shift+Tab to the last control when the panel itself has focus", async () => {
+    render(<Dialog open onClose={() => {}} title="T" closeLabel="Close" footer={<button>Save</button>} />);
+    screen.getByRole("dialog").focus();
+    await userEvent.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Save" })).toHaveFocus();
+  });
+});
+
 describe("ConfirmDialog", () => {
   function setup() {
     const onConfirm = vi.fn();
