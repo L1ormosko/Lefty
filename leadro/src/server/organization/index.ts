@@ -1,3 +1,5 @@
+export { getCompanyOverview } from "./company-overview";
+export type { CompanyOverview } from "./company-overview";
 export { getTenantProfile, updateTenantProfile } from "./tenant-profile";
 export { createLegalEntity, updateLegalEntity, archiveLegalEntity, listLegalEntities, getLegalEntity } from "./legal-entities";
 export { createOrgUnit, updateOrgUnit, moveOrgUnit, archiveOrgUnit } from "./org-units";

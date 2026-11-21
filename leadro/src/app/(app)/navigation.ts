@@ -1,6 +1,7 @@
 import type { MessageKey } from "@/lib/i18n";
-import { can } from "@/server/authz";
+import { can, resolveScope } from "@/server/authz";
 import type { Actor } from "@/server/core";
+import { withTenant } from "@/server/db";
 
 /**
  * One entry of the workspace navigation (§5). This file is the single place that says which
@@ -13,6 +14,11 @@ export interface NavigationItem {
   /** Catalog permission (`module.action`) needed to see the item; omitted = every signed-in user. */
   permission?: string;
   /**
+   * Scope-aware rule for administration screens (instead of `permission`): visible with a
+   * non-OWN `<module>.view` scope or the module's administrative permission.
+   */
+  adminModule?: { module: string; adminPermission: string };
+  /**
    * False while the destination page does not exist yet. Such items are defined here so their
    * permission rule is settled and tested, but they are never shown: a link to a 404 is worse
    * than no link. The task that builds the page flips this to true.
@@ -22,18 +28,36 @@ export interface NavigationItem {
 
 export const NAVIGATION_ITEMS: readonly NavigationItem[] = [
   { id: "overview", labelKey: "NAV.OVERVIEW", href: "/", isAvailable: true },
-  // Administration screens arrive with Task 8 (admin UI). They are gated on MANAGEMENT permissions
-  // where a plain `view` is also held by self-service roles: a Technician holds employees.view and
-  // localization.view (own record only), which must not surface the employee directory or the
-  // translation editor. Capability checks ignore data scope, so the item permission has to be one
-  // that only managers hold.
-  { id: "organization", labelKey: "NAV.ORGANIZATION", href: "/admin/organization", permission: "organization.view", isAvailable: false },
-  { id: "employees", labelKey: "NAV.EMPLOYEES", href: "/admin/employees", permission: "employees.edit", isAvailable: false },
-  { id: "users", labelKey: "NAV.USERS", href: "/admin/users", permission: "users.view", isAvailable: false },
-  { id: "roles", labelKey: "NAV.ROLES_AND_ACCESS", href: "/admin/roles", permission: "permissions.view", isAvailable: false },
+  // Administration screens (Task 8). Their visibility is scope-aware (see `canSeeAdminModule`): a
+  // Technician holds employees.view / localization.view over their OWN record only, which must not
+  // surface the employee directory or the translation editor.
+  { id: "company", labelKey: "NAV.COMPANY_OVERVIEW", href: "/admin/company", adminModule: { module: "company_settings", adminPermission: "company_settings.configure" }, isAvailable: true },
+  { id: "organization", labelKey: "NAV.ORGANIZATION", href: "/admin/organization", adminModule: { module: "organization", adminPermission: "organization.manage" }, isAvailable: true },
+  { id: "employees", labelKey: "NAV.EMPLOYEES", href: "/admin/employees", adminModule: { module: "employees", adminPermission: "employees.edit" }, isAvailable: true },
+  { id: "users", labelKey: "NAV.USERS", href: "/admin/users", adminModule: { module: "users", adminPermission: "users.manage" }, isAvailable: true },
+  { id: "roles", labelKey: "NAV.ROLES_AND_ACCESS", href: "/admin/roles", adminModule: { module: "permissions", adminPermission: "permissions.manage" }, isAvailable: true },
   { id: "audit", labelKey: "NAV.AUDIT_LOG", href: "/admin/audit", permission: "audit.view", isAvailable: false },
-  { id: "localization", labelKey: "NAV.LOCALIZATION", href: "/admin/localization", permission: "localization.edit", isAvailable: false },
+  { id: "localization", labelKey: "NAV.LOCALIZATION", href: "/admin/localization", adminModule: { module: "localization", adminPermission: "localization.configure" }, isAvailable: true },
 ];
+
+/**
+ * Whether an administration module belongs in this actor's navigation: they hold `<module>.view`
+ * over at least one scope beyond their own record (tenant, legal entity or org unit), or hold the module's administrative permission outright. Capability checks alone
+ * ignore data scope, so a Technician (view of their own record) would wrongly qualify.
+ * Decided from granted permissions only (never role names, §4.2) and re-read on every call (§25.5).
+ */
+export async function canSeeAdminModule(actor: Actor, module: string, adminPermission: string): Promise<boolean> {
+  const scope = await withTenant(actor.tenantId, (tx) => resolveScope(tx, actor, `${module}.view`));
+  // OWN is the person's own record; ASSIGNED is "records assigned to me" (jobs, leads) and means
+  // nothing for administration data. Neither makes a directory or an editor worth showing.
+  if (scope.parts.some((part) => part.type === "TENANT" || part.type === "LEGAL_ENTITY" || part.type === "ORG_UNIT")) return true;
+  return (await can(actor, adminPermission)).allowed;
+}
+
+async function isVisible(actor: Actor, item: NavigationItem): Promise<boolean> {
+  if (item.adminModule) return canSeeAdminModule(actor, item.adminModule.module, item.adminModule.adminPermission);
+  return !item.permission || (await can(actor, item.permission)).allowed;
+}
 
 /**
  * The items this actor may see, decided on the server from granted permissions only (never from
@@ -48,8 +72,6 @@ export async function getNavigation(
   items: readonly NavigationItem[] = NAVIGATION_ITEMS,
 ): Promise<NavigationItem[]> {
   const candidates = items.filter((item) => item.isAvailable);
-  const allowed = await Promise.all(
-    candidates.map(async (item) => !item.permission || (await can(actor, item.permission)).allowed),
-  );
+  const allowed = await Promise.all(candidates.map((item) => isVisible(actor, item)));
   return candidates.filter((_, index) => allowed[index]);
 }

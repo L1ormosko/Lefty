@@ -123,7 +123,10 @@ describe("navigation from permissions", () => {
 
   it("never lists pages that do not exist yet, whatever the permissions", async () => {
     const world = await buildWorld("nav-planned");
-    expect(ids(await getNavigation(world.ceo.actor))).toEqual(["overview"]);
+    const shown = ids(await getNavigation(world.ceo.actor));
+    const unbuilt = NAVIGATION_ITEMS.filter((item) => !item.isAvailable).map((item) => item.id);
+    expect(unbuilt).toContain("audit");
+    for (const id of unbuilt) expect(shown).not.toContain(id);
   });
 });
 
