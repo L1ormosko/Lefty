@@ -77,6 +77,17 @@ describe("toErrorResponse", () => {
     }
   });
 
+  it("forces the generic message for INTERNAL even when a custom one was given, and logs the real one", async () => {
+    const lines: string[] = [];
+    const log = createLogger({ level: "debug", sink: (_l, line) => lines.push(line) });
+    const { body } = await (async () => {
+      const response = toErrorResponse(new InternalError({ message: "authorize requires authenticate" }), CID, log);
+      return { body: (await response.json()) as ErrorBody };
+    })();
+    expect(body.error.message).toBe("An internal error occurred.");
+    expect(lines.join("\n")).toContain("authorize requires authenticate");
+  });
+
   it("does not expose the cause of an AppError to the client, but logs it", async () => {
     const lines: string[] = [];
     const log = createLogger({ level: "debug", sink: (_l, line) => lines.push(line) });
