@@ -422,6 +422,9 @@ model Session {
   revokedAt  DateTime? @db.Timestamptz(3)
   ipAddress  String?
   userAgent  String?
+  /// True between a correct password and a correct TOTP code. A pending session may only call the
+  /// MFA endpoints; every other route rejects it.
+  mfaPending Boolean   @default(false)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   user   User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
