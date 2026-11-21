@@ -69,12 +69,17 @@ export function unitOptions(units: readonly UnitSummary[], t: TranslateFn): Arra
   return units.map((unit) => ({ value: unit.id, label: `${unit.name} (${t(`ORG_UNIT_TYPE.${unit.type}`)})` }));
 }
 
-/** Active employees the caller may see, as `{ value: id, label: "Last, First" }`. */
-export function loadEmployeeOptions(actor: Actor): Promise<Array<{ value: string; label: string }>> {
+/** Active employees the caller may see (optionally only those without a login), as `{ value: id, label: "Last, First" }`. */
+export function loadEmployeeOptions(
+  actor: Actor,
+  { withoutLogin = false }: { withoutLogin?: boolean } = {},
+): Promise<Array<{ value: string; label: string }>> {
   return orEmpty(async () => {
     const page = await listEmployees(actor, { limit: PICKER_LIMIT, status: "ACTIVE" });
     return page.data
       .filter((employee) => typeof employee.id === "string")
+      // `userId` is a base field; a caller who cannot see it gets every employee (the service still guards the invite).
+      .filter((employee) => !withoutLogin || !employee.userId)
       .map((employee) => ({
         value: String(employee.id),
         label: fullNameOf(employee) || String(employee.employeeNumber ?? employee.id),
