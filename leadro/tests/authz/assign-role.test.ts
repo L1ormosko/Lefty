@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { assignRole } from "@/server/authz";
+import { bootstrapRoleAssignment } from "@/server/authz";
 import { ConflictError, NotFoundError, ValidationError } from "@/server/core";
 import { withTenant } from "@/server/db";
 import { buildWorld, createPerson, disconnect, type World } from "./fixtures";
@@ -12,9 +12,9 @@ beforeAll(async () => {
 });
 afterAll(disconnect);
 
-const assign = (userId: string, input: Partial<Parameters<typeof assignRole>[1]> = {}) =>
+const assign = (userId: string, input: Partial<Parameters<typeof bootstrapRoleAssignment>[1]> = {}) =>
   withTenant(w.tenantId, (tx) =>
-    assignRole(tx, {
+    bootstrapRoleAssignment(tx, {
       tenantId: w.tenantId,
       userId,
       roleId: w.roles.CITY_MANAGER,
@@ -23,7 +23,7 @@ const assign = (userId: string, input: Partial<Parameters<typeof assignRole>[1]>
     }),
   );
 
-describe("assignRole duplicate guard", () => {
+describe("role assignment duplicate guard", () => {
   it("rejects the same (user, role, scope) while an overlapping assignment is active", async () => {
     const person = await createPerson(w.tenantId, "dup", { withEmployee: false });
     await assign(person.userId);
@@ -60,7 +60,7 @@ describe("assignRole duplicate guard", () => {
   });
 });
 
-describe("assignRole validation", () => {
+describe("role assignment validation", () => {
   it("requires at least one scope and a consistent target per scope type", async () => {
     const person = await createPerson(w.tenantId, "val", { withEmployee: false });
     await expect(assign(person.userId, { scopes: [] })).rejects.toBeInstanceOf(ValidationError);

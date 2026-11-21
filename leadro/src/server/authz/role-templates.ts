@@ -1,6 +1,11 @@
 import type { ScopeType } from "@prisma/client";
 import type { GrantConditions } from "./conditions";
-import { PERMISSION_CATALOG, isPermissionKey, type PermissionActionName } from "./permission-catalog";
+import {
+  PERMISSION_CATALOG,
+  SENSITIVE_FIELD_CATEGORIES,
+  isPermissionKey,
+  type PermissionActionName,
+} from "./permission-catalog";
 
 /**
  * Default role templates (spec 4.4) derived from the 4.5 matrix; mapping rationale in
@@ -89,7 +94,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     name: "Owner / CEO",
     description: "Company-wide overview, organization structure, system configuration and high-level approvals.",
     suggestedScopeTypes: ["TENANT"],
-    grants: PERMISSION_CATALOG.flatMap((p) => grantActions(p.module, [p.action])),
+    // "Full" includes the sensitive field sets (financial, billing); they are opt-in for everyone else.
+    grants: PERMISSION_CATALOG.flatMap((p) => {
+      const sensitive = SENSITIVE_FIELD_CATEGORIES.find((category) => category.module === p.module);
+      return grantActions(p.module, [p.action], sensitive ? { includeFields: [sensitive.tag] } : undefined);
+    }),
   }),
   defineTemplate({
     key: "COO",
@@ -213,7 +222,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     grants: [
       ...view("localization"),
       ...view("organization"),
-      ...full("employees", { excludeFields: ["financial"] }),
+      // No `includeFields`: HR sees personal/employment fields but not financial ones (opt-in).
+      ...full("employees"),
       ...view("performance"),
     ],
   }),
@@ -231,7 +241,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("dispatch"),
       ...grantActions("jobs", ["VIEW", "EDIT"], { fields: "execution" }),
       ...view("compensation"),
-      ...view("financial_reports"),
+      // No financial_reports.view: own statements/summary are self-service, not the module permission.
       ...view("performance"),
     ],
   }),

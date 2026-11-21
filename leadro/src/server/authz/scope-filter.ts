@@ -1,4 +1,5 @@
 import { withTenant, type TenantTx } from "@/server/db";
+import { grantFieldSets } from "./conditions";
 import { expandActiveOrgUnits } from "./org-tree";
 import { loadGrants, loadSubjectState } from "./load-grants";
 import { isPermissionKey } from "./permission-catalog";
@@ -15,6 +16,9 @@ export interface ResolvedScope {
   ownEmployeeId: string | null;
   /** Set when an ASSIGNED scope applies: records assigned to this employee. */
   assignedEmployeeId: string | null;
+  /** Field sets revealed by the contributing grants (see `AccessDecision.fieldSets`). List routes
+   *  project each row with `projectFields` using this. */
+  fieldSets: string[];
 }
 
 export interface ScopeOptions {
@@ -32,6 +36,7 @@ export const EMPTY_SCOPE: ResolvedScope = {
   legalEntityIds: [],
   ownEmployeeId: null,
   assignedEmployeeId: null,
+  fieldSets: [],
 };
 
 /**
@@ -74,6 +79,7 @@ export async function resolveScope(
     legalEntityIds: [...new Set(scopes.flatMap((s) => (s.type === "LEGAL_ENTITY" && s.legalEntityId ? [s.legalEntityId] : [])))],
     ownEmployeeId: scopes.some((s) => s.type === "OWN") ? state.employeeId : null,
     assignedEmployeeId: scopes.some((s) => s.type === "ASSIGNED") ? state.employeeId : null,
+    fieldSets: [...new Set(grants.flatMap((grant) => (grant.conditions ? grantFieldSets(grant.conditions) : [])))],
   };
 }
 
@@ -89,9 +95,11 @@ export interface ScopeColumns<W extends object> {
 }
 
 /**
- * Builds the where-fragment for a resolved scope: `{}` for tenant-wide access, otherwise an `OR`
- * of the scope parts. No coverage yields `{ OR: [] }`, which matches no rows (fail closed).
- * Always AND the fragment with the caller's own filters; never fetch-then-filter (PERMISSIONS.md 4).
+ * Builds the where-fragment for a resolved scope: `{}` for tenant-wide access, otherwise
+ * `{ AND: [{ OR: parts }] }`. No coverage yields `{ AND: [{ id: { in: [] } }] }`, which matches no rows
+ * (fail closed). The OR is nested in an AND on purpose: a caller that spreads the fragment next to
+ * its own `OR` key would silently overwrite a top-level OR and widen access to the whole tenant.
+ * Combine with caller filters through `withinScope`, never by spreading.
  */
 export function buildScopeWhere<W extends object>(scope: ResolvedScope, columns: ScopeColumns<W>, now: Date): W {
   if (scope.tenantWide) return {} as W;
@@ -100,8 +108,16 @@ export function buildScopeWhere<W extends object>(scope: ResolvedScope, columns:
   if (scope.legalEntityIds.length > 0 && columns.legalEntity) parts.push(columns.legalEntity(scope.legalEntityIds, now));
   if (scope.ownEmployeeId && columns.own) parts.push(columns.own(scope.ownEmployeeId, now));
   if (scope.assignedEmployeeId && columns.assigned) parts.push(columns.assigned(scope.assignedEmployeeId, now));
-  // `OR` is a where-clause key on every Prisma model, so this is a valid fragment of W.
-  return { OR: parts } as unknown as W;
+  // `AND`/`OR`/`id` are where-clause keys on every Prisma model, so these are valid fragments of W.
+  // No parts: `OR: []` nested in an AND matches EVERYTHING in Prisma, so deny with an explicit
+  // empty `id IN ()` instead (fail closed).
+  if (parts.length === 0) return { AND: [{ id: { in: [] } }] } as unknown as W;
+  return { AND: [{ OR: parts }] } as unknown as W;
+}
+
+/** Combines a scope fragment with the caller's own filter so that neither can overwrite the other. */
+export function withinScope<W extends object>(scopeWhere: W, callerWhere: W): W {
+  return { AND: [scopeWhere, callerWhere] } as unknown as W;
 }
 
 /**

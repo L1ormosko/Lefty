@@ -1,12 +1,18 @@
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
+import { SENSITIVE_FIELD_CATEGORIES } from "./permission-catalog";
+
+/** Field set of every non-sensitive field of a record. Sensitive sets are never part of it. */
+export const BASE_FIELD_SET = "base";
+
+const SENSITIVE_TAGS: ReadonlySet<string> = new Set(SENSITIVE_FIELD_CATEGORIES.map((category) => category.tag));
 
 /**
- * Qualifiers stored in `RolePermission.conditions` for the "Limited" cells of the §4.5 matrix.
+ * Qualifiers stored in `RolePermission.conditions` for the "Limited" cells of the 4.5 matrix.
  *
- * - `fields`: the grant reveals ONLY this field set (e.g. Finance sees `financial` fields of
- *   employees; a Dispatcher sees `availability`).
- * - `excludeFields`: the grant reveals everything EXCEPT these field sets (HR: no `financial`).
+ * - `fields`: the grant reveals ONLY this field set (Finance: `financial`; Dispatcher: `availability`).
+ * - `includeFields`: the grant reveals the base fields PLUS these sensitive sets. Sensitive
+ *   categories (financial, billing) are OPT-IN: without a grant naming them they stay hidden.
  * - `set`: the grant covers only records of this named set (e.g. `job_related` customers). The
  *   caller supplies the sets a record belongs to (`ResourceRef.sets`).
  *
@@ -16,7 +22,7 @@ import type { Prisma } from "@prisma/client";
 const conditionsSchema = z
   .object({
     fields: z.string().min(1).optional(),
-    excludeFields: z.array(z.string().min(1)).optional(),
+    includeFields: z.array(z.string().min(1)).optional(),
     set: z.string().min(1).optional(),
   })
   .strict();
@@ -30,9 +36,19 @@ export function parseConditions(raw: Prisma.JsonValue | null | undefined): Grant
   return parsed.success ? parsed.data : null;
 }
 
-/** Whether a grant with these conditions reveals the field set `tag`. */
-export function conditionsAllowFieldSet(conditions: GrantConditions, tag: string): boolean {
-  if (conditions.fields !== undefined && conditions.fields !== tag) return false;
-  if (conditions.excludeFields?.includes(tag)) return false;
-  return true;
+/** The field sets a grant with these conditions reveals (or lets the holder change). */
+export function grantFieldSets(conditions: GrantConditions): string[] {
+  if (conditions.fields !== undefined) return [conditions.fields];
+  return [BASE_FIELD_SET, ...(conditions.includeFields ?? [])];
+}
+
+/**
+ * Whether a holder of field sets `held` may hand out a grant that reveals `required`.
+ * Non-sensitive sets (availability, execution...) are covered by `base`; sensitive sets need to be
+ * held explicitly.
+ */
+export function fieldSetsCover(held: string[], required: string[]): boolean {
+  return required.every(
+    (tag) => held.includes(tag) || (tag !== BASE_FIELD_SET && !SENSITIVE_TAGS.has(tag) && held.includes(BASE_FIELD_SET)),
+  );
 }

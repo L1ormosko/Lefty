@@ -59,6 +59,52 @@ describe("requirePermission wired into defineRoute", () => {
     expect((await denied.json()).error.code).toBe("FORBIDDEN");
   });
 
+  it("answers 404, not 403, when a condition rules the record out (existence is not confirmed)", async () => {
+    const route = defineRoute({
+      authenticate: async () => w.dispatcher.actor,
+      // Dispatcher may view only job-related customers; this record is not in that set.
+      authorize: requirePermission("customers.view", () => ({ orgUnitId: w.units.cityA, sets: [] })),
+      handler: async () => ok({}),
+    });
+    const response = await route(new Request("http://localhost/api/v1/customers/1"));
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe("NOT_FOUND");
+  });
+
+  it("checks the capability before running the resolver, and treats a null record as 404", async () => {
+    let resolverCalls = 0;
+    const denied = defineRoute({
+      authenticate: async () => w.finance.actor,
+      authorize: requirePermission("dispatch.view", () => {
+        resolverCalls += 1;
+        return { orgUnitId: w.units.cityA };
+      }),
+      handler: async () => ok({}),
+    });
+    expect((await denied(new Request("http://localhost/api/v1/x"))).status).toBe(403);
+    expect(resolverCalls).toBe(0);
+
+    // The resolver reads inside the same transaction and signals "not found" with null.
+    const missing = defineRoute({
+      authenticate: async () => w.ceo.actor,
+      authorize: requirePermission("employees.view", async (_actor, _input, tx) => {
+        const employee = await tx.employee.findFirst({ where: { id: "nope" }, select: { id: true } });
+        return employee ? { employeeId: employee.id } : null;
+      }),
+      handler: async () => ok({}),
+    });
+    expect((await missing(new Request("http://localhost/api/v1/x"))).status).toBe(404);
+  });
+
+  it("does not let an undefined attribute turn a record into a tenant-level one", async () => {
+    const route = defineRoute({
+      authenticate: async () => w.ceo.actor,
+      authorize: requirePermission("employees.view", () => ({ orgUnitId: undefined })),
+      handler: async () => ok({}),
+    });
+    expect((await route(new Request("http://localhost/api/v1/x"))).status).toBe(404);
+  });
+
   it("records every denial in the audit log with outcome DENIED", async () => {
     const person = await createPerson(w.tenantId, "denied-audit", { withEmployee: false });
     const strict = defineRoute({

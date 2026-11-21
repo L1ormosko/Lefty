@@ -62,8 +62,12 @@ platform modules not in the 4.5 table (see section 5).
 ### 3.1 Sensitive field categories
 
 Field-level protection inside a module's records (spec 4.2 "sensitive data category"). Defined in code
-as `SENSITIVE_FIELD_CATEGORIES`; checked with `canViewFields`, which needs the module's `view` on the
-record plus a grant whose conditions do not hide the set.
+as `SENSITIVE_FIELD_CATEGORIES`. Sensitive sets are **opt-in**: a plain grant (no conditions) reveals
+the `base` (non-sensitive) fields only; a sensitive set is visible only to a grant that names it
+(`includeFields` or `fields`). `can()` returns the permitted `fieldSets` (`base`, `financial`,
+`availability`...) and routes MUST project records with `projectFields(record, decision, fieldMap)`.
+`canViewFields` answers "may this subject see this category of this record". Only the Owner/CEO
+(`includeFields`) and the Finance Director (`fields`) hold the financial/billing sets by default.
 
 | Category | Module | Field set tag |
 |---|---|---|
@@ -76,11 +80,11 @@ record plus a grant whose conditions do not hide the set.
 | Key | Meaning |
 |---|---|
 | `fields: "x"` | The grant reveals only field set `x` (Finance: `financial`; Dispatcher: `availability`). |
-| `excludeFields: ["x"]` | The grant reveals everything except these field sets (HR: `financial`). |
+| `includeFields: ["x"]` | The grant reveals the base fields plus these sensitive sets (Owner: `financial`, `billing`). |
 | `set: "x"` | The grant covers only records of named set `x` (`job_related`, `lead_team`...). The caller states which sets a record belongs to; list filters ignore the grant unless the caller passes `satisfiedSets`. |
 
-Unknown keys make the grant unusable (fail closed). A `fields`-limited grant still passes the
-capability check for its action; sensitive field sets are gated with `canViewFields`.
+Unknown keys make the grant unusable (fail closed). A `fields`-limited grant still returns
+`allowed: true` for its action, with only its own `fieldSets`: the response must be projected.
 
 ## 4. Scopes (ABAC)
 
@@ -140,7 +144,7 @@ Cell vocabulary from the spec -> grants:
 | Dispatch | `dispatch.*` T | `dispatch.*` T | - | view, create, edit, assign ORG_UNIT | same | `dispatch.*` T | view (limited) ORG_UNIT | view OWN |
 | Jobs | `jobs.*` T | `jobs.*` T | view cond `{fields:"financial"}` T | view, create, edit, assign ORG_UNIT | same | view, create, edit, assign (operational fields) T | view cond `{set:"recovery_related"}` | view, edit (execution) ASSIGNED |
 | Compensation | `compensation.*` T | view T | `compensation.*` T | configurable (default view ORG_UNIT) | view (limited) ORG_UNIT | - | - | view OWN (own statements) |
-| Financial reports | view, export T | view T | view, export T | view ORG_UNIT | view (limited) ORG_UNIT | - | - | view OWN (own summary) |
+| Financial reports | view, export T | view T | view, export T | view ORG_UNIT | view (limited) ORG_UNIT | - | - | - (self-service, not the module permission) |
 | Performance | view, export T | view T | - | view ORG_UNIT | view ORG_UNIT | - | view cond `{set:"lead_team"}` | view OWN |
 | Permissions | `permissions.*` T | view, assign (limited, non-sensitive roles) | - | - | - | - | - | - |
 
@@ -160,6 +164,20 @@ any role holding `permissions.manage`, `permissions.assign` or a `*.configure` p
 COO template MFA-required too). Authentication enforces it at login; the authz engine exposes it as
 `via.requiresMfa`.
 
+**Granting roles (anti-escalation).** `assignRole(tx, actor, input)` is the only request-path way to
+grant a role. The actor must not be the target, must hold `permissions.assign` over scopes covering
+every scope granted (a `non_sensitive_roles`-qualified grant, as the COO's, never covers a role that
+`requiresMfa` or contains a sensitive permission), and must hold EVERY permission of the role over
+those scopes, including its field sets (sensitive sets must be held explicitly). Seeds and tenant
+bootstrap use the actor-less `bootstrapRoleAssignment`.
+
+**Technician.** No `financial_reports` permission: own statements and summary are self-service
+through `compensation.view` with `OWN` scope, not the module permission (the matrix cell "own
+summary" is delivered by the future self-service endpoint).
+
+**Diagnostics.** `explainAccess(actor, targetUserId, permission, resource?)` requires the actor to
+hold `permissions.view` (403) and the target user/record to be inside the actor's scope (404).
+
 **Duplicate assignments.** `assignRole` rejects a second active assignment of the same (user, role,
 scope) over an overlapping period (service check with an advisory lock; not expressible as a DB
 constraint because scopes are a child table).
@@ -172,7 +190,7 @@ confirmation in `DECISIONS.md`:
 | Regional Manager | State Manager | ORG_UNIT (region) |
 | Team Leader | City Manager, read-mostly | ORG_UNIT (team) |
 | Customer Relations | Customers scoped + leads view | ORG_UNIT |
-| HR Manager | employees.* (incl. training/cert records later), no financial fields | TENANT |
+| HR Manager | employees.* (incl. training/cert records later), base fields only (financial fields are opt-in) | TENANT |
 
 Platform modules (not in 4.5): `users` and `audit` follow `permissions`/`company_settings`
 (CEO full; others none by default); `localization` view for everyone, edit/configure for CEO.

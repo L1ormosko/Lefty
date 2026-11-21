@@ -5,11 +5,12 @@ import {
   canViewFields,
   explainAccess,
   PERMISSION_CATALOG,
+  projectFields,
   permissionKey,
 } from "@/server/authz";
-import { ForbiddenError } from "@/server/core";
+import { ForbiddenError, NotFoundError } from "@/server/core";
 import { withTenant } from "@/server/db";
-import { buildWorld, createPerson, disconnect, grantTemplate, toActor, type World } from "./fixtures";
+import { buildWorld, createPerson, disconnect, grantTemplate, makeRole, toActor, type World } from "./fixtures";
 
 let w: World;
 
@@ -26,7 +27,7 @@ describe("spec 26.3 permission acceptance", () => {
     expect(own).toMatchObject({ allowed: true, reason: "GRANTED" });
 
     const other = await can(w.cityManagerA.actor, "employees.view", { employeeId: w.techB.employeeId! });
-    expect(other).toEqual({ allowed: false, reason: "OUT_OF_SCOPE", via: null });
+    expect(other).toEqual({ allowed: false, reason: "OUT_OF_SCOPE", via: null, fieldSets: [] });
   });
 
   it("scope covers descendants: a city manager reaches a team below the city", async () => {
@@ -238,31 +239,66 @@ describe("conditions and sensitive fields", () => {
     expect(outOfSet).toMatchObject({ allowed: false, reason: "CONDITION_NOT_MET" });
   });
 
-  it("financial fields of employees: Owner, Finance and managers yes; HR, Dispatcher, Technician no", async () => {
+  it("sensitive employee fields are opt-in: only Owner and Finance see financial fields", async () => {
     const target = { employeeId: w.techA1.employeeId! };
     const allowed = async (person: { actor: typeof w.ceo.actor }) =>
       (await canViewFields(person.actor, "employees.financial_fields", target)).allowed;
 
     expect(await allowed(w.ceo)).toBe(true);
     expect(await allowed(w.finance)).toBe(true);
-    expect(await allowed(w.cityManagerA)).toBe(true);
-    expect(await allowed(w.hr)).toBe(false); // HR sees employees, but not their financial fields
+    expect(await allowed(w.cityManagerA)).toBe(false); // plain view reveals base fields only
+    expect(await allowed(w.stateManager)).toBe(false);
+    expect(await allowed(w.hr)).toBe(false); // HR sees personal fields, not pay
     expect(await allowed(w.dispatcher)).toBe(false); // availability only
     expect(await allowed(w.techA1Other)).toBe(false); // someone else's record
     expect((await can(w.hr.actor, "employees.view", target)).allowed).toBe(true);
   });
 
-  it("billing fields of customers are visible to Finance but not to the Technician", async () => {
+  it("billing fields of customers are opt-in: Owner and Finance only", async () => {
     expect((await canViewFields(w.finance.actor, "customers.billing_fields", {})).allowed).toBe(true);
+    expect((await canViewFields(w.ceo.actor, "customers.billing_fields", {})).allowed).toBe(true);
+    expect((await canViewFields(w.cityManagerA.actor, "customers.billing_fields", { orgUnitId: w.units.cityA })).allowed).toBe(false);
     expect(
       (await canViewFields(w.techA1.actor, "customers.billing_fields", { assignedEmployeeIds: [w.techA1.employeeId!] })).allowed,
     ).toBe(false);
+  });
+
+  it("can() reports the permitted field sets so routes can project", async () => {
+    const target = { employeeId: w.techA1.employeeId! };
+    expect((await can(w.ceo.actor, "employees.view", target)).fieldSets.sort()).toEqual(["base", "financial"]);
+    expect((await can(w.cityManagerA.actor, "employees.view", target)).fieldSets).toEqual(["base"]);
+    // Field-limited grants are "allowed" but only for their own field set.
+    expect(await can(w.finance.actor, "employees.view", target)).toMatchObject({ allowed: true, fieldSets: ["financial"] });
+    expect(await can(w.dispatcher.actor, "employees.view", target)).toMatchObject({ allowed: true, fieldSets: ["availability"] });
+    expect((await can(w.cityManagerB.actor, "employees.view", target)).fieldSets).toEqual([]);
+  });
+
+  it("projectFields keeps only the permitted field sets and fails closed on denial", async () => {
+    const record = { name: "Ann", salary: 100, bankAccount: "X", availability: "mon-fri" };
+    const map = { salary: "financial", bankAccount: "financial", availability: "availability" };
+    const target = { employeeId: w.techA1.employeeId! };
+
+    const asOwner = projectFields(record, await can(w.ceo.actor, "employees.view", target), map);
+    expect(asOwner).toEqual({ name: "Ann", salary: 100, bankAccount: "X" });
+    expect(projectFields(record, await can(w.cityManagerA.actor, "employees.view", target), map)).toEqual({ name: "Ann" });
+    expect(projectFields(record, await can(w.finance.actor, "employees.view", target), map)).toEqual({ salary: 100, bankAccount: "X" });
+    expect(projectFields(record, await can(w.dispatcher.actor, "employees.view", target), map)).toEqual({ availability: "mon-fri" });
+    expect(projectFields(record, await can(w.cityManagerB.actor, "employees.view", target), map)).toEqual({});
+  });
+
+  it("a Technician holds no financial_reports permission (own statements are self-service)", async () => {
+    expect(await can(w.techA1.actor, "financial_reports.view")).toMatchObject({ allowed: false, reason: "NO_PERMISSION" });
+  });
+
+  it("an explicitly-undefined resource attribute fails closed instead of becoming tenant-level", async () => {
+    expect(await can(w.ceo.actor, "employees.view", { orgUnitId: undefined })).toMatchObject({ allowed: false, reason: "RESOURCE_NOT_FOUND" });
+    expect(await can(w.ceo.actor, "employees.view", { employeeId: undefined })).toMatchObject({ allowed: false, reason: "RESOURCE_NOT_FOUND" });
   });
 });
 
 describe("explainAccess", () => {
   it("names the role, assignment and scope that allow access", async () => {
-    const result = await explainAccess(w.cityManagerA.actor, "employees.view", { employeeId: w.techA1.employeeId! });
+    const result = await explainAccess(w.ceo.actor, w.cityManagerA.userId, "employees.view", { employeeId: w.techA1.employeeId! });
     expect(result.decision.allowed).toBe(true);
     expect(result.summary).toContain("City Manager");
     expect(result.assignments).toHaveLength(1);
@@ -270,7 +306,7 @@ describe("explainAccess", () => {
   });
 
   it("explains an out-of-scope denial and an expired grant", async () => {
-    const outOfScope = await explainAccess(w.cityManagerA.actor, "employees.view", { employeeId: w.techB.employeeId! });
+    const outOfScope = await explainAccess(w.ceo.actor, w.cityManagerA.userId, "employees.view", { employeeId: w.techB.employeeId! });
     expect(outOfScope.decision.reason).toBe("OUT_OF_SCOPE");
     expect(outOfScope.assignments[0].scopes[0]).toMatchObject({ matched: false });
     expect(outOfScope.assignments[0].scopes[0].detail).toMatch(/outside/i);
@@ -283,7 +319,7 @@ describe("explainAccess", () => {
         data: { effectiveFrom: new Date(Date.now() - 2 * HOUR), effectiveTo: new Date(Date.now() - HOUR) },
       }),
     );
-    const expired = await explainAccess(person.actor, "dispatch.view");
+    const expired = await explainAccess(w.ceo.actor, person.userId, "dispatch.view");
     expect(expired.decision.reason).toBe("NO_PERMISSION");
     expect(expired.assignments[0]).toMatchObject({ status: "EXPIRED" });
   });
@@ -291,8 +327,34 @@ describe("explainAccess", () => {
   it("reports an inactive account", async () => {
     const person = await createPerson(w.tenantId, "explain-locked", { withEmployee: false });
     await withTenant(w.tenantId, (tx) => tx.user.update({ where: { id: person.userId }, data: { status: "LOCKED" } }));
-    const result = await explainAccess(person.actor, "dispatch.view");
+    const result = await explainAccess(w.ceo.actor, person.userId, "dispatch.view");
     expect(result).toMatchObject({ accountActive: false, decision: { reason: "USER_NOT_ACTIVE" } });
+  });
+
+  it("is gated: needs permissions.view (403), and target and record inside the actor's scope (404)", async () => {
+    // No permissions.view at all.
+    await expect(explainAccess(w.cityManagerA.actor, w.techA1.userId, "jobs.view")).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(explainAccess(w.techA1.actor, w.techA1.userId, "jobs.view")).rejects.toBeInstanceOf(ForbiddenError);
+
+    // permissions.view scoped to city A: sees users inside it, not users elsewhere, not unknown/foreign ids.
+    const auditorRole = await makeRole(w.tenantId, "Auditor A", [{ permission: "permissions.view" }]);
+    const auditor = await createPerson(w.tenantId, "scoped-auditor", { withEmployee: false });
+    await grantTemplate(w.tenantId, auditor, auditorRole, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
+
+    // The auditor has no employee, so a tenant-level target (CEO has no employee) is out of reach too.
+    await expect(explainAccess(auditor.actor, w.techB.userId, "jobs.view")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(explainAccess(auditor.actor, w.ceo.userId, "jobs.view")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(explainAccess(auditor.actor, "no-such-user", "jobs.view")).rejects.toBeInstanceOf(NotFoundError);
+    const inside = await explainAccess(auditor.actor, w.techA1.userId, "jobs.view");
+    expect(inside.accountActive).toBe(true);
+    // A record outside the actor's scope is also hidden.
+    await expect(
+      explainAccess(auditor.actor, w.techA1.userId, "jobs.view", { employeeId: w.techB.employeeId! }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    // Another tenant's user is simply not found.
+    const other = await buildWorld("authz-explain-other");
+    await expect(explainAccess(w.ceo.actor, other.techA1.userId, "jobs.view")).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

@@ -37,7 +37,7 @@ const scopeKey = (scope: { type: ScopeType; legalEntityId?: string | null; orgUn
   ].join("|");
 
 /** Mirrors the `access_scope_target` CHECK so callers get a clean 400 instead of a database error. */
-function validateScopes(scopes: ScopeInput[]): void {
+export function validateScopes(scopes: ScopeInput[]): void {
   if (scopes.length === 0) throw new ValidationError({ message: "A role assignment needs at least one scope.", field: "scopes" });
   for (const scope of scopes) {
     const needsEntity = scope.type === "LEGAL_ENTITY";
@@ -55,6 +55,9 @@ const overlaps = (aFrom: Date, aTo: Date | null, bFrom: Date, bTo: Date | null):
   aFrom < (bTo ?? new Date(8.64e15)) && bFrom < (aTo ?? new Date(8.64e15));
 
 /**
+ * SYSTEM-LEVEL grant: no granting actor, no privilege checks. Only for seeds, tenant bootstrap
+ * (the first Owner) and tests. Request paths must use `assignRole`, which enforces who may grant what.
+ *
  * Grants `roleId` to a user with the given data scopes and optional validity window, and audits it.
  *
  * Duplicate guard (T1 review): the same (user, role, scope) must not be active twice over
@@ -69,7 +72,7 @@ const overlaps = (aFrom: Date, aTo: Date | null, bFrom: Date, bTo: Date | null):
  * @throws ValidationError for malformed scopes or dates, NotFoundError for an unknown
  *   user/role/org unit/legal entity in this tenant, ConflictError for a duplicate.
  */
-export async function assignRole(tx: TenantTx, input: AssignRoleInput): Promise<{ roleAssignmentId: string }> {
+export async function bootstrapRoleAssignment(tx: TenantTx, input: AssignRoleInput): Promise<{ roleAssignmentId: string }> {
   const effectiveFrom = input.effectiveFrom ?? new Date();
   const effectiveTo = input.effectiveTo ?? null;
   if (effectiveTo !== null && effectiveTo <= effectiveFrom) {

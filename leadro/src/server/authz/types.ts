@@ -60,4 +60,11 @@ export interface AccessDecision {
   allowed: boolean;
   reason: AccessReason;
   via: AccessVia | null;
+  /**
+   * Field sets the subject may see or change on the record, unioned over every grant that matched:
+   * `base` (all non-sensitive fields), sensitive sets such as `financial`, or a limited set such as
+   * `availability`. Empty when denied. ROUTES MUST PROJECT THE RESPONSE FROM IT (`projectFields`):
+   * `allowed: true` on a field-limited grant does not mean the whole record may be returned.
+   */
+  fieldSets: string[];
 }

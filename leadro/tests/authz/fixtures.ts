@@ -1,7 +1,7 @@
 import type { ScopeType } from "@prisma/client";
 import type { Actor } from "@/server/core";
 import { prisma, withTenant } from "@/server/db";
-import { assignRole, provisionRoleTemplates } from "@/server/authz";
+import { bootstrapRoleAssignment, provisionRoleTemplates } from "@/server/authz";
 import { createTenant } from "../helpers";
 
 export interface Person {
@@ -82,9 +82,27 @@ export async function grantTemplate(
   window: { effectiveFrom?: Date; effectiveTo?: Date } = {},
 ): Promise<string> {
   const { roleAssignmentId } = await withTenant(tenantId, (tx) =>
-    assignRole(tx, { tenantId, userId: person.userId, roleId, scopes, ...window }),
+    bootstrapRoleAssignment(tx, { tenantId, userId: person.userId, roleId, scopes, ...window }),
   );
   return roleAssignmentId;
+}
+
+/** Creates a custom (non-template) role holding exactly the given permissions. */
+export async function makeRole(
+  tenantId: string,
+  name: string,
+  grants: Array<{ permission: string; conditions?: Record<string, unknown> }>,
+): Promise<string> {
+  return withTenant(tenantId, async (tx) => {
+    const role = await tx.role.create({ data: { tenantId, name: `${name} ${Date.now()}-${counter++}` } });
+    for (const grant of grants) {
+      const permission = await tx.permission.findUniqueOrThrow({ where: { key: grant.permission } });
+      await tx.rolePermission.create({
+        data: { tenantId, roleId: role.id, permissionId: permission.id, conditions: grant.conditions as never },
+      });
+    }
+    return role.id;
+  });
 }
 
 export async function buildWorld(label = "authz"): Promise<World> {

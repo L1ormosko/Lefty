@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { employeeScopeColumns, orgUnitScopeColumns, scopeFilter } from "@/server/authz";
+import { employeeScopeColumns, orgUnitScopeColumns, scopeFilter, withinScope } from "@/server/authz";
 import { withTenant } from "@/server/db";
 import { buildWorld, createPerson, disconnect, grantTemplate, type World } from "./fixtures";
 
 let w: World;
+// Matches no rows. NOT `{ OR: [] }` nested in AND: Prisma treats that as "match everything".
+const DENY_ALL = { AND: [{ id: { in: [] } }] };
 
 beforeAll(async () => {
   w = await buildWorld("authz-scope");
@@ -42,8 +44,27 @@ describe("scopeFilter over employees", () => {
   });
 
   it("a user with no grant gets a fragment that matches nothing", async () => {
-    expect(await scopeFilter(w.finance.actor, "dispatch.view", employeeScopeColumns)).toEqual({ OR: [] });
+    expect(await scopeFilter(w.finance.actor, "dispatch.view", employeeScopeColumns)).toEqual(DENY_ALL);
     expect(await visibleEmployeeIds(w.finance.actor, "dispatch.view")).toEqual([]);
+  });
+
+  it("combining with a caller filter that has its own OR still narrows to the scope", async () => {
+    const scopeWhere = await scopeFilter(w.cityManagerA.actor, "employees.view", employeeScopeColumns);
+    // The caller's OR would match employees of city B too, e.g. "name contains Test".
+    const callerWhere = { OR: [{ lastName: "Test" }, { firstName: "tech-b" }] };
+
+    // Spreading would overwrite the scope's OR (the original bug); withinScope must not.
+    const rows = await withTenant(w.tenantId, (tx) =>
+      tx.employee.findMany({ where: withinScope(scopeWhere, callerWhere), select: { id: true } }),
+    );
+    expect(rows.map((r) => r.id).sort()).toEqual(ids(w.cityManagerA, w.techA1, w.techA1Other));
+
+    // A user with no scope stays empty whatever the caller asks for.
+    const none = await scopeFilter(w.finance.actor, "dispatch.view", employeeScopeColumns);
+    const empty = await withTenant(w.tenantId, (tx) =>
+      tx.employee.findMany({ where: withinScope(none, callerWhere), select: { id: true } }),
+    );
+    expect(empty).toEqual([]);
   });
 
   it("archived units drop out of the filter, and so do their employees", async () => {
@@ -73,7 +94,7 @@ describe("scopeFilter over employees", () => {
         data: { effectiveFrom: new Date(Date.now() - 7_200_000), effectiveTo: new Date(Date.now() - 3_600_000) },
       }),
     );
-    expect(await scopeFilter(world.cityManagerA.actor, "employees.view", employeeScopeColumns)).toEqual({ OR: [] });
+    expect(await scopeFilter(world.cityManagerA.actor, "employees.view", employeeScopeColumns)).toEqual(DENY_ALL);
   });
 
   it("a LEGAL_ENTITY scope selects by legal employer", async () => {
@@ -90,10 +111,10 @@ describe("scopeFilter over employees", () => {
 
   it("set-qualified grants are ignored unless the caller states it already restricts to that set", async () => {
     const without = await scopeFilter(w.dispatcher.actor, "customers.view", orgUnitScopeColumns);
-    expect(without).toEqual({ OR: [] });
+    expect(without).toEqual(DENY_ALL);
     const withSet = await scopeFilter(w.dispatcher.actor, "customers.view", orgUnitScopeColumns, {
       satisfiedSets: ["job_related"],
     });
-    expect(withSet).toMatchObject({ OR: [{ id: { in: expect.arrayContaining([w.units.cityA, w.units.teamA1]) } }] });
+    expect(withSet).toMatchObject({ AND: [{ OR: [{ id: { in: expect.arrayContaining([w.units.cityA, w.units.teamA1]) } }] }] });
   });
 });

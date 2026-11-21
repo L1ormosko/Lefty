@@ -60,6 +60,18 @@ describe("role template definitions", () => {
     expect(templateRequiresMfa("CUSTOM", [{ permission: "jobs.view" }])).toBe(false);
   });
 
+  it("hands out sensitive field sets only to Owner/CEO and Finance Director (opt-in)", () => {
+    const naming = ROLE_TEMPLATES.filter((t) =>
+      t.grants.some((g) => g.conditions?.includeFields?.length || ["financial", "billing"].includes(g.conditions?.fields ?? "")),
+    ).map((t) => t.key);
+    expect(naming.sort()).toEqual(["FINANCE_DIRECTOR", "OWNER_CEO"]);
+  });
+
+  it("gives the Technician no financial_reports permission", () => {
+    expect(holds("TECHNICIAN", "financial_reports.view")).toBe(false);
+    expect(holds("TECHNICIAN", "compensation.view")).toBe(true);
+  });
+
   it("follows the 4.5 matrix for the separation-critical cells", () => {
     // Finance does not gain operational management (spec 4.4).
     for (const p of ["dispatch.view", "jobs.edit", "organization.view", "leads.view"]) expect(holds("FINANCE_DIRECTOR", p), p).toBe(false);

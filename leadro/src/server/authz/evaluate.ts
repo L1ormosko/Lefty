@@ -1,5 +1,5 @@
 import type { TenantTx } from "@/server/db";
-import type { GrantConditions } from "./conditions";
+import { grantFieldSets } from "./conditions";
 import { expandActiveOrgUnits } from "./org-tree";
 import { loadGrants, loadSubjectState, type LoadedGrant, type LoadedScope, type SubjectState } from "./load-grants";
 import { resolveResource, type ResolvedResource } from "./resolve-resource";
@@ -28,12 +28,7 @@ export interface AccessEvaluation {
   evaluations: GrantEvaluation[];
 }
 
-export interface EvaluateOptions {
-  /** Extra grant-condition test, e.g. "does this grant reveal the financial field set". */
-  conditionCheck?: (conditions: GrantConditions) => boolean;
-}
-
-const deny = (reason: AccessReason): AccessDecision => ({ allowed: false, reason, via: null });
+const deny = (reason: AccessReason): AccessDecision => ({ allowed: false, reason, via: null, fieldSets: [] });
 
 function buildVia(grant: LoadedGrant, scope: LoadedScope): AccessVia {
   return {
@@ -122,7 +117,6 @@ export async function evaluateAccess(
   permissionKey: string,
   resource: ResourceRef | undefined,
   now: Date,
-  options: EvaluateOptions = {},
 ): Promise<AccessEvaluation> {
   const state = await loadSubjectState(tx, subject);
   if (!state.isActive) return { decision: deny("USER_NOT_ACTIVE"), subject: state, grants: [], evaluations: [] };
@@ -139,6 +133,7 @@ export async function evaluateAccess(
 
   const evaluations: GrantEvaluation[] = [];
   let decision: AccessDecision | null = null;
+  const fieldSets = new Set<string>();
   let sawConditionMet = false;
   let sawScope = false;
 
@@ -146,7 +141,6 @@ export async function evaluateAccess(
     const conditions = grant.conditions;
     const conditionMet =
       conditions !== null &&
-      (options.conditionCheck?.(conditions) ?? true) &&
       // A record-set qualifier can only be checked against a concrete record.
       (conditions.set === undefined || resolved === null || resolved.sets.includes(conditions.set));
     if (!conditionMet) {
@@ -163,12 +157,16 @@ export async function evaluateAccess(
         ? await matchScope(tx, subject.tenantId, scope, resolved, state.employeeId)
         : { scope, matched: true, detail: "Capability check: the grant has a data scope." };
       scopeResults.push(result);
-      if (result.matched && !decision) decision = { allowed: true, reason: "GRANTED", via: buildVia(grant, scope) };
+      if (result.matched && !decision) {
+        decision = { allowed: true, reason: "GRANTED", via: buildVia(grant, scope), fieldSets: [] };
+      }
+      // Union over every matching grant: a second role may reveal more fields than the first.
+      if (result.matched && conditions) for (const tag of grantFieldSets(conditions)) fieldSets.add(tag);
     }
     evaluations.push({ grant, conditionMet, scopes: scopeResults });
   }
 
-  if (decision) return { decision, subject: state, grants, evaluations };
+  if (decision) return { decision: { ...decision, fieldSets: [...fieldSets] }, subject: state, grants, evaluations };
   const reason: AccessReason = !sawConditionMet ? "CONDITION_NOT_MET" : !sawScope ? "NO_SCOPE" : "OUT_OF_SCOPE";
   return { decision: deny(reason), subject: state, grants, evaluations };
 }

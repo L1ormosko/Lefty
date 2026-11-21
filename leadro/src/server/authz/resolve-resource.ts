@@ -36,6 +36,12 @@ export async function resolveResource(
   ref: ResourceRef,
   now: Date,
 ): Promise<ResolvedResource | null> {
+  // Fail closed: a key that is present but empty (`{ orgUnitId: undefined }`, typically a missing
+  // lookup result) must not degrade into a tenant-level record that a TENANT scope would match.
+  for (const key of ["orgUnitId", "employeeId", "legalEntityId", "ownerEmployeeId"] as const) {
+    if (key in ref && (ref[key] === undefined || ref[key] === null)) return null;
+  }
+
   const orgUnitIds: string[] = [];
   const legalEntityIds: string[] = [];
   let ownerEmployeeId = ref.ownerEmployeeId ?? null;

@@ -192,3 +192,22 @@ No new dependencies (Zod already present). No schema change and no migration: ev
     `listAuditEvents` stays ungated for internal use.
 13. **Employee/org-unit scope column presets** (`employeeScopeColumns`, `orgUnitScopeColumns`) ship with the
     engine; other models define their own `ScopeColumns` when their modules arrive.
+
+### Task 4 fix round 1 (review findings)
+
+14. **Field sets are explicit and opt-in.** `AccessDecision.fieldSets` lists what a grant covers: a plain grant = `base`;
+    `includeFields` adds sensitive sets (`financial`, `billing`); `fields: x` = only set `x`. Union over matching grants.
+    `projectFields(record, decision, fieldMap)` is the projection helper; routes must use it. `excludeFields` is gone.
+    Only Owner/CEO and Finance Director hold financial/billing sets; HR gets base employee fields only (design call: §4.4
+    lists employee records, employment info, training, certifications and development, not pay).
+15. **Technician loses `financial_reports.view`** (ruling): own summary is self-service, not the module permission.
+16. **`requirePermission` order**: capability (403) -> resolver (same transaction, may return `null` = missing) -> check
+    against the record; once a record is involved every denial is 404. A resource key present but undefined/null
+    (`{ orgUnitId: undefined }`) fails closed as RESOURCE_NOT_FOUND instead of becoming tenant-level.
+17. **`scopeFilter` shape**: `{ AND: [{ OR: parts }] }`; use `withinScope(scope, callerWhere)` to combine. No coverage is
+    `{ AND: [{ id: { in: [] } }] }` because a nested `OR: []` matches EVERYTHING in Prisma (found by a test).
+18. **`explainAccess(actor, targetUserId, permission, resource?)`** is gated inside the function (permissions.view + target and
+    record in the actor's scope; 403/404).
+19. **`assignRole(tx, actor, input)`** enforces anti-escalation (see PERMISSIONS.md); the actor-less variant is renamed
+    `bootstrapRoleAssignment` for seeds/tests only. Coverage rules: TENANT needs tenant-wide; ORG_UNIT needs the unit and its
+    active subtree inside the granter's scope; OWN/ASSIGNED need any scope of the granter; LEGAL_ENTITY needs that entity.
