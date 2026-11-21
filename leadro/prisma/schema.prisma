@@ -291,17 +291,18 @@ model User {
   createdAt          DateTime   @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime   @updatedAt @db.Timestamptz(3)
 
-  tenant             Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  employee           Employee?
-  sessions           Session[]
-  authEvents         AuthenticationEvent[]
-  roleAssignments    RoleAssignment[]           @relation("AssignmentUser")
-  grantedAssignments RoleAssignment[]           @relation("AssignmentGrantedBy")
-  revokedAssignments RoleAssignment[]           @relation("AssignmentRevokedBy")
-  resetTokens        PasswordResetToken[]
-  invitationsSent    Invitation[]
-  orgAssignmentsMade OrganizationalAssignment[] @relation("AssignmentCreatedBy")
-  translationsEdited TranslationResource[]
+  tenant               Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee             Employee?
+  sessions             Session[]
+  authEvents           AuthenticationEvent[]
+  roleAssignments      RoleAssignment[]           @relation("AssignmentUser")
+  grantedAssignments   RoleAssignment[]           @relation("AssignmentGrantedBy")
+  revokedAssignments   RoleAssignment[]           @relation("AssignmentRevokedBy")
+  resetTokens          PasswordResetToken[]
+  invitationsSent      Invitation[]
+  orgAssignmentsMade   OrganizationalAssignment[] @relation("AssignmentCreatedBy")
+  translationsEdited   TranslationResource[]      @relation("TranslationEditedBy")
+  translationsReviewed TranslationResource[]      @relation("TranslationReviewedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -541,17 +542,22 @@ model IdempotencyRecord {
 
 /// Optional per-tenant overrides of the built-in translation catalog.
 model TranslationResource {
-  id          String   @id @default(cuid())
-  tenantId    String
-  locale      String
-  key         String
-  value       String
-  updatedById String?
-  createdAt   DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  id           String    @id @default(cuid())
+  tenantId     String
+  locale       String
+  key          String
+  value        String
+  /// §16.6: only reviewed overrides are served. Any edit of `value` resets this to false.
+  reviewed     Boolean   @default(false)
+  reviewedAt   DateTime? @db.Timestamptz(3)
+  reviewedById String?
+  updatedById  String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
 
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  updatedBy User?  @relation(fields: [updatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  updatedBy  User?  @relation("TranslationEditedBy", fields: [updatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reviewedBy User?  @relation("TranslationReviewedBy", fields: [reviewedById, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
   @@unique([tenantId, locale, key])
