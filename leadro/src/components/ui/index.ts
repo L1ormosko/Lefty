@@ -23,4 +23,5 @@ export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./StatusBad
 export { TextInput, type TextInputProps } from "./TextInput";
 export { TopNav, type TopNavProps } from "./TopNav";
 export { UserProfileCard, type UserProfileCardProps } from "./UserProfileCard";
-export { buttonClasses } from "./cx";
+export { buttonClasses, cx, focusRing } from "./cx";
+export { AlertTriangleIcon, CheckCircleIcon, InfoIcon, XCircleIcon } from "./icons";
