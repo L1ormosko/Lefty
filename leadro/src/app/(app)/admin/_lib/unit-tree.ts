@@ -64,3 +64,17 @@ export function pathOf<U extends TreeUnit>(units: readonly U[], unitId: string):
   }
   return names;
 }
+
+/** The unit's ancestors, nearest first (parent, grandparent, ...), as far as the list reaches. */
+export function ancestorsOf<U extends TreeUnit>(units: readonly U[], unitId: string): U[] {
+  const byId = new Map(units.map((unit) => [unit.id, unit]));
+  const ancestors: U[] = [];
+  const seen = new Set<string>([unitId]);
+  for (let parentId = byId.get(unitId)?.parentId; parentId && !seen.has(parentId); parentId = byId.get(parentId)?.parentId) {
+    const parent = byId.get(parentId);
+    if (!parent) break;
+    seen.add(parentId);
+    ancestors.push(parent);
+  }
+  return ancestors;
+}
