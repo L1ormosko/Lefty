@@ -21,7 +21,7 @@ Vitest + Tailwind 3. Versions are pinned exactly in `package.json`.
 npm install
 cp .env.example .env
 npm run db:deploy        # apply migrations to the dev database `leadro`
-npm run seed             # permission catalog
+SEED_PASSWORD="<16+ chars, your choice>" npm run seed   # catalog + two demo tenants (see below)
 npm run dev
 ```
 
@@ -48,7 +48,16 @@ there only so `prisma migrate dev` can create its shadow database.
 | `npm run db:migrate` | `prisma migrate dev` (create/apply migrations in development) |
 | `npm run db:deploy` | `prisma migrate deploy` on the dev database |
 | `npm run db:migrate:test` | `prisma migrate deploy` on `leadro_test` (also done automatically by `npm test`) |
-| `npm run seed` | Seed the global permission catalog |
+| `npm run seed` | Dev seed: permission catalog + two demo tenants; needs `SEED_PASSWORD` (>= 16 chars, never printed), refuses in production |
+
+## Development seed
+
+`SEED_PASSWORD=... npm run seed` creates (idempotently, by company code) two fictional tenants, `acme-field` and
+`globex-home`, each with two legal entities, Texas/Florida/California, regions, cities, branches, teams and one ACTIVE
+user per role template (`owner@acme-field.example.test`, `city-manager@...`, `technician@...`, ...). Every user signs in
+with the company code, the email and `SEED_PASSWORD` (there is no default password; the value is hashed and never
+printed). Owner, Finance and HR roles require MFA, so set `LEADRO_ENCRYPTION_KEY` and enroll an authenticator on first
+login. Log in to one tenant and confirm you never see the other: that is the isolation check by hand.
 
 ## Tests
 

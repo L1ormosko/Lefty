@@ -302,3 +302,66 @@ No new dependencies (Zod already present). No schema change and no migration: ev
     keys are reserved ahead of their columns so they cannot leak by default.
 23. **Target in scope**: `assignRole` checks the target user (employee placement, or tenant-level when none) against the
     granter's `permissions.assign` via `canInTx`, passing `non_sensitive_roles` as the record set when the role is not sensitive.
+
+
+## Task 5 decisions (organization, employees, users, roles, seed, integration)
+
+### Integration items (Task 3 <-> 4 <-> 2)
+- **a. MFA policy**: `auth.userRequiresMfa` now delegates to `authz.holdsMfaRequiringRole`; `activeAssignmentWhere(now)` is the
+  single definition of an active assignment for Prisma queries (`load-grants.ts` classifies rows in memory with the same rules).
+- **b. Invitations -> authz**: `assignRole` was split into `assertMayGrantRole` (dry run) + write. Creation runs the dry run as
+  the inviter (target = linked employee, else the existing INVITED user's employee, else tenant-level, which needs a
+  tenant-wide `permissions.assign`). Acceptance calls `assignRole` AS the inviter, so authority is re-validated at that moment;
+  failures become the generic "invalid invitation" and roll back (the token is not consumed). The scope target must also still
+  be active (a tenant-wide inviter could otherwise grant over an archived unit; that would grant nothing). Inviter-less
+  (system) invitations use `bootstrapRoleAssignment`. `AuthNotifier` gained `sendInvitation` (default: logs, no token); the API
+  never returns the invitation token (otherwise an administrator could take over the account they invited).
+- **c. Context in hooks**: `defineRoute` passes `{ correlationId, sourceApp }` to `authenticate` and the full `RequestContext` to
+  `authorize`. `requirePermission` audits denials with that id; `authenticateRequest` uses it for `auth.access_denied`
+  (the raw header may be absent or malformed and was never the id the client received).
+- **d. Translation overrides**: kept `localization.edit` (save) and `localization.configure` (review, delete) instead of a new
+  `translations.manage` permission: the catalog already models edit vs configure, and two permissions keep the review step
+  meaningful. New `*AsActor` functions check the permission (tenant-level), audit in the same transaction and map
+  `TranslationOverrideError` to `ValidationError` / `NotFoundError` / `ConflictError`. No self-review rule is applied (a
+  single Owner holds both permissions and must be able to publish a translation); revisit if a stricter tenant wants it.
+- **e. API conventions**: the error table now lists exactly `ERROR_CODES` (a test parses the doc and compares codes and HTTP
+  statuses). Documented the cursor pagination actually implemented and that only the cookie transport exists.
+
+### Services and API
+- **Services re-check, routes gate**: every service function runs `enforceInTx` (permission + data scope) inside its own write
+  transaction; the route's `authorize` hook (`requirePermission` / `requireTenantLevelPermission`) is the early, audited gate.
+  The duplication is deliberate: services stay safe when called from anywhere and are TOCTOU-proof, routes get audited denials
+  (a denial thrown inside the write transaction would roll its own audit row back).
+- **Denial semantics**: no grant at all -> 403; a record outside scope -> 404 (existence not confirmed); tenant-level records
+  (company settings, roles, legal-entity writes, translations) -> 403 for non-tenant-wide holders; users outside scope -> 404
+  even when tenant-level (`enforceOnUser`).
+- **Org hierarchy rules** (`src/lib/org-hierarchy.ts`): BUSINESS_UNIT, STATE and REGION may be top-level; STATE under
+  BUSINESS_UNIT; REGION under BUSINESS_UNIT/STATE; CITY under STATE/REGION; BRANCH under CITY/REGION; DEPARTMENT under any
+  of BU..BRANCH; TEAM under BRANCH/CITY/DEPARTMENT. A default, kept as a constant; making it per-tenant means loading a map
+  of the same shape. The rule graph is acyclic (a test asserts it), so type rules alone already prevent cycles; the live-tree
+  cycle check and the DB trigger are defence in depth.
+- **Tree serialisation** (T1 review minor): a per-tenant `pg_advisory_xact_lock` taken first in create/update/move/archive.
+  Employee placement takes `FOR SHARE` on the destination unit row and archive takes `FOR UPDATE` before counting
+  placements, so an archive racing a placement cannot leave a person in an archived unit.
+- **Placements**: employee history lives in `OrganizationalAssignment` only; transfers close + insert; a new PRIMARY must start
+  after the current one started; only SECONDARY/TEMPORARY rows end early. The org tree's own history (which unit had which
+  parent in March) is NOT versioned: it is reconstructible from `org_unit.move` audit events only. Reports needing the tree
+  as-of a date need a later `OrgUnitParentHistory`; `orgUnitAt` gives the unit, not its ancestry then.
+- **Employees**: `terminate` rejects future dates (no scheduled terminations yet), deactivates the login and revokes sessions
+  in the same transaction. `email` uniqueness is not enforced on `Employee` (the schema has no constraint; logins are unique).
+- **Users**: no user creation endpoint (accounts come from invitations); no reactivate/unlock endpoints yet (deactivation is
+  one-way until a product decision); email change is out of scope (it is the login identifier).
+- **Roles**: `listRoles` uses `withinScope` with an empty column map, so only a TENANT scope matches: unit-scoped holders get an
+  empty page, not an error. Permission history = audit events targeting the role. A clone has no `templateKey`.
+- **Pagination**: keyset by row id (`cursor` = base64url id) over a fixed `orderBy` ending in id; one extra row fetched; cursors
+  must look like an id (a NUL-byte cursor was a 500 before this was validated).
+- **Idempotency-Key** is enabled on creating POSTs (units, legal entities, employees, assignments, roles, clones, grants,
+  invitations).
+- **Seed**: `prisma/seed.ts` + `prisma/seed/` (two tenants, 12 role templates each, explicit scopes). `SEED_PASSWORD` is required
+  (>= 16 chars, no default), is hashed once and never logged; the seed refuses `NODE_ENV=production`. `npm run seed` loads
+  `.env` through `tsx --env-file=.env` (Prisma's client does not read it under tsx).
+- No new dependencies, no new migrations.
+- **`next build` fix in core** (found while building the API; every `/api/v1` route failed Next's route type check):
+  `RouteHandler` is now an overloaded interface `(req)` + `(req, routeContext)` and `NextRouteContext.params` is required, because
+  Next's validator reads the last signature and rejects an optional second parameter. Direct callers (tests) may still call
+  `handler(req)`. `withSessionCookie` forwards accordingly. `npx next build` now passes with all routes.
