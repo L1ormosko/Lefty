@@ -138,3 +138,20 @@ No new dependencies (uses node:crypto, Zod, Prisma already in the stack).
    includes `tests/**/*.test.ts`.
 7. **Audit read API** is `listAuditEvents(tenantId, { filter, cursor, limit })`; it does no
    permission check (caller enforces `audit.read`, Task 4). Cursor is keyset on (occurredAt, id).
+
+## Task 7a — design-system primitives
+
+- **New dev dependencies (exact pins):** `@testing-library/react@16.3.3`, `@testing-library/user-event@14.6.13`,
+  `@testing-library/jest-dom@6.10.0`, `jsdom@25.0.1` (component tests need a DOM; jsdom 25 is the
+  line supported by Vitest 2.1), plus `@testing-library/dom@10.4.1` — a required peer dependency of
+  `@testing-library/react@16`, not an independent choice.
+- **Vitest environments:** default stays `node` (DB integration tests); component tests opt in with a
+  `// @vitest-environment jsdom` first line. `tests/setup-dom.ts` registers jest-dom matchers and
+  cleanup only when a DOM exists. `esbuild.jsx = "automatic"` is set because tsconfig uses `jsx: preserve`.
+- **Tailwind CSS entry:** `src/app/globals.css` is imported only by `src/app/dev/ui/layout.tsx` so this
+  task does not edit the root layout (owned by other tasks). The app shell task should import it from
+  the root layout and may then drop the dev import.
+- **Overlay `dir` prop:** portals render in `<body>` and inherit `<html dir>`; the optional `dir` prop on
+  Dialog/Drawer/ConfirmDialog exists only so the gallery's RTL preview section can show RTL overlays.
+- **No icon/class-name libraries:** a tiny inline icon set and `cx()` instead of lucide/clsx.
+- **Gallery strings** are hardcoded demo text (dev-only page); components themselves take all text via props.

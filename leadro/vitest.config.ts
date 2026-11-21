@@ -10,9 +10,14 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.TEST_DATABASE_URL = TEST_DATABASE_URL;
 
 export default defineConfig({
+  // tsconfig uses `jsx: preserve` for Next; Vitest needs the automatic React runtime for .tsx tests.
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    // Component tests opt into jsdom per file with `// @vitest-environment jsdom`; the default
+    // stays `node` so DB integration tests are unaffected.
+    include: ["tests/**/*.test.ts", "src/components/**/*.test.tsx"],
+    setupFiles: ["tests/setup-dom.ts"],
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 120_000,
