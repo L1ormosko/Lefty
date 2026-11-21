@@ -140,16 +140,21 @@ async function parseInput<S extends RouteSchemas>(
  * mapped by `toErrorResponse`, so no stack trace or internal message can reach the client.
  */
 export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: RouteDefinition<S>): RouteHandler {
+  // Wiring mistakes fail at definition (module load), not per request, so they can never reach a
+  // client and are caught by the first test/boot that imports the route.
+  if (definition.authorize && !definition.authenticate) {
+    throw new Error("defineRoute: `authorize` requires `authenticate` (there would be no actor to check)");
+  }
+  if (definition.idempotent && !definition.authenticate) {
+    throw new Error("defineRoute: `idempotent` requires `authenticate` (idempotency keys are per tenant)");
+  }
+
   return async (req, routeContext) => {
     const startedAt = Date.now();
     const correlationId = resolveCorrelationId(req.headers);
     let log = logger.child({ correlationId, method: req.method, path: new URL(req.url).pathname });
 
     try {
-      if (definition.authorize && !definition.authenticate) {
-        // Fail closed: an authorize hook without an actor to check is a wiring mistake.
-        throw new InternalError({ message: "authorize requires authenticate", cause: new Error("route misconfigured") });
-      }
       const actor = definition.authenticate ? await definition.authenticate(req) : null;
       if (definition.authenticate && !actor) throw new UnauthenticatedError();
       if (actor) log = log.child({ tenantId: actor.tenantId, userId: actor.userId });
@@ -163,9 +168,8 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
       const idempotencyKey = definition.idempotent ? req.headers.get(IDEMPOTENCY_HEADER) : null;
       let response: Response;
       if (idempotencyKey !== null) {
-        if (!actor) {
-          throw new InternalError({ message: "idempotent routes require authenticate", cause: new Error("route misconfigured") });
-        }
+        // Unreachable: defineRoute() rejects `idempotent` without `authenticate`, which yields an actor.
+        if (!actor) throw new InternalError({ cause: new Error("idempotent route ran without an actor") });
         const outcome = await withIdempotency(
           actor.tenantId,
           idempotencyKey,

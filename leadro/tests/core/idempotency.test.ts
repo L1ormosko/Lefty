@@ -116,6 +116,31 @@ describe("withIdempotency", () => {
     expect(replay).toEqual({ status: 204, body: null, replayed: true });
   });
 
+  it("returns the real response when storing it fails, and does not re-run fn for the in-flight window", async () => {
+    const key = uniqueKey();
+    let runs = 0;
+    const fn = async () => {
+      runs += 1;
+      // A cyclic body cannot be serialised, so persisting the response fails after fn succeeded.
+      const body: Record<string, unknown> = { id: "created" };
+      body.self = body;
+      return { status: 201, body };
+    };
+    const outcome = await withIdempotency(tenantA.id, key, scope(), fn);
+    expect(outcome).toMatchObject({ status: 201, replayed: false });
+    await expect(withIdempotency(tenantA.id, key, scope(), fn)).rejects.toMatchObject({ code: "CONFLICT", retryable: true });
+    expect(runs).toBe(1);
+  });
+
+  it("does not fail a successful request whose claim was taken over meanwhile", async () => {
+    const key = uniqueKey();
+    const outcome = await withIdempotency(tenantA.id, key, scope(), async () => {
+      await withTenant(tenantA.id, (tx) => tx.idempotencyRecord.deleteMany({ where: { key } }));
+      return { status: 200, body: { ok: true } };
+    });
+    expect(outcome).toEqual({ status: 200, body: { ok: true }, replayed: false });
+  });
+
   it("rejects empty and over-long keys", async () => {
     const fn = async () => ({ status: 200, body: {} });
     await expect(withIdempotency(tenantA.id, "", scope(), fn)).rejects.toBeInstanceOf(ValidationError);

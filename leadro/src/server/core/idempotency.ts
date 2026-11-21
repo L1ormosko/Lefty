@@ -90,7 +90,14 @@ export async function withIdempotency(
     await releaseClaim(tenantId, claim.recordId);
     throw error;
   }
-  await storeResponse(tenantId, claim.recordId, response);
+  try {
+    await storeResponse(tenantId, claim.recordId, response);
+  } catch (storeError) {
+    // fn already succeeded and its effects are committed: report that truth to the client instead
+    // of a 500 that invites a retry. The claim expires after IDEMPOTENCY_IN_FLIGHT_MS; until then
+    // duplicates get a retryable CONFLICT.
+    logger.error("failed to store idempotent response", { recordId: claim.recordId, storeError: String(storeError) });
+  }
   return { ...response, replayed: false };
 }
 
@@ -135,8 +142,11 @@ async function claimKey(
 }
 
 async function storeResponse(tenantId: string, recordId: string, response: IdempotentResponse): Promise<void> {
+  // updateMany (not update): if the claim expired and a duplicate already took it over, there is
+  // nothing to update and that must not turn a successful request into an error. Handlers are
+  // expected to finish well within IDEMPOTENCY_IN_FLIGHT_MS (withTenant caps transactions at 15 s).
   await withTenant(tenantId, (tx) =>
-    tx.idempotencyRecord.update({
+    tx.idempotencyRecord.updateMany({
       where: { id: recordId },
       data: {
         responseStatus: response.status,

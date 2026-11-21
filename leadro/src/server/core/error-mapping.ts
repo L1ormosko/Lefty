@@ -43,7 +43,9 @@ export function toErrorResponse(error: unknown, correlationId: string, log: Logg
   const headers = new Headers({ [CORRELATION_HEADER]: correlationId });
 
   if (error instanceof AppError) {
-    ({ code, message, field, details, retryable } = error);
+    ({ code, field, details, retryable } = error);
+    // INTERNAL messages may describe wiring/internals; the real text is logged, never sent.
+    message = error.code === "INTERNAL" ? GENERIC_INTERNAL_MESSAGE : error.message;
     if (error instanceof RateLimitedError && error.retryAfterSeconds !== undefined) {
       headers.set("Retry-After", String(error.retryAfterSeconds));
     }

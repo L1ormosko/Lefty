@@ -125,9 +125,9 @@ describe("defineRoute pipeline", () => {
     expect(ran).toBe(false);
   });
 
-  it("fails closed when authorize is configured without authenticate", async () => {
-    const route = defineRoute({ authorize: async () => undefined, handler: async () => ok(null) });
-    expect((await route(jsonRequest({}))).status).toBe(500);
+  it("rejects wiring mistakes at definition time", () => {
+    expect(() => defineRoute({ authorize: async () => undefined, handler: async () => ok(null) })).toThrow(/authorize/);
+    expect(() => defineRoute({ idempotent: true, handler: async () => ok(null) })).toThrow(/idempotent/);
   });
 
   it("turns unexpected handler exceptions into a generic 500 with no internals", async () => {
