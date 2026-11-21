@@ -14,7 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:migrate:test": "DATABASE_URL=postgresql://leadro:leadro@127.0.0.1:5432/leadro_test prisma migrate deploy",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "i18n:check": "tsx scripts/i18n-check.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
