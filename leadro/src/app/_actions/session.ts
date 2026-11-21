@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { logout, revokeOwnSession } from "@/server/auth";
 import { NotFoundError } from "@/server/core";
-import { getPageContext } from "../_lib/page-context";
+import { getPageContext, requireFullSession } from "../_lib/page-context";
 import { getClientInfo } from "../_lib/request-client";
 import { clearSessionCookie } from "../_lib/session-cookie";
 
@@ -22,8 +22,7 @@ export async function logoutAction(): Promise<void> {
  * session goes through `logoutAction` instead, which also clears the cookie.
  */
 export async function revokeSessionAction(formData: FormData): Promise<void> {
-  const { actor } = await getPageContext();
-  if (!actor) redirect("/login");
+  const { actor } = await requireFullSession();
   const sessionId = String(formData.get("sessionId") ?? "");
   if (!sessionId || sessionId === actor.sessionId) return;
   try {

@@ -2,7 +2,7 @@ import { StatusBadge } from "@/components/ui";
 import { MfaEnrollmentPanel } from "../../../_components/MfaEnrollmentPanel";
 import { mfaEnrollmentLabels } from "../../../_components/mfa-labels";
 import { loadMfaEnabled } from "../../../_lib/account-queries";
-import { getPageContext } from "../../../_lib/page-context";
+import { requireFullSession } from "../../../_lib/page-context";
 
 /**
  * Two-step verification status and enrollment. There is deliberately no "turn off" button: the
@@ -10,8 +10,7 @@ import { getPageContext } from "../../../_lib/page-context";
  * require MFA must not be able to drop it.
  */
 export default async function SecurityPage() {
-  const { actor, t } = await getPageContext();
-  if (!actor) return null;
+  const { actor, t } = await requireFullSession();
   const mfaEnabled = await loadMfaEnabled(actor);
 
   return (

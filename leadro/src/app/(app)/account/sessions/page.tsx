@@ -2,12 +2,11 @@ import { EmptyState, StatusBadge, buttonClasses } from "@/components/ui";
 import { formatDateTime, isolateLtr } from "@/lib/i18n";
 import { listOwnSessions } from "@/server/auth";
 import { revokeSessionAction } from "../../../_actions/session";
-import { getPageContext } from "../../../_lib/page-context";
+import { requireFullSession } from "../../../_lib/page-context";
 
 /** The signed-in user's own live sessions, with revoke for every session except the current one. */
 export default async function SessionsPage() {
-  const { actor, locale, timeZone, t } = await getPageContext();
-  if (!actor) return null;
+  const { actor, locale, timeZone, t } = await requireFullSession();
   const sessions = await listOwnSessions(actor);
   const when = (date: Date) => formatDateTime(date, { locale, timeZone });
 

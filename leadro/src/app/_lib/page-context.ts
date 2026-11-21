@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { createTranslator, directionOf, type Locale, type TextDirection, type TranslateFn } from "@/lib/i18n";
 import { SESSION_COOKIE_NAME, authenticateMfaRequest, requireSession } from "@/server/auth";
 import { UnauthenticatedError, type Actor } from "@/server/core";
@@ -79,3 +80,17 @@ export const getPageContext = cache(async (): Promise<PageContext> => {
     t: createTranslator({ localeChain: [locale] }),
   };
 });
+
+/**
+ * The signed-in actor of a FULLY authenticated session, for every page and action that touches
+ * user data. No session -> /login; password accepted but MFA outstanding -> /login/mfa. Layouts
+ * do not guard their pages (each renders independently), so every (app) page and every
+ * data-touching action must call this itself. Only the MFA actions and logout use the tolerant
+ * `getPageContext()`.
+ */
+export async function requireFullSession(): Promise<PageContext & { actor: Actor }> {
+  const context = await getPageContext();
+  if (!context.actor) redirect("/login");
+  if (context.mfaPending) redirect("/login/mfa");
+  return context as PageContext & { actor: Actor };
+}

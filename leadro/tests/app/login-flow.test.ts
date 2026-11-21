@@ -75,6 +75,17 @@ describe("loginAction", () => {
     expect(getFakeCookie(SESSION_COOKIE_NAME)).toBeUndefined();
   });
 
+  it("shows the same generic message for a locked-out account, even with the right password", async () => {
+    const user = await createTenantWithUser();
+    const attempt = (password: string) =>
+      loginAction({}, loginForm({ tenantSlug: user.tenantSlug, email: user.email, password }));
+    for (let i = 0; i < 5; i++) await attempt("wrong password " + i);
+    expect((await loadUser(user)).lockedUntil).not.toBeNull();
+    const locked = await attempt(TEST_PASSWORD);
+    expect(locked.error).toBe("The company code, email or password is incorrect.");
+    expect(getFakeCookie(SESSION_COOKIE_NAME)).toBeUndefined();
+  });
+
   it("shows the failure message in the visitor's language", async () => {
     const user = await createTenantWithUser();
     setFakeCookie(LOCALE_COOKIE_NAME, "es-US");

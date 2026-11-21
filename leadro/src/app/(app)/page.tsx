@@ -1,14 +1,12 @@
 import { EmptyState } from "@/components/ui";
 import { loadShellIdentity } from "../_lib/account-queries";
-import { getPageContext } from "../_lib/page-context";
+import { requireFullSession } from "../_lib/page-context";
 
 /**
  * Home. Honest placeholder: no dashboards exist yet, so nothing is drawn that looks like data.
- * (The layout has already guaranteed a signed-in actor.)
  */
 export default async function HomePage() {
-  const { actor, t } = await getPageContext();
-  if (!actor) return null;
+  const { actor, t } = await requireFullSession();
   const identity = await loadShellIdentity(actor);
 
   return (

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma, withTenant } from "@/server/db";
 import type { Actor } from "@/server/core";
 
@@ -12,7 +13,7 @@ export interface ShellIdentity {
  * Own-record reads for the shell header and user menu. A user may always read themselves, so no
  * permission check applies (same rule as `listOwnSessions`); the read still runs under RLS.
  */
-export async function loadShellIdentity(actor: Actor): Promise<ShellIdentity> {
+export const loadShellIdentity = cache(async (actor: Actor): Promise<ShellIdentity> => {
   const [tenant, user] = await Promise.all([
     prisma.tenant.findUniqueOrThrow({ where: { id: actor.tenantId }, select: { name: true } }),
     withTenant(actor.tenantId, (tx) =>
@@ -24,7 +25,7 @@ export async function loadShellIdentity(actor: Actor): Promise<ShellIdentity> {
   ]);
   const employeeName = user.employee ? `${user.employee.firstName} ${user.employee.lastName}`.trim() : "";
   return { displayName: employeeName || user.email, email: user.email, tenantName: tenant.name };
-}
+});
 
 /** Whether the caller already has a working authenticator (decides enroll vs. verify screens). */
 export async function loadMfaEnabled(actor: Actor): Promise<boolean> {

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { withTenant } from "@/server/db";
-import { createTenantWithUser, resetAuthTestState, loginAs, testClient } from "../auth/auth-helpers";
+import { assignRole, createTenantWithUser, resetAuthTestState, loginAs, testClient } from "../auth/auth-helpers";
 import { buildWorld } from "../authz/fixtures";
-import { getFakeCookie, resetFakeRequest, setFakeCookie, setFakeHeader } from "./next-fakes";
+import { getFakeCookie, redirectOf, resetFakeRequest, setFakeCookie, setFakeHeader } from "./next-fakes";
 
 vi.mock("next/headers", async () => (await import("./next-fakes")).headersModule);
 vi.mock("next/navigation", async () => (await import("./next-fakes")).navigationModule);
@@ -16,6 +16,9 @@ import { acceptInvitationAction } from "@/app/(auth)/accept-invitation/actions";
 import { LOCALE_COOKIE_NAME } from "@/app/_lib/locale-negotiation";
 import { readSessionState } from "@/app/_lib/page-context";
 import { SESSION_COOKIE_NAME, listOwnSessions } from "@/server/auth";
+import HomePage from "@/app/(app)/page";
+import SessionsPage from "@/app/(app)/account/sessions/page";
+import SecurityPage from "@/app/(app)/account/security/page";
 import { NAVIGATION_ITEMS, getNavigation } from "@/app/(app)/navigation";
 
 resetAuthTestState();
@@ -187,5 +190,51 @@ describe("password reset and invitations", () => {
     expect((await acceptInvitationAction({}, badToken)).error).toBe(
       "This invitation link is invalid or has expired. Ask your administrator for a new one.",
     );
+  });
+});
+
+describe("MFA-pending (password-only) sessions", () => {
+  /** A live full session on one device, then a password-only session on another; the browser holds the latter. */
+  async function pendingBrowser() {
+    const user = await createTenantWithUser();
+    const fullSession = await loginAs(user);
+    await assignRole(user, { requiresMfa: true });
+    const pending = await loginAs(user);
+    expect(pending.mfaRequired).toBe(true);
+    setFakeCookie(SESSION_COOKIE_NAME, pending.token);
+    return { user, fullSession };
+  }
+
+  const sessionRevoked = (tenantId: string, userId: string) =>
+    withTenant(tenantId, async (tx) => (await tx.session.findMany({ where: { userId, revokedAt: null } })).length);
+
+  it("cannot revoke the user's other sessions", async () => {
+    const { user } = await pendingBrowser();
+    const live = await sessionRevoked(user.tenantId, user.userId);
+    const target = await withTenant(user.tenantId, (tx) => tx.session.findFirstOrThrow({ where: { userId: user.userId, mfaPending: false } }));
+    const form = new FormData();
+    form.set("sessionId", target.id);
+    expect(await redirectOf(() => revokeSessionAction(form))).toBe("/login/mfa");
+    expect(await sessionRevoked(user.tenantId, user.userId)).toBe(live);
+  });
+
+  it("cannot change user.locale (only the cookie is set)", async () => {
+    const { user } = await pendingBrowser();
+    expect(await changeLocaleAction("he-IL")).toBe(true);
+    const row = await withTenant(user.tenantId, (tx) => tx.user.findUniqueOrThrow({ where: { id: user.userId }, select: { locale: true } }));
+    expect(row.locale).toBeNull();
+  });
+
+  it("is redirected to the MFA step by every (app) page before any data is loaded", async () => {
+    await pendingBrowser();
+    for (const page of [HomePage, SessionsPage, SecurityPage]) {
+      expect(await redirectOf(() => page())).toBe("/login/mfa");
+    }
+  });
+
+  it("sends visitors with no session to the login page from every (app) page", async () => {
+    for (const page of [HomePage, SessionsPage, SecurityPage]) {
+      expect(await redirectOf(() => page())).toBe("/login");
+    }
   });
 });

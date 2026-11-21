@@ -24,7 +24,8 @@ export async function changeLocaleAction(locale: string): Promise<boolean> {
   if (!isSupportedLocale(locale)) return false;
 
   const session = await readSessionState();
-  if (session) {
+  // A password-only (MFA-pending) session must not write user data: it only gets the cookie.
+  if (session && !session.mfaPending) {
     const { actor } = session;
     const client = await getClientInfo();
     await withTenant(actor.tenantId, async (tx) => {
