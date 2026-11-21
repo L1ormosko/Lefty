@@ -3,6 +3,7 @@ import type { TranslateFn } from "@/lib/i18n";
 import { ForbiddenError, type Actor } from "@/server/core";
 import { listEmployees } from "@/server/employees";
 import { listLegalEntities, listOrgUnits } from "@/server/organization";
+import { listRoles } from "@/server/roles";
 import { fullNameOf } from "./format";
 
 /**
@@ -86,5 +87,13 @@ export function loadLegalEntityOptions(actor: Actor): Promise<Array<{ value: str
   return orEmpty(async () => {
     const page = await listLegalEntities(actor, { limit: PICKER_LIMIT, active: "true" });
     return page.data.map((entity) => ({ value: String(entity.id), label: String(entity.name ?? entity.id) }));
+  });
+}
+
+/** Active roles the caller may see (`permissions.view`), for invitation and assignment forms. */
+export function loadRoleOptions(actor: Actor): Promise<Array<{ value: string; label: string }>> {
+  return orEmpty(async () => {
+    const page = await listRoles(actor, { limit: PICKER_LIMIT, active: "true" });
+    return page.data.map((role) => ({ value: String(role.id), label: String(role.name ?? role.id) }));
   });
 }

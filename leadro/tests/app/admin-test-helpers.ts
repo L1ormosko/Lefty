@@ -1,3 +1,5 @@
+import type { ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { SESSION_COOKIE_NAME } from "@/server/auth";
 import type { Person } from "../authz/fixtures";
 import { sessionCookie } from "../org/org-helpers";
@@ -22,4 +24,12 @@ export function form(values: Record<string, string | undefined>): FormData {
   const data = new FormData();
   for (const [key, value] of Object.entries(values)) if (value !== undefined) data.set(key, value);
   return data;
+}
+
+/**
+ * HTML of what a page (an async server component called as a function) renders, so tests can assert
+ * on visible text. Only works for pages whose tree is synchronous below the page itself.
+ */
+export async function htmlOf(page: Promise<unknown>): Promise<string> {
+  return renderToStaticMarkup((await page) as ReactElement);
 }

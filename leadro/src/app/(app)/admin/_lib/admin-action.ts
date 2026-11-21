@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 import type { MessageKey, TranslateFn } from "@/lib/i18n";
-import { AppError, ValidationError, type Actor, type RequestContext } from "@/server/core";
+import type { ClientInfo } from "@/server/auth";
+import { AppError, ConflictError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { logger } from "@/server/logging";
 import type { FormState } from "../../../_lib/form-state";
 import { requireFullSession, type PageContext } from "../../../_lib/page-context";
@@ -19,6 +20,8 @@ import { getClientInfo } from "../../../_lib/request-client";
 export interface AdminActionContext extends PageContext {
   actor: Actor;
   ctx: RequestContext;
+  /** Client facts (IP, user agent) for services that take `ClientInfo` instead of a request context. */
+  client: ClientInfo;
 }
 
 /** `validation field -> message` for problems the user can fix; any other code uses the generic text. */
@@ -101,6 +104,7 @@ export async function runAdminAction(formData: FormData, options: AdminActionOpt
   const client = await getClientInfo();
   const context: AdminActionContext = {
     ...page,
+    client,
     ctx: { correlationId: client.correlationId ?? randomUUID(), actor: page.actor, sourceApp: "WEB" },
   };
   try {
@@ -109,5 +113,19 @@ export async function runAdminAction(formData: FormData, options: AdminActionOpt
     return { success };
   } catch (error) {
     return { error: adminErrorMessage(error, page.t) };
+  }
+}
+
+/**
+ * Runs a service call whose only possible CONFLICT is a duplicate of one named field (a unique
+ * column), and labels it so the user sees "this number is already used" instead of the generic
+ * "changed by someone else" text.
+ */
+export async function withConflictField<T>(field: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof ConflictError && !error.field) throw new ConflictError({ message: error.message, field, cause: error });
+    throw error;
   }
 }
