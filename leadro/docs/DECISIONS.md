@@ -211,3 +211,15 @@ No new dependencies (Zod already present). No schema change and no migration: ev
 19. **`assignRole(tx, actor, input)`** enforces anti-escalation (see PERMISSIONS.md); the actor-less variant is renamed
     `bootstrapRoleAssignment` for seeds/tests only. Coverage rules: TENANT needs tenant-wide; ORG_UNIT needs the unit and its
     active subtree inside the granter's scope; OWN/ASSIGNED need any scope of the granter; LEGAL_ENTITY needs that entity.
+
+### Task 4 fix round 2
+
+20. **Per-scope field sets.** `ResolvedScope.parts` = one entry per (active grant, scope) with that grant's field sets; the
+    scope-blind `fieldSets` union is removed. Archived-unit scopes yield no part (so no field sets). Rows are projected with
+    `fieldSetsForRow` / `projectRows`. `can()` was already per matched scope; its `fieldSets` is only meaningful with a resource.
+21. **Anti-escalation per held grant**: for each granted scope a single held part must cover the scope AND the role grant's
+    field sets (`partCovers` + `fieldSetsCover`). Two parts are never combined (stricter than needed, never looser).
+22. **`projectFields` requires a field map**; unmapped fields are dropped. Central maps in `field-maps.ts`; financial/billing
+    keys are reserved ahead of their columns so they cannot leak by default.
+23. **Target in scope**: `assignRole` checks the target user (employee placement, or tenant-level when none) against the
+    granter's `permissions.assign` via `canInTx`, passing `non_sensitive_roles` as the record set when the role is not sensitive.

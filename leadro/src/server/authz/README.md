@@ -36,3 +36,14 @@ Invariants:
 Files: `permission-catalog.ts` (catalog + sensitive field sets), `role-templates.ts` (templates + MFA rule),
 `evaluate.ts` (the single decision function), `load-grants.ts`, `resolve-resource.ts`, `org-tree.ts`,
 `conditions.ts`. Rationale and deviations: `docs/DECISIONS.md` "Task 4"; model: `docs/PERMISSIONS.md`.
+
+Field sets (read before returning records):
+- `AccessDecision.fieldSets` is only meaningful when `can` was given the record (`resource`); a capability check
+  (no resource) unions every scope and must not be used to project data.
+- Lists: `resolveScope` keeps field sets PER scope part. Derive a row's fields with `fieldSetsForRow` /
+  `projectRows(rows, scope, FIELD_MAP, attributesOf)` (`employeeScopeSelect` + `employeeRowAttributes` for employees),
+  never by unioning `parts[].fieldSets`.
+- `projectFields` requires an explicit field map (`EMPLOYEE_FIELD_MAP`, `CUSTOMER_FIELD_MAP` in `field-maps.ts`);
+  unmapped fields are dropped, so a new column is hidden until classified.
+- `assignRole` also requires the target user inside the granter's `permissions.assign` scope, and checks (scope AND
+  field sets) together per held grant.
