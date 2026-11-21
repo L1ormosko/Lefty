@@ -1,4 +1,4 @@
-import type { OrgUnitManager, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import {
   EMPLOYEE_FIELD_MAP,
@@ -55,7 +55,7 @@ export async function assignUnitManager(
   ctx: RequestContext,
   unitId: string,
   input: AssignManagerInput,
-): Promise<OrgUnitManager> {
+): Promise<Omit<UnitManagerView, "employee">> {
   return withTenant(actor.tenantId, async (tx) => {
     // Serialise manager changes of one unit so the duplicate / single-primary checks cannot race.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`org-manager:${unitId}`}))`;
@@ -102,7 +102,14 @@ export async function assignUnitManager(
       targetId: unitId,
       newValue: { managerId: manager.id, employeeId: input.employeeId, isPrimary: input.isPrimary, demotedPrimaryManagers: demoted },
     });
-    return manager;
+    return {
+      id: manager.id,
+      orgUnitId: manager.orgUnitId,
+      employeeId: manager.employeeId,
+      isPrimary: manager.isPrimary,
+      effectiveFrom: manager.effectiveFrom,
+      effectiveTo: manager.effectiveTo,
+    };
   });
 }
 

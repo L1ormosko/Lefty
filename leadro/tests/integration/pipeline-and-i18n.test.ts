@@ -12,8 +12,9 @@ import {
   reviewOverrideAsActor,
   saveOverrideAsActor,
 } from "@/server/i18n";
+import { markOverrideReviewed } from "@/server/i18n/overrides";
 import { createTenantWithUser, testClient, TEST_PASSWORD } from "../auth/auth-helpers";
-import { buildWorld, createPerson, disconnect, grantTemplate, makeRole, type World } from "../authz/fixtures";
+import { buildWorld, createPerson, disconnect, grantTemplate, makeRole, type Person, type World } from "../authz/fixtures";
 import { auditEvents, call, contextFor, sessionCookie } from "../org/org-helpers";
 
 let w: World;
@@ -77,6 +78,14 @@ describe("translation overrides: permission-gated, audited, errors mapped to App
   const [plainKey] = entries.find(([, text]) => !/\{\w+\}/.test(text)) ?? [];
   const [placeholderKey, placeholderText] = entries.find(([, text]) => /\{\w+\}/.test(text)) ?? [];
 
+  // A second person with localization.configure: the editor of a text may not approve it.
+  let reviewer: Person;
+  beforeAll(async () => {
+    const role = await makeRole(w.tenantId, "translation reviewer", [{ permission: "localization.configure" }]);
+    reviewer = await createPerson(w.tenantId, "reviewer", { withEmployee: false });
+    await grantTemplate(w.tenantId, reviewer, role, [{ type: "TENANT" }]);
+  });
+
   const save = (actor = w.ceo.actor, value = "Custom text") => saveOverrideAsActor(actor, contextFor(actor), { locale: "en-US", key: plainKey!, value });
 
   it("has catalog keys to work with", () => {
@@ -110,10 +119,11 @@ describe("translation overrides: permission-gated, audited, errors mapped to App
     expect(latest.previousValue).toMatchObject({ value: "First draft" });
     expect(latest.newValue).toMatchObject({ value: "Second draft", reviewed: false });
 
-    await reviewOverrideAsActor(w.ceo.actor, ctx, { locale: "en-US", key: plainKey!, reviewedValue: "Second draft" });
+    await expect(reviewOverrideAsActor(w.ceo.actor, ctx, { locale: "en-US", key: plainKey!, reviewedValue: "Second draft" })).rejects.toBeInstanceOf(ForbiddenError); // own edit
+    await reviewOverrideAsActor(reviewer.actor, contextFor(reviewer.actor), { locale: "en-US", key: plainKey!, reviewedValue: "Second draft" });
     expect((await loadReviewedOverrides(w.tenantId))["en-US"]?.[plainKey!]).toBe("Second draft");
     const [review] = await auditEvents(w.tenantId, "translation.review");
-    expect(review).toMatchObject({ actorUserId: w.ceo.userId, correlationId: ctx.correlationId });
+    expect(review).toMatchObject({ actorUserId: reviewer.userId });
 
     await deleteOverrideAsActor(w.ceo.actor, ctx, { locale: "en-US", key: plainKey! });
     expect(await loadReviewedOverrides(w.tenantId)).toEqual({});
@@ -127,15 +137,15 @@ describe("translation overrides: permission-gated, audited, errors mapped to App
     await expect(saveOverrideAsActor(w.ceo.actor, ctx, { locale: "en-US", key: placeholderKey!, value: `${placeholderText} {extra}` })).rejects.toMatchObject({ constructor: ValidationError, field: "value" });
 
     await save(w.ceo.actor, "Changed after load");
-    await expect(reviewOverrideAsActor(w.ceo.actor, ctx, { locale: "en-US", key: plainKey!, reviewedValue: "Stale text" })).rejects.toBeInstanceOf(ConflictError);
-    await expect(reviewOverrideAsActor(w.ceo.actor, ctx, { locale: "es-US", key: plainKey!, reviewedValue: "x" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(reviewOverrideAsActor(reviewer.actor, contextFor(reviewer.actor), { locale: "en-US", key: plainKey!, reviewedValue: "Stale text" })).rejects.toBeInstanceOf(ConflictError);
+    await expect(reviewOverrideAsActor(reviewer.actor, contextFor(reviewer.actor), { locale: "es-US", key: plainKey!, reviewedValue: "x" })).rejects.toBeInstanceOf(NotFoundError);
     await expect(deleteOverrideAsActor(w.ceo.actor, ctx, { locale: "he-IL", key: plainKey! })).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("another tenant's overrides are untouched and unreadable", async () => {
     const other = await buildWorld("integration-i18n-other");
     await saveOverrideAsActor(other.ceo.actor, contextFor(other.ceo.actor), { locale: "en-US", key: plainKey!, value: "Other tenant" });
-    await reviewOverrideAsActor(other.ceo.actor, contextFor(other.ceo.actor), { locale: "en-US", key: plainKey!, reviewedValue: "Other tenant" });
+    await markOverrideReviewed(other.tenantId, { locale: "en-US", key: plainKey!, reviewedValue: "Other tenant", reviewerUserId: other.ceo.userId });
     expect((await loadReviewedOverrides(w.tenantId))["en-US"]?.[plainKey!]).not.toBe("Other tenant");
   });
 });

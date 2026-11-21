@@ -84,7 +84,7 @@ describe("transfers keep history", () => {
 
   it("refuses to rewrite history: backdating before the current placement, same unit, overlapping end", async () => {
     const worker = await createPerson(w.tenantId, "strict", { orgUnitId: w.units.cityA });
-    const backdated = await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityB, effectiveFrom: iso(-30) });
+    const backdated = await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityB, effectiveFrom: iso(-30), reason: "Correction" });
     expect(backdated.status).toBe(400);
     expect(backdated.json.error.field).toBe("effectiveFrom");
     const same = await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityA });
@@ -113,6 +113,38 @@ describe("transfers keep history", () => {
     for (let index = 1; index < all.length; index += 1) {
       expect(all[index - 1].effectiveTo?.getTime()).toBe(all[index].effectiveFrom.getTime()); // gapless, no overlap
     }
+  });
+});
+
+describe("corrections of the past", () => {
+  it("a past-dated transfer needs a reason and is audited as a correction", async () => {
+    const worker = await createPerson(w.tenantId, "late-entry", { orgUnitId: w.units.cityA }); // placed yesterday
+    const without = await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityB, effectiveFrom: iso(-0.5) });
+    expect(without.status).toBe(400);
+    expect(without.json.error.field).toBe("reason");
+    expect(await rows(worker.employeeId!)).toHaveLength(1); // nothing changed
+
+    const withReason = await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityB, effectiveFrom: iso(-0.5), reason: "Entered late" });
+    expect(withReason.status).toBe(201);
+    const [event] = await auditEvents(w.tenantId, "employee.assign", worker.employeeId!);
+    expect(event.newValue).toMatchObject({ correction: true });
+    expect(event.reason).toBe("Entered late");
+
+    const normal = await createPerson(w.tenantId, "on-time", { orgUnitId: w.units.cityA });
+    expect((await place(ceo, normal.employeeId!, { orgUnitId: w.units.cityB })).status).toBe(201); // now: no reason needed
+    const [plain] = await auditEvents(w.tenantId, "employee.assign", normal.employeeId!);
+    expect((plain.newValue as Record<string, unknown>).correction).toBeUndefined();
+  });
+
+  it("ending a placement in the past needs a reason too", async () => {
+    const worker = await createPerson(w.tenantId, "end-past", { orgUnitId: w.units.cityA });
+    const early = await place(ceo, worker.employeeId!, { orgUnitId: w.units.teamA1, kind: "SECONDARY", effectiveFrom: iso(-2), reason: "Backfill" });
+    const earlyParams = { id: worker.employeeId!, assignmentId: early.json.data.id };
+    expect((await call(endAssignment, "POST", "/x", { cookie: ceo, params: earlyParams, body: { effectiveTo: iso(-1) } })).status).toBe(400);
+    const ok = await call(endAssignment, "POST", "/x", { cookie: ceo, params: earlyParams, body: { effectiveTo: iso(-1), reason: "Left that team earlier" } });
+    expect(ok.status).toBe(200);
+    const [event] = await auditEvents(w.tenantId, "employee.assignment_end", worker.employeeId!);
+    expect(event.newValue).toMatchObject({ correction: true });
   });
 });
 
@@ -207,5 +239,20 @@ describe("authority for placements", () => {
     const people = await withTenant(w.tenantId, (tx) => tx.organizationalAssignment.count({ where: { orgUnitId: unit.id!, effectiveTo: null } }));
     const row = await withTenant(w.tenantId, (tx) => tx.orgUnit.findUniqueOrThrow({ where: { id: unit.id! } }));
     expect(row.active === false && people > 0).toBe(false);
+  });
+});
+
+describe("archiving a unit with scheduled placements", () => {
+  it("a future-dated transfer into a unit blocks its archive", async () => {
+    const { archiveOrgUnit, createOrgUnit } = await import("@/server/organization");
+    const { contextFor } = await import("../org/org-helpers");
+    const ctx = contextFor(w.ceo.actor);
+    const unit = await createOrgUnit(w.ceo.actor, ctx, { type: "CITY", name: `Scheduled ${Date.now()}`, parentId: w.units.state });
+    const worker = await createPerson(w.tenantId, "scheduled", { orgUnitId: w.units.cityA });
+    expect((await place(ceo, worker.employeeId!, { orgUnitId: unit.id!, effectiveFrom: iso(3) })).status).toBe(201);
+
+    await expect(archiveOrgUnit(w.ceo.actor, ctx, unit.id!, {})).rejects.toMatchObject({ code: "INVALID_STATE_TRANSITION" });
+    const row = await withTenant(w.tenantId, (tx) => tx.orgUnit.findUniqueOrThrow({ where: { id: unit.id! } }));
+    expect(row.active).toBe(true);
   });
 });

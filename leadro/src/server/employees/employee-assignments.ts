@@ -47,6 +47,23 @@ export interface AssignmentView {
   previousOrgUnitId: string | null;
 }
 
+/** Clock-skew tolerance: a change dated within this window of "now" is a normal change, not a correction. */
+const CORRECTION_TOLERANCE_MS = 5 * 60_000;
+
+/**
+ * Changing the past is a CORRECTION of recorded history, not a normal change: it is allowed only
+ * with a written reason and is audited as `correction: true`, so nobody can quietly re-date where
+ * someone worked. Returns whether this change is one.
+ * @throws ValidationError (field `reason`) when a past date comes without a reason.
+ */
+function requireReasonForCorrection(date: Date, now: Date, reason: string | undefined, field: string): boolean {
+  if (date.getTime() >= now.getTime() - CORRECTION_TOLERANCE_MS) return false;
+  if (!reason) {
+    throw new ValidationError({ message: `A change dated in the past (${field}) is a correction and needs a reason.`, field: "reason" });
+  }
+  return true;
+}
+
 const toView = (row: OrganizationalAssignment, previousOrgUnitId: string | null): AssignmentView => ({
   id: row.id,
   employeeId: row.employeeId,
@@ -125,6 +142,7 @@ export async function assignEmployeeToUnit(
 
     const from = input.effectiveFrom ?? new Date();
     const to = input.effectiveTo ?? null;
+    const correction = requireReasonForCorrection(from, new Date(), input.reason, "effectiveFrom");
     if (to !== null && to <= from) {
       throw new ValidationError({ message: "effectiveTo must be after effectiveFrom.", field: "effectiveTo" });
     }
@@ -165,6 +183,7 @@ export async function assignEmployeeToUnit(
         kind: input.kind,
         effectiveFrom: from.toISOString(),
         effectiveTo: to?.toISOString() ?? null,
+        ...(correction ? { correction: true } : {}),
       },
       reason: input.reason,
     });
@@ -198,6 +217,7 @@ export async function endEmployeeAssignment(
       throw new InvalidStateTransitionError({ message: "This placement has already ended." });
     }
     const wanted = input.effectiveTo ?? now;
+    const correction = requireReasonForCorrection(wanted, now, input.reason, "effectiveTo");
     if (row.effectiveTo !== null && wanted > row.effectiveTo) {
       throw new ValidationError({ message: "A placement can only be shortened, not extended.", field: "effectiveTo" });
     }
@@ -211,7 +231,7 @@ export async function endEmployeeAssignment(
       targetType: "Employee",
       targetId: employeeId,
       previousValue: { assignmentId: row.id, effectiveTo: row.effectiveTo?.toISOString() ?? null },
-      newValue: { assignmentId: row.id, effectiveTo: updated.effectiveTo?.toISOString() ?? null },
+      newValue: { assignmentId: row.id, effectiveTo: updated.effectiveTo?.toISOString() ?? null, ...(correction ? { correction: true } : {}) },
       reason: input.reason,
     });
     return toView(updated, null);

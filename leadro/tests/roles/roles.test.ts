@@ -237,3 +237,54 @@ describe("archiving, reading and isolation", () => {
     expect(listed.json.data.some((role: { id: string }) => role.id === other.roles.DISPATCHER)).toBe(false);
   });
 });
+
+describe("editing a role that is already assigned", () => {
+  /** An editor who may edit roles tenant-wide but holds employees.view only over City A. */
+  async function narrowEditor() {
+    const editRole = await makeRole(w.tenantId, "Role editor", [{ permission: "permissions.view" }, { permission: "permissions.edit" }]);
+    const viewRole = await makeRole(w.tenantId, "City A employee viewer", [{ permission: "employees.view" }]);
+    const editor = await createPerson(w.tenantId, "narrow-editor", { withEmployee: false });
+    await grantTemplate(w.tenantId, editor, editRole, [{ type: "TENANT" }]);
+    await grantTemplate(w.tenantId, editor, viewRole, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
+    return sessionCookie(editor, w.tenantId);
+  }
+  const withEmployeeView = [{ permission: "jobs.view" }, { permission: "employees.view" }];
+
+  it("refuses to add a permission to a role held over scopes the editor could not grant it in", async () => {
+    const cookie = await narrowEditor();
+    const role = (await create(ceo, { name: unique("Tenant-wide holders"), permissions: [{ permission: "jobs.view" }] })).json.data;
+    const holder = await createPerson(w.tenantId, "tenant-holder", { withEmployee: false });
+    await grantTemplate(w.tenantId, holder, role.id, [{ type: "TENANT" }]);
+
+    const result = await call(putPermissions, "PUT", "/x", { cookie, params: { id: role.id }, body: { permissions: withEmployeeView } });
+    expect(result.status).toBe(403);
+    expect(permissionKeys((await call(getRole, "GET", "/x", { cookie: ceo, params: { id: role.id } })).json.data)).toEqual(["jobs.view"]);
+  });
+
+  it("allows it when every live holder is inside the editor's reach; revoked and expired holders do not count", async () => {
+    const cookie = await narrowEditor();
+    const role = (await create(ceo, { name: unique("City A holders"), permissions: [{ permission: "jobs.view" }] })).json.data;
+    const insider = await createPerson(w.tenantId, "city-holder", { orgUnitId: w.units.cityA });
+    await grantTemplate(w.tenantId, insider, role.id, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
+    // a tenant-wide holder whose assignment is already revoked must not block the edit
+    const gone = await createPerson(w.tenantId, "former-holder", { withEmployee: false });
+    const goneAssignment = await grantTemplate(w.tenantId, gone, role.id, [{ type: "TENANT" }]);
+    await withTenant(w.tenantId, (tx) => tx.roleAssignment.update({ where: { id: goneAssignment }, data: { revokedAt: new Date() } }));
+
+    const result = await call(putPermissions, "PUT", "/x", { cookie, params: { id: role.id }, body: { permissions: withEmployeeView } });
+    expect(result.status).toBe(200);
+
+    // and a new tenant-wide holder afterwards makes the same edit impossible
+    const wide = await createPerson(w.tenantId, "late-holder", { withEmployee: false });
+    await grantTemplate(w.tenantId, wide, role.id, [{ type: "TENANT" }]);
+    const more = await call(putPermissions, "PUT", "/x", { cookie, params: { id: role.id }, body: { permissions: [...withEmployeeView, { permission: "customers.view" }] } });
+    expect(more.status).toBe(403);
+  });
+
+  it("a tenant-wide editor who holds the permission tenant-wide may edit any role", async () => {
+    const role = (await create(ceo, { name: unique("Anyone"), permissions: [{ permission: "jobs.view" }] })).json.data;
+    const holder = await createPerson(w.tenantId, "any-holder", { withEmployee: false });
+    await grantTemplate(w.tenantId, holder, role.id, [{ type: "TENANT" }]);
+    expect((await call(putPermissions, "PUT", "/x", { cookie: ceo, params: { id: role.id }, body: { permissions: withEmployeeView } })).status).toBe(200);
+  });
+});

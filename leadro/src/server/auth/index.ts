@@ -3,7 +3,7 @@ export { login, logout } from "./login-service";
 export type { LoginInput, LoginResult } from "./login-service";
 export { listOwnSessions, revokeOwnSession, revokeAllSessionsForUser } from "./session-service";
 export type { SessionSummary } from "./session-service";
-export { deactivateUserAccount } from "./account-lifecycle";
+export { deactivateUserAccount, deactivateUserAccountInTx } from "./account-lifecycle";
 export { startMfaEnrollment, confirmMfaEnrollment, verifyMfaChallenge } from "./mfa-service";
 export type { MfaEnrollment, PromotedSession } from "./mfa-service";
 export { userRequiresMfa } from "./mfa-policy";

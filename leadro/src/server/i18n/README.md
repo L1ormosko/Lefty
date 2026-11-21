@@ -28,4 +28,4 @@ for API routes/server actions:
 - Each write is audited in the same transaction (`translation.save|review|delete`, previous/new text).
 - `TranslationOverrideError` is mapped to core errors: unsupported locale / unknown key / placeholder mismatch ->
   `ValidationError` (field `locale` / `key` / `value`), missing -> `NotFoundError`, changed-after-load -> `ConflictError`.
-The low-level `saveOverride` / `markOverrideReviewed` / `deleteOverride` remain for seeds and tests (no permission check).
+The reviewer must not be the last editor of the text (`assertNotSelfApproval`). The ungated `saveOverride` / `markOverrideReviewed` / `deleteOverride` are NOT exported from `index.ts` (module-internal; tests import `./overrides`).

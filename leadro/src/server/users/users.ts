@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { changedFields } from "@/lib/changed-fields";
 import { auditContextFields, recordAudit } from "@/server/audit";
-import { deactivateUserAccount, type ClientInfo } from "@/server/auth";
+import { deactivateUserAccountInTx, type ClientInfo } from "@/server/auth";
 import {
   buildScopeWhere,
   enforceInTx,
@@ -134,13 +134,14 @@ export async function deactivateUser(
   userId: string,
   input: { reason: string },
 ): Promise<{ revokedSessions: number }> {
-  await withTenant(actor.tenantId, async (tx) => {
+  return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "users.archive");
     await enforceOnUser(tx, actor, "users.archive", await resolveUserTarget(tx, actor.tenantId, userId));
     if (userId === actor.userId) throw new ForbiddenError({ message: "You cannot deactivate your own account." });
     const user = await tx.user.findFirst({ where: { id: userId, tenantId: actor.tenantId }, select: { status: true } });
     if (user?.status === "DEACTIVATED") throw new InvalidStateTransitionError({ message: "The user is already deactivated." });
+    // Same transaction as the checks above. Auth owns session revocation and writes the audit event
+    // (`user.deactivate`) with the reason.
+    return deactivateUserAccountInTx(tx, actor.tenantId, userId, actor.userId, client, input.reason);
   });
-  // Auth owns session revocation and writes the audit event (`user.deactivate`) with the reason.
-  return deactivateUserAccount(actor.tenantId, userId, actor.userId, client, input.reason);
 }

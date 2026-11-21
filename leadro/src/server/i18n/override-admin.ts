@@ -1,5 +1,5 @@
 import { recordAudit, auditContextFields } from "@/server/audit";
-import { canInTx } from "@/server/authz";
+import { assertNotSelfApproval, canInTx } from "@/server/authz";
 import {
   ConflictError,
   ForbiddenError,
@@ -97,6 +97,12 @@ export async function reviewOverrideAsActor(
 ): Promise<void> {
   await run(actor, async (tx) => {
     await assertMay(tx, actor, REVIEW_PERMISSION);
+    // Separation of duties (§21.3, §16.6): the last editor of a text cannot be the one who approves it.
+    const stored = await tx.translationResource.findFirst({
+      where: { tenantId: actor.tenantId, locale: input.locale, key: input.key },
+      select: { updatedById: true },
+    });
+    if (stored) assertNotSelfApproval(actor.userId, stored.updatedById);
     await markOverrideReviewedInTx(tx, actor.tenantId, { ...input, reviewerUserId: actor.userId });
     await recordAudit(tx, {
       ...auditContextFields(ctx),

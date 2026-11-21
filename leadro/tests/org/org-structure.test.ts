@@ -103,6 +103,7 @@ describe("unit managers", () => {
 
     const first = await call(addManager, "POST", managerUrl(w.units.cityA), { cookie: ceo, params: { id: w.units.cityA }, body: { employeeId: a.employeeId, isPrimary: true } });
     expect(first.status).toBe(201);
+    expect(Object.keys(first.json.data).sort()).toEqual(["effectiveFrom", "effectiveTo", "employeeId", "id", "isPrimary", "orgUnitId"]); // no tenantId
     const second = await call(addManager, "POST", managerUrl(w.units.cityA), { cookie: ceo, params: { id: w.units.cityA }, body: { employeeId: b.employeeId, isPrimary: true } });
     expect(second.status).toBe(201);
     // a manages another unit too

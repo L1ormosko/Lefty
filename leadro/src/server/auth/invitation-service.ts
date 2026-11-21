@@ -56,6 +56,11 @@ export async function createInvitation(
   tenantId: string,
   input: CreateInvitationInput,
   client: ClientInfo,
+  /**
+   * Runs FIRST inside the creation transaction (e.g. the caller's permission check), so "may this
+   * person invite?" and the invitation are one atomic step. Throwing aborts the creation.
+   */
+  precheck?: (tx: TenantTx) => Promise<void>,
 ): Promise<CreatedInvitation> {
   const email = normaliseEmail(input.email);
   const { token, tokenHash } = issueToken(tenantId);
@@ -67,6 +72,7 @@ export async function createInvitation(
   if (input.scope && !input.roleId) throw invalid("roleId", "A scope needs a role.");
 
   const created = await withTenant(tenantId, async (tx) => {
+    if (precheck) await precheck(tx);
     if (input.invitedById) {
       const inviter = await tx.user.findFirst({ where: { id: input.invitedById, tenantId, status: "ACTIVE" }, select: { id: true } });
       if (!inviter) throw invalid("invitedById", "The inviting user does not exist or is not active.");

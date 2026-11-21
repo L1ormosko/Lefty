@@ -3,13 +3,11 @@ import { createTranslator } from "@/lib/i18n";
 import { prisma, withTenant } from "@/server/db";
 import {
   TranslationOverrideError,
-  deleteOverride,
   getTranslatorForRequest,
   loadReviewedOverrides,
-  markOverrideReviewed,
   resolveLocaleContext,
-  saveOverride,
 } from "@/server/i18n";
+import { deleteOverride, markOverrideReviewed, saveOverride } from "@/server/i18n/overrides";
 import { createTenant } from "../helpers";
 
 async function createUser(tenantId: string, data: { email: string; locale?: string; timeZone?: string }) {

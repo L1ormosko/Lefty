@@ -22,7 +22,9 @@ Invariants:
   `FOR SHARE` so a concurrent archive cannot leave someone in an archived unit. Transfers are serialised per employee.
 - Writes need the permission over the employee's scope AND the `base` field set (a field-limited grant may read,
   not change). Reads project fields per row with the grant that matched THAT row (`EMPLOYEE_FIELD_MAP`).
+- A placement dated more than 5 minutes in the past is a correction: it needs a `reason` and is audited with `correction: true`.
+- `legalEntityId` set or changed needs the write permission over that legal entity (it is part of the data scope).
 - Terminate is soft: status TERMINATED + date (not in the future), open placements and manager rows ended, the
-  login deactivated and its sessions revoked, all in one transaction. Terminated employees are read-only.
+  login deactivated and its sessions revoked (only with `users.archive` over it; refused outright for holders of sensitive roles the actor cannot administer), all in one transaction. Terminated employees are read-only.
 - Invitations: `users.create` over the employee; with a role, auth re-runs authz's anti-escalation check at
   creation and at acceptance. The token goes to the `AuthNotifier`, never into the API response.

@@ -3,6 +3,7 @@ import type { TenantTx } from "@/server/db";
 import { fieldSetsCover, grantFieldSets, parseConditions } from "./conditions";
 import { isPermissionKey } from "./permission-catalog";
 import { resolveScope } from "./scope-filter";
+import { expandRequestedScopes, heldCoversRequest } from "./role-grant-check";
 import type { AccessSubject } from "./types";
 
 /** One permission of a role being created or edited, as it will be stored. */
@@ -46,6 +47,49 @@ export async function assertMayDefineGrants(
     const required = grantFieldSets(conditions);
     if (!held.parts.some((part) => fieldSetsCover(part.fieldSets, required))) {
       throw new ForbiddenError({ message: "You cannot grant permissions you do not hold." });
+    }
+  }
+}
+
+/**
+ * Editing a role that is ALREADY assigned changes access immediately for every holder, so the
+ * editor must be able to hand each added/changed grant to each live holder's scopes, exactly as
+ * `assignRole` would require: a single held part must cover the assignment's scope and the grant's
+ * field sets. (An editor with employees.view over City A only must not add it to a role held
+ * tenant-wide.) Revoked and expired assignments are ignored.
+ *
+ * @throws ForbiddenError
+ */
+export async function assertMayGrantToExistingHolders(
+  tx: TenantTx,
+  actor: AccessSubject,
+  roleId: string,
+  grants: RoleGrantDefinition[],
+  now: Date = new Date(),
+): Promise<void> {
+  if (grants.length === 0) return;
+  const assignments = await tx.roleAssignment.findMany({
+    where: { tenantId: actor.tenantId, roleId, revokedAt: null, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+    select: { scopes: { select: { type: true, legalEntityId: true, orgUnitId: true, includeDescendants: true } } },
+  });
+  for (const grant of grants) {
+    const conditions = parseConditions((grant.conditions ?? null) as never);
+    if (conditions === null) continue; // already rejected by assertMayDefineGrants
+    const held = await resolveScope(tx, actor, grant.permission, now, { satisfiedSets: conditions.set ? [conditions.set] : [] });
+    for (const assignment of assignments) {
+      const requested = await expandRequestedScopes(
+        tx,
+        actor.tenantId,
+        assignment.scopes.map((scope) => ({
+          type: scope.type,
+          legalEntityId: scope.legalEntityId ?? undefined,
+          orgUnitId: scope.orgUnitId ?? undefined,
+          includeDescendants: scope.includeDescendants,
+        })),
+      );
+      if (!heldCoversRequest(held.parts, requested, grantFieldSets(conditions))) {
+        throw new ForbiddenError({ message: "This role is assigned over scopes you cannot grant these permissions in." });
+      }
     }
   }
 }

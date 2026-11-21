@@ -3,7 +3,9 @@ import { changedFields } from "@/lib/changed-fields";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { revokeAllSessionsForUser } from "@/server/auth";
 import {
+  assertMayDisableUser,
   buildScopeWhere,
+  canInTx,
   employeeRowAttributes,
   employeeScopeColumns,
   enforceInTx,
@@ -28,7 +30,7 @@ import {
 import { withTenant, type TenantTx } from "@/server/db";
 import { assertLegalEntityUsable } from "@/server/organization";
 import { effectiveAt, endInstant } from "./active-window";
-import { EMPLOYEE_API_FIELD_MAP, employeeSelect, withDerivedFields } from "./fields";
+import { EMPLOYEE_API_FIELD_MAP, employeeSelect, withDerivedFields, type EmployeeRow } from "./fields";
 import type {
   CreateEmployeeInput,
   ListEmployeesQuery,
@@ -81,6 +83,9 @@ export async function createEmployee(
         if (!unit.active) throw new InvalidStateTransitionError({ message: "Employees cannot be placed in an archived unit." });
       }
       await assertLegalEntityUsable(tx, actor.tenantId, input.legalEntityId);
+      // The legal employer is part of the data scope (LEGAL_ENTITY scopes): a unit-scoped creator
+      // must not file a record under an employer outside their scope.
+      if (input.legalEntityId) await enforceInTx(tx, actor, "employees.create", { legalEntityId: input.legalEntityId });
       if (input.hireDate && input.hireDate.getTime() > Date.now() + 366 * 86_400_000) {
         throw new ValidationError({ message: "The hire date is too far in the future.", field: "hireDate" });
       }
@@ -110,9 +115,28 @@ export async function createEmployee(
         targetId: employee.id,
         newValue: { ...input, orgUnitId },
       });
-      return projectFields(withDerivedFields(employee), decision, EMPLOYEE_API_FIELD_MAP);
+      return projectForViewer(tx, actor, employee, decision);
     }),
   );
+}
+
+/**
+ * What the caller may SEE of an employee as it is now (after a write): the `employees.view` decision
+ * on the post-change record, not the write grant's. A write can move a record into another scope
+ * (e.g. a different legal employer), and the response must not reveal fields the caller's view
+ * grants do not cover for it. Falls back to `{ id }` when the caller may no longer view it.
+ */
+async function projectForViewer(
+  tx: TenantTx,
+  actor: Actor,
+  row: EmployeeRow,
+  writeDecision: AccessDecision,
+): Promise<Record<string, unknown>> {
+  const view = await canInTx(tx, actor, "employees.view", { employeeId: row.id });
+  if (!view.allowed) return { id: row.id };
+  // Only fields BOTH grants cover: the response is never wider than what the caller could write or view.
+  const shared = view.fieldSets.filter((set) => writeDecision.fieldSets.includes(set) || set === "base");
+  return projectFields(withDerivedFields(row), { allowed: true, fieldSets: shared }, EMPLOYEE_API_FIELD_MAP);
 }
 
 /**
@@ -144,6 +168,9 @@ export async function updateEmployee(
       const { changedKeys, previous, next } = changedFields(employee, input);
       if (changedKeys.length === 0) return projectFields(withDerivedFields(employee), decision, EMPLOYEE_API_FIELD_MAP);
       if (input.legalEntityId !== undefined) await assertLegalEntityUsable(tx, actor.tenantId, input.legalEntityId);
+      // Re-pointing the legal employer moves the record between LEGAL_ENTITY scopes: the actor needs
+      // authority over the destination employer too.
+      if (input.legalEntityId) await enforceInTx(tx, actor, "employees.edit", { legalEntityId: input.legalEntityId });
 
       const updated = await tx.employee.update({ where: { id: employee.id }, data: input, select: employeeSelect(now) });
       await recordAudit(tx, {
@@ -154,7 +181,7 @@ export async function updateEmployee(
         previousValue: previous,
         newValue: next,
       });
-      return projectFields(withDerivedFields(updated), decision, EMPLOYEE_API_FIELD_MAP);
+      return projectForViewer(tx, actor, updated, decision);
     }),
   );
 }
@@ -185,6 +212,14 @@ export async function terminateEmployee(
       throw new ValidationError({ message: "The termination date is before the hire date.", field: "terminationDate" });
     }
 
+    // Terminating takes the person out of authz entirely; never let that lock out a privileged user
+    // the actor could not administer (HR must not be able to terminate the Owner).
+    let mayDeactivateLogin = false;
+    if (employee.userId) {
+      await assertMayDisableUser(tx, actor, employee.userId);
+      mayDeactivateLogin = (await canInTx(tx, actor, "users.archive", { employeeId: employee.id })).allowed;
+    }
+
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`employee-assignment:${employee.id}`}))`;
     const openPlacements = await tx.organizationalAssignment.findMany({
       where: { tenantId: actor.tenantId, employeeId: employee.id, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
@@ -202,7 +237,10 @@ export async function terminateEmployee(
     }
 
     let revokedSessions = 0;
-    if (employee.userId) {
+    // Deactivating the LOGIN is user administration: it needs users.archive over that user. Without
+    // it the employee record is still terminated (and authz ignores them), but the account is left
+    // for a user administrator and the audit event says so.
+    if (employee.userId && mayDeactivateLogin) {
       await tx.user.update({ where: { id: employee.userId }, data: { status: "DEACTIVATED" } });
       revokedSessions = await revokeAllSessionsForUser(tx, actor.tenantId, employee.userId);
     }
@@ -223,7 +261,8 @@ export async function terminateEmployee(
         terminationDate: input.terminationDate.toISOString().slice(0, 10),
         endedPlacements: openPlacements.length,
         endedManagerAssignments: openManagers.length,
-        deactivatedUserId: employee.userId,
+        deactivatedUserId: mayDeactivateLogin ? employee.userId : null,
+        loginLeftActiveForUserAdministrator: Boolean(employee.userId) && !mayDeactivateLogin,
         revokedSessions,
       },
       reason: input.reason,

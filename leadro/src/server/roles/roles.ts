@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import {
   assertMayDefineGrants,
+  assertMayGrantToExistingHolders,
   assertNotHoldingRole,
   enforceInTx,
   projectFields,
@@ -206,7 +207,10 @@ export async function replaceRolePermissions(actor: Actor, ctx: RequestContext, 
       return projectFields(toRoleView(role, { withPermissions: true }), decision, ROLE_FIELD_MAP);
     }
 
-    await assertMayDefineGrants(tx, actor, input.permissions.filter((grant) => added.includes(grant.permission) || changed.includes(grant.permission)));
+    const toAdd = input.permissions.filter((grant) => added.includes(grant.permission) || changed.includes(grant.permission));
+    await assertMayDefineGrants(tx, actor, toAdd);
+    // The role may already be assigned: every live holder's scope must be one the editor could grant it in.
+    await assertMayGrantToExistingHolders(tx, actor, roleId, toAdd);
     await tx.rolePermission.deleteMany({ where: { tenantId: actor.tenantId, roleId } });
     await storeGrants(tx, actor.tenantId, roleId, input.permissions);
     if (!role.requiresMfa && mfaIsMandatory(role.templateKey, input.permissions)) {

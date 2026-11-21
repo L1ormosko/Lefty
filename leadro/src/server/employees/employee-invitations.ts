@@ -58,6 +58,19 @@ export async function inviteEmployee(
     actor.tenantId,
     { email, invitedById: actor.userId, employeeId, roleId: input.roleId, scope: input.scope },
     client,
+    // Re-check authority in the transaction that creates the invitation (the read above only
+    // computed the address; nothing is decided on it).
+    async (tx) => {
+      await enforceInTx(tx, actor, "users.create", { employeeId });
+      const employee = await tx.employee.findFirst({
+        where: { id: employeeId, tenantId: actor.tenantId },
+        select: { userId: true, status: true },
+      });
+      if (!employee) throw new NotFoundError();
+      if (employee.status === "TERMINATED" || employee.userId) {
+        throw new ConflictError({ message: "This employee can no longer be invited." });
+      }
+    },
   );
   return { invitationId: invitation.invitationId, expiresAt: invitation.expiresAt };
 }

@@ -322,8 +322,7 @@ No new dependencies (Zod already present). No schema change and no migration: ev
 - **d. Translation overrides**: kept `localization.edit` (save) and `localization.configure` (review, delete) instead of a new
   `translations.manage` permission: the catalog already models edit vs configure, and two permissions keep the review step
   meaningful. New `*AsActor` functions check the permission (tenant-level), audit in the same transaction and map
-  `TranslationOverrideError` to `ValidationError` / `NotFoundError` / `ConflictError`. No self-review rule is applied (a
-  single Owner holds both permissions and must be able to publish a translation); revisit if a stricter tenant wants it.
+  `TranslationOverrideError` to `ValidationError` / `NotFoundError` / `ConflictError`. Fix round 1: the reviewer must not be the last editor (`assertNotSelfApproval`), and the ungated functions are no longer exported from `index.ts`.
 - **e. API conventions**: the error table now lists exactly `ERROR_CODES` (a test parses the doc and compares codes and HTTP
   statuses). Documented the cursor pagination actually implemented and that only the cookie transport exists.
 
@@ -365,3 +364,21 @@ No new dependencies (Zod already present). No schema change and no migration: ev
   `RouteHandler` is now an overloaded interface `(req)` + `(req, routeContext)` and `NextRouteContext.params` is required, because
   Next's validator reads the last signature and rejects an optional second parameter. Direct callers (tests) may still call
   `handler(req)`. `withSessionCookie` forwards accordingly. `npx next build` now passes with all routes.
+
+### Task 5 fix round 1 (review findings)
+- **Role edits vs live holders**: `replaceRolePermissions` also runs `assertMayGrantToExistingHolders`: each added/changed grant must be
+  grantable (scope + field sets, one held part, like `assignRole`) in the scopes of every non-revoked, unexpired assignment of the role.
+- **Legal entity is scope**: creating/re-pointing `legalEntityId` on employees and org units needs the write permission over
+  `{ legalEntityId }` (so a unit-scoped manager cannot choose an employer outside their scope; denial is 404). Employee write responses are
+  projected with the post-change `employees.view` decision intersected with the write grant's field sets (`projectForViewer`).
+- **Archive vs scheduled placements**: the placement count ignores `effectiveFrom`, so future-dated placements block archiving.
+- **Seed atomicity**: a failing seed deletes the tenant it created (tenant rows roll back with their transaction), so re-runs are not
+  fooled by an empty company.
+- **Managers** return a projected view (no `tenantId`). **Invitations/deactivation**: `createInvitation(..., precheck)` runs the caller's
+  `users.create` check inside its transaction; `deactivateUserAccountInTx` lets `users.deactivateUser` check and write in one transaction.
+- **Termination authority**: `assertMayDisableUser` refuses terminating a user who holds a sensitive role the actor could not revoke (HR cannot
+  terminate the Owner). The linked login is deactivated only when the actor also holds `users.archive` over it; otherwise the employee is
+  terminated and the audit event carries `loginLeftActiveForUserAdministrator: true`.
+- **i18n**: ungated override functions are no longer exported from `index.ts`; the reviewer must not be the last editor.
+- **Corrections of the past**: an assignment start/end more than 5 minutes in the past needs a `reason` and is audited with `correction: true`.
+

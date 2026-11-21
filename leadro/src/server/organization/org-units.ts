@@ -55,6 +55,8 @@ export async function createOrgUnit(actor: Actor, ctx: RequestContext, input: Cr
       assertParentAllowed(input.type, parent);
       await assertSiblingNameFree(tx, actor.tenantId, parentId, input.name);
       await assertLegalEntityUsable(tx, actor.tenantId, input.legalEntityId);
+      // The legal entity is part of the data scope (LEGAL_ENTITY scopes cover units of an entity).
+      if (input.legalEntityId) await enforceInTx(tx, actor, "organization.create", { legalEntityId: input.legalEntityId });
 
       const unit = await tx.orgUnit.create({
         data: {
@@ -106,6 +108,7 @@ export async function updateOrgUnit(
       if (changedKeys.length === 0) return projectFields(unit, decision, ORG_UNIT_FIELD_MAP);
       if (input.name !== undefined) await assertSiblingNameFree(tx, actor.tenantId, unit.parentId, input.name, unit.id);
       if (input.legalEntityId !== undefined) await assertLegalEntityUsable(tx, actor.tenantId, input.legalEntityId);
+      if (input.legalEntityId) await enforceInTx(tx, actor, "organization.edit", { legalEntityId: input.legalEntityId });
 
       const updated = await tx.orgUnit.update({
         where: { id: unit.id },
@@ -208,7 +211,7 @@ export async function archiveOrgUnit(
         where: {
           tenantId: actor.tenantId,
           orgUnitId: unit.id,
-          effectiveFrom: { lte: now },
+          // Includes scheduled (future-dated) placements: they would otherwise outlive the archive.
           OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
         },
       }),

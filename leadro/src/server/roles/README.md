@@ -22,6 +22,7 @@ Rules enforced on every role write:
 4. `requiresMfa` is forced on for roles with `permissions.manage|assign` or `*.configure` (and the always-MFA
    templates) and cannot be lowered while it is mandatory.
 5. A clone is an ordinary custom role (no template key), so template re-provisioning never confuses it with the original.
+Editing a role that is already assigned additionally requires that the editor could grant each added permission in every live holder's scope (`assertMayGrantToExistingHolders`).
 Assignments always carry explicit scopes; granting/revoking follows authz's anti-escalation rules (not to yourself, only
 over scopes you administer, only roles whose permissions you hold). Nothing is deleted: archived roles and revoked or
 expired assignments remain as history, and every change is audited (`role.*`, `role_assignment.*`).

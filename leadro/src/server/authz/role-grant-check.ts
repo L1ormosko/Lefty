@@ -51,7 +51,7 @@ export function heldCoversRequest(parts: ScopePart[], requested: RequestedScope[
   );
 }
 
-async function expandRequestedScopes(tx: TenantTx, tenantId: string, scopes: ScopeInput[]): Promise<RequestedScope[]> {
+export async function expandRequestedScopes(tx: TenantTx, tenantId: string, scopes: ScopeInput[]): Promise<RequestedScope[]> {
   const requested: RequestedScope[] = [];
   for (const scope of scopes) {
     const neededUnits = scope.orgUnitId

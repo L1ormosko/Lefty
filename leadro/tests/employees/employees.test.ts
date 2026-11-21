@@ -176,3 +176,54 @@ describe("terminating an employee", () => {
     expect((await call(terminate, "POST", "/x", { cookie: hr, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-01", reason: "x" } })).status).toBe(200);
   });
 });
+
+describe("legal employer is part of the data scope", () => {
+  it("a unit-scoped manager cannot file a record under, or re-point it to, a legal entity outside their scope", async () => {
+    const created = await create(cityManagerA, person({ orgUnitId: w.units.cityA, legalEntityId: w.legalEntityId }));
+    expect(created.status).toBe(404);
+
+    const own = (await create(cityManagerA, person({ orgUnitId: w.units.cityA }))).json.data;
+    const repointed = await call(patchEmployee, "PATCH", "/x", { cookie: cityManagerA, params: { id: own.id }, body: { legalEntityId: w.legalEntityId } });
+    expect(repointed.status).toBe(404);
+    const row = await withTenant(w.tenantId, (tx) => tx.employee.findUniqueOrThrow({ where: { id: own.id } }));
+    expect(row.legalEntityId).toBeNull();
+
+    // a tenant-wide holder may
+    expect((await create(hr, person({ orgUnitId: w.units.cityA, legalEntityId: w.legalEntityId }))).status).toBe(201);
+  });
+
+  it("org units: creating or re-pointing a unit's legal entity needs authority over that entity", async () => {
+    const { POST: createUnit } = await import("@/app/api/v1/organization/units/route");
+    const { PATCH: patchUnit } = await import("@/app/api/v1/organization/units/[id]/route");
+    const denied = await call(createUnit, "POST", "/x", { cookie: cityManagerA, body: { type: "TEAM", name: unique("T"), parentId: w.units.cityA, legalEntityId: w.legalEntityId } });
+    expect(denied.status).toBe(404);
+    const team = (await call(createUnit, "POST", "/x", { cookie: cityManagerA, body: { type: "TEAM", name: unique("T"), parentId: w.units.cityA } })).json.data;
+    expect((await call(patchUnit, "PATCH", "/x", { cookie: cityManagerA, params: { id: team.id }, body: { legalEntityId: w.legalEntityId } })).status).toBe(404);
+    expect((await call(patchUnit, "PATCH", "/x", { cookie: ceo, params: { id: team.id }, body: { legalEntityId: w.legalEntityId } })).status).toBe(200);
+  });
+});
+
+describe("terminating people with privileged logins", () => {
+  it("HR cannot terminate (and so lock out) a user who holds the Owner role, but the Owner can", async () => {
+    const owner2 = await createPerson(w.tenantId, "second-owner", { orgUnitId: w.units.state });
+    await grantTemplate(w.tenantId, owner2, w.roles.OWNER_CEO, [{ type: "TENANT" }]);
+    const attempt = await call(terminate, "POST", "/x", { cookie: hr, params: { id: owner2.employeeId! }, body: { terminationDate: "2026-11-01", reason: "x" } });
+    expect(attempt.status).toBe(403);
+    await withTenant(w.tenantId, async (tx) => {
+      expect((await tx.employee.findUniqueOrThrow({ where: { id: owner2.employeeId! } })).status).toBe("ACTIVE");
+      expect((await tx.user.findUniqueOrThrow({ where: { id: owner2.userId } })).status).toBe("ACTIVE");
+    });
+    expect((await call(terminate, "POST", "/x", { cookie: ceo, params: { id: owner2.employeeId! }, body: { terminationDate: "2026-11-01", reason: "left" } })).status).toBe(200);
+  });
+
+  it("without users.archive the employee record is terminated but the login is left for a user administrator (flagged in the audit)", async () => {
+    const worker = await createPerson(w.tenantId, "hr-term", { orgUnitId: w.units.cityA });
+    expect((await call(terminate, "POST", "/x", { cookie: hr, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-01", reason: "x" } })).status).toBe(200);
+    await withTenant(w.tenantId, async (tx) => {
+      expect((await tx.employee.findUniqueOrThrow({ where: { id: worker.employeeId! } })).status).toBe("TERMINATED");
+      expect((await tx.user.findUniqueOrThrow({ where: { id: worker.userId } })).status).toBe("ACTIVE");
+    });
+    const [event] = await auditEvents(w.tenantId, "employee.terminate", worker.employeeId!);
+    expect(event.newValue).toMatchObject({ loginLeftActiveForUserAdministrator: true, deactivatedUserId: null });
+  });
+});

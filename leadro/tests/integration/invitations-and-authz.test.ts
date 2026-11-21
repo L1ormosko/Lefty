@@ -229,3 +229,16 @@ describe("employee invitation API", () => {
     expect(sent).toHaveLength(0);
   });
 });
+
+describe("invitation creation is one transaction with its authority check", () => {
+  it("a failing in-transaction precheck creates nothing and sends nothing", async () => {
+    const address = email();
+    await expect(
+      createInvitation(w.tenantId, { email: address, invitedById: null }, testClient(), async () => {
+        throw new ForbiddenError();
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await withTenant(w.tenantId, (tx) => tx.invitation.count({ where: { email: address } }))).toBe(0);
+    expect(sent).toHaveLength(0);
+  });
+});

@@ -102,6 +102,17 @@ describe("development seed", () => {
     expect((await can(stateActor, "organization.create")).allowed).toBe(true);
   });
 
+  it("is atomic: a failing seed leaves no empty tenant behind, and a re-run can succeed", async () => {
+    const slug = `seedtest-broken-${suffix}`;
+    const broken: TenantSpec = { ...specs[0], slug, units: [{ key: "bu", type: "BUSINESS_UNIT", name: "Only unit" }] }; // people refer to units that do not exist
+    await expect(seedTenant(broken, passwordHash)).rejects.toThrow(/Seed spec error/);
+    expect(await prisma.tenant.count({ where: { slug } })).toBe(0);
+
+    const fixed = await seedTenant({ ...specs[0], slug }, passwordHash);
+    expect(fixed.created).toBe(true);
+    expect(fixed.people).toHaveLength(ROLE_TEMPLATES.length);
+  });
+
   it("is idempotent: seeding an existing company code changes nothing", async () => {
     const before = await withTenant(results[0].tenantId, (tx) => tx.user.count());
     const again = await seedTenant(specs[0], passwordHash);
