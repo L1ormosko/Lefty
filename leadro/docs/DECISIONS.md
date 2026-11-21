@@ -173,3 +173,48 @@ No new dependencies (uses node:crypto, Zod, Prisma already in the stack).
 - **Approval is bound to reviewed text**: `markOverrideReviewed` takes `reviewedValue` and conflicts if the value changed.
 - **Server module uses a local `TranslationOverrideError`** because `src/server/core` (AppError) lands in a parallel task;
   map it to `AppError` when merging.
+## Task 3 decisions (authentication)
+
+**New dependency:** `bcryptjs@3.0.2` (exact). Pure-JS bcrypt, ships its own types, no native build.
+Requested by the Task 3 brief (cost 12). TOTP and AES-256-GCM use `node:crypto`; no other packages.
+
+1. **Schema change:** `Session.mfaPending boolean default false` (migration
+   `20261121150000_auth_session_mfa_pending`). RLS is unchanged (column added to an existing
+   protected table). A password-correct login of an MFA user creates a pending session that only the
+   MFA endpoints and logout accept; no signed challenge token was needed.
+2. **Lockout without a window column:** failures are counted from `AuthenticationEvent`
+   (`LOGIN_FAILED` + `MFA_CHALLENGE_FAILED`) newer than the latest of: 15 min ago, `lockedUntil`,
+   `lastLoginAt`, `passwordChangedAt`. `failedLoginCount` is kept as a display/convenience mirror.
+   `User.status = LOCKED` is not used; `lockedUntil` is the only lock mechanism.
+3. **Locked accounts get the same generic 401** as a wrong password (a distinct "locked" answer would
+   confirm the account exists). The reason is in the login history.
+4. **MFA required when** any non-revoked, in-date assignment of an active role has `requiresMfa`, OR the
+   user already enrolled. Users who must enroll log in to an `mfaPending` session and enroll through it.
+5. **Rate limiting is in-memory** (fixed window, per process), documented in the auth README. The
+   DB-backed lockout is the brute-force control; the limiter blunts floods.
+6. **Invitation accept** creates the user when absent or activates an `INVITED` user, links
+   `Invitation.employeeId` if the employee has no user, and creates a plain `RoleAssignment` for
+   `Invitation.roleId` (no scopes: scoping belongs to authz/user administration). It refuses to
+   touch ACTIVE/DEACTIVATED accounts. No session is issued; the user logs in afterwards.
+7. **Reset tokens are delivered through an `AuthNotifier` interface.** No mail provider exists
+   (§28.3), so the default notifier logs only that a token was issued (never the token).
+8. **Cookie flags:** HttpOnly, SameSite=Lax, Secure in every environment except `next dev`.
+   Idle timeout 60 min, absolute 12 h (constants in `auth/config.ts`).
+9. **`defineRoute` cannot set headers**, so routes that set/clear the cookie are wrapped in
+   `withSessionCookie` (auth module) rather than changing core.
+10. **TOTP replay** is refused by looking for a successful MFA event with the same time step in the
+    last 2 minutes (JSON path query on `AuthenticationEvent.metadata`).
+11. **`LEADRO_ENCRYPTION_KEY`** is read lazily: the app boots without it, but every MFA code path
+    throws `EncryptionKeyError` (HTTP 500 generic) instead of ever storing plaintext.
+
+### Task 3 fix round 1
+12. **Client IP trust:** `LEADRO_TRUSTED_PROXY_HOPS` (default 0 = ignore `x-forwarded-for`, store no IP;
+    N = Nth entry from the right). Per-IP limits are skipped (with a log) when no IP is known.
+13. **TOTP replay** is now `User.mfaLastUsedStep` + conditional UPDATE (replaces decision 10): atomic,
+    and refuses older in-window steps after a newer one.
+14. **Session token rotation** when an MFA-pending session is promoted (same row, new token hash).
+15. **Invitations** validate inviter/role/employee/scope targets, require a scope with a role
+    (columns `scopeType/scopeLegalEntityId/scopeOrgUnitId/scopeIncludeDescendants`, no FKs to avoid
+    touching org models), and re-check inviter and role at accept. Migration `*_auth_fix_round_1`
+    (columns only, RLS unchanged).
+16. **bcrypt outside transactions** in login, invitation accept and password reset.
