@@ -122,5 +122,9 @@ queue/storage/map/notification SDK (spec 28.3: no fake integrations).
 - **Reviewer may equal editor**: no four-eyes rule is specified in §16.6; add one if the business wants it.
 - **`i18n:check` JSX scan is a heuristic**, not a parser; `// i18n-ignore` on a line suppresses a finding. It ignores
   `src/app/dev/**` and test files. The parity check also validates placeholder sets and key format.
+- **Translation wording (review round 1)**: he-IL uses impersonal phrasing ("יש ל...") in all messages; COMMON.CONFIRM is
+  "כן, להמשיך" to differ from COMMON.APPROVE "אישור"; directories are "מאגר ..."; es-US Financial Overview is "Panorama
+  financiero" vs Financial Summary "Resumen financiero". Wording is subject to native-speaker review before release.
+- **Approval is bound to reviewed text**: `markOverrideReviewed` takes `reviewedValue` and conflicts if the value changed.
 - **Server module uses a local `TranslationOverrideError`** because `src/server/core` (AppError) lands in a parallel task;
   map it to `AppError` when merging.

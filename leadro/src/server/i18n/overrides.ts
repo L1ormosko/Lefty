@@ -4,7 +4,7 @@ import { CATALOGS, isSupportedLocale, type Locale, type TranslationOverrides } f
 /** Raised for invalid override requests. Wrap/map to the core AppError VALIDATION_FAILED / NOT_FOUND at the API layer. */
 export class TranslationOverrideError extends Error {
   constructor(
-    readonly code: "UNSUPPORTED_LOCALE" | "UNKNOWN_KEY" | "PLACEHOLDER_MISMATCH" | "NOT_FOUND",
+    readonly code: "UNSUPPORTED_LOCALE" | "UNKNOWN_KEY" | "PLACEHOLDER_MISMATCH" | "NOT_FOUND" | "CONFLICT",
     message: string,
   ) {
     super(message);
@@ -71,22 +71,32 @@ export async function saveOverride(tenantId: string, input: OverrideInput): Prom
   );
 }
 
-/** Marks an override as human-reviewed so it starts being served. */
+/**
+ * Marks an override as human-reviewed so it starts being served.
+ *
+ * The approval is bound to the text the reviewer actually read (`reviewedValue`): the update only
+ * applies if the stored value still equals it, in one atomic statement. If someone edited the
+ * override after the reviewer loaded it, we raise CONFLICT instead of approving unseen text (§16.6).
+ */
 export async function markOverrideReviewed(
   tenantId: string,
-  input: { locale: string; key: string; reviewerUserId: string },
+  input: { locale: string; key: string; reviewedValue: string; reviewerUserId: string },
 ): Promise<void> {
   if (!isSupportedLocale(input.locale)) {
     throw new TranslationOverrideError("UNSUPPORTED_LOCALE", `Unsupported locale: ${input.locale}`);
   }
   const locale: Locale = input.locale;
-  const result = await withTenant(tenantId, (tx) =>
-    tx.translationResource.updateMany({
-      where: { tenantId, locale, key: input.key },
+  await withTenant(tenantId, async (tx) => {
+    const result = await tx.translationResource.updateMany({
+      where: { tenantId, locale, key: input.key, value: input.reviewedValue },
       data: { reviewed: true, reviewedAt: new Date(), reviewedById: input.reviewerUserId },
-    }),
-  );
-  if (result.count === 0) throw new TranslationOverrideError("NOT_FOUND", "No such translation override");
+    });
+    if (result.count > 0) return;
+    const exists = await tx.translationResource.findFirst({ where: { tenantId, locale, key: input.key }, select: { id: true } });
+    throw exists
+      ? new TranslationOverrideError("CONFLICT", "The override changed after it was loaded; review the current text")
+      : new TranslationOverrideError("NOT_FOUND", "No such translation override");
+  });
 }
 
 /** Removes an override so the built-in text is used again. */

@@ -12,6 +12,8 @@ overrides. Implements spec §16.2, §16.5, §16.6. Pure logic is in `src/lib/i18
 
 ## Invariants
 - Only overrides with `reviewed = true` are ever served (`loadReviewedOverrides` is the single filter).
+- `markOverrideReviewed` requires `reviewedValue` and only approves if the stored value still equals it (else CONFLICT),
+  so a reviewer can never approve text they did not read.
 - Saving/editing an override always resets it to unreviewed (value change = new review).
 - Overrides must target an existing built-in key and keep the same `{placeholders}`.
 - All access goes through `withTenant` (RLS); overrides never cross tenants.

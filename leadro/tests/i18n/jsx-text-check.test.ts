@@ -17,6 +17,34 @@ describe("hardcoded JSX text heuristic", () => {
     expect(findHardcodedJsxText(`const A = () => <p>Guardar cambios</p>;`)).toHaveLength(1);
   });
 
+  it.each([
+    ["text before an expression", `const A = () => <p>Hello {name}</p>;`],
+    ["text after an expression", `const A = () => <p>{n} items left</p>;`],
+    ["text with a colon before an expression", `const A = () => <p>Total: {x}</p>;`],
+    ["text with an ampersand", `const A = () => <p>Save & close</p>;`],
+    ["text with parentheses", `const A = () => <p>Call us (24/7)</p>;`],
+    ["text after a closing tag", `const A = () => <p><b>{n}</b> items</p>;`],
+    ["text in a conditional branch", `const A = () => <p>{ok && <span>Done</span>}</p>;`],
+  ])("flags %s", (_label, source) => {
+    expect(findHardcodedJsxText(source)).toHaveLength(1);
+  });
+
+  it("does not flag code after a self-closing tag or entity-only text", () => {
+    expect(findHardcodedJsxText(`const A = () => <hr />;\nexport default A;`)).toEqual([]);
+    expect(findHardcodedJsxText(`const A = () => <p>&nbsp;&mdash;</p>;`)).toEqual([]);
+    expect(findHardcodedJsxText(`const A = () => <p onClick={() => go()}>{t("X.Y")}</p>;`)).toEqual([]);
+  });
+
+  it("does not mistake generics in components or hooks for JSX", () => {
+    const source = `
+      export function List<T>({ items }: { items: Array<T> }) {
+        const [s, setS] = useState<string | null>(null);
+        const f = <T,>(x: T) => x;
+        return <ul>{items.map((i) => <li key={String(i)}>{t("COMMON.SAVE")}</li>)}</ul>;
+      }`;
+    expect(findHardcodedJsxText(source)).toEqual([]);
+  });
+
   it("accepts translated text, expressions, symbols and non-text attributes", () => {
     const source = `
       const A = () => (

@@ -25,7 +25,7 @@ describe("translation overrides (spec 16.6)", () => {
     await saveOverride(tenant.id, { locale: "es-US", key: "COMMON.SAVE", value: "Salvar", editorUserId: editor.id });
     expect(await loadReviewedOverrides(tenant.id)).toEqual({});
 
-    await markOverrideReviewed(tenant.id, { locale: "es-US", key: "COMMON.SAVE", reviewerUserId: reviewer.id });
+    await markOverrideReviewed(tenant.id, { locale: "es-US", key: "COMMON.SAVE", reviewedValue: "Salvar", reviewerUserId: reviewer.id });
     const overrides = await loadReviewedOverrides(tenant.id);
     expect(overrides).toEqual({ "es-US": { "COMMON.SAVE": "Salvar" } });
     expect(createTranslator({ localeChain: ["es-US"], overrides })("COMMON.SAVE")).toBe("Salvar");
@@ -36,21 +36,38 @@ describe("translation overrides (spec 16.6)", () => {
     const user = await createUser(tenant.id, { email: "a@example.com" });
     const base = { locale: "en-US", key: "COMMON.SAVE", editorUserId: user.id };
     await saveOverride(tenant.id, { ...base, value: "Keep" });
-    await markOverrideReviewed(tenant.id, { locale: "en-US", key: "COMMON.SAVE", reviewerUserId: user.id });
+    await markOverrideReviewed(tenant.id, { locale: "en-US", key: "COMMON.SAVE", reviewedValue: "Keep", reviewerUserId: user.id });
     expect(await loadReviewedOverrides(tenant.id)).toEqual({ "en-US": { "COMMON.SAVE": "Keep" } });
 
     await saveOverride(tenant.id, { ...base, value: "Keep it" });
     expect(await loadReviewedOverrides(tenant.id)).toEqual({});
   });
 
+  it("refuses to approve text that changed after the reviewer loaded it", async () => {
+    const tenant = await createTenant("i18n");
+    const user = await createUser(tenant.id, { email: "a@example.com" });
+    const base = { locale: "en-US", key: "COMMON.SAVE", editorUserId: user.id };
+    await saveOverride(tenant.id, { ...base, value: "Keep" });
+    // Reviewer read "Keep"; meanwhile an editor swaps in different text.
+    await saveOverride(tenant.id, { ...base, value: "Something else" });
+
+    await expect(
+      markOverrideReviewed(tenant.id, { locale: "en-US", key: "COMMON.SAVE", reviewedValue: "Keep", reviewerUserId: user.id }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await loadReviewedOverrides(tenant.id)).toEqual({});
+
+    await markOverrideReviewed(tenant.id, { locale: "en-US", key: "COMMON.SAVE", reviewedValue: "Something else", reviewerUserId: user.id });
+    expect(await loadReviewedOverrides(tenant.id)).toEqual({ "en-US": { "COMMON.SAVE": "Something else" } });
+  });
+
   it("isolates overrides between tenants", async () => {
     const [a, b] = [await createTenant("i18n-a"), await createTenant("i18n-b")];
     const user = await createUser(a.id, { email: "a@example.com" });
     await saveOverride(a.id, { locale: "en-US", key: "COMMON.SAVE", value: "A-save", editorUserId: user.id });
-    await markOverrideReviewed(a.id, { locale: "en-US", key: "COMMON.SAVE", reviewerUserId: user.id });
+    await markOverrideReviewed(a.id, { locale: "en-US", key: "COMMON.SAVE", reviewedValue: "A-save", reviewerUserId: user.id });
     expect(await loadReviewedOverrides(b.id)).toEqual({});
     await expect(
-      markOverrideReviewed(b.id, { locale: "en-US", key: "COMMON.SAVE", reviewerUserId: user.id }),
+      markOverrideReviewed(b.id, { locale: "en-US", key: "COMMON.SAVE", reviewedValue: "A-save", reviewerUserId: user.id }),
     ).rejects.toBeInstanceOf(TranslationOverrideError);
   });
 
@@ -67,7 +84,7 @@ describe("translation overrides (spec 16.6)", () => {
     const tenant = await createTenant("i18n");
     const user = await createUser(tenant.id, { email: "a@example.com" });
     await saveOverride(tenant.id, { locale: "en-US", key: "COMMON.SAVE", value: "Keep", editorUserId: user.id });
-    await markOverrideReviewed(tenant.id, { locale: "en-US", key: "COMMON.SAVE", reviewerUserId: user.id });
+    await markOverrideReviewed(tenant.id, { locale: "en-US", key: "COMMON.SAVE", reviewedValue: "Keep", reviewerUserId: user.id });
     await deleteOverride(tenant.id, { locale: "en-US", key: "COMMON.SAVE" });
     expect(await loadReviewedOverrides(tenant.id)).toEqual({});
   });
