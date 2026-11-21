@@ -39,10 +39,13 @@ async function orEmpty<T>(load: () => Promise<T[]>): Promise<T[]> {
 }
 
 /**
- * Active org units the caller may see, pages followed until `maxPages` (default 5 x 200). The tree
+ * Org units the caller may see (active only unless `active: "all"`), pages followed until `maxPages` (default 5 x 200). The tree
  * and the parent pickers need the whole set, not one page.
  */
-export function loadActiveUnits(actor: Actor, maxPages = 5, type?: OrgUnitType): Promise<UnitSummary[]> {
+export function loadActiveUnits(
+  actor: Actor,
+  { maxPages = 5, type, active = "true" }: { maxPages?: number; type?: OrgUnitType; active?: "true" | "all" } = {},
+): Promise<UnitSummary[]> {
   return orEmpty(async () => {
     const units: UnitSummary[] = [];
     let cursor: string | undefined;
@@ -50,7 +53,7 @@ export function loadActiveUnits(actor: Actor, maxPages = 5, type?: OrgUnitType):
       const result = await listOrgUnits(actor, {
         limit: PICKER_LIMIT,
         cursor,
-        active: "true",
+        active,
         type,
       });
       units.push(...(result.data as unknown as UnitSummary[]));
