@@ -15,7 +15,8 @@ afterAll(disconnect);
 const grantAs = (granter: Person, input: ActorAssignRoleInput) =>
   withTenant(w.tenantId, (tx) => assignRole(tx, granter.actor, input));
 
-const target = () => createPerson(w.tenantId, "target", { withEmployee: false });
+/** A user whose employee sits in City A: inside a City A admin's scope. */
+const target = (orgUnitId: string = w.units.cityA) => createPerson(w.tenantId, "target", { orgUnitId });
 
 /** A delegated admin: may assign roles inside City A, and holds jobs.view (base fields) there. */
 async function cityAAdmin(): Promise<Person> {
@@ -56,6 +57,22 @@ describe("assignRole (actor-checked)", () => {
     await expect(
       grantAs(admin, { userId: admin.userId, roleId: role, scopes: [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }] }),
     ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("requires the TARGET user to be inside the granter's permissions.assign scope", async () => {
+    const admin = await cityAAdmin();
+    const role = await makeRole(w.tenantId, "Jobs viewer", [{ permission: "jobs.view" }]);
+    const scopes = [{ type: "ORG_UNIT" as const, orgUnitId: w.units.cityA }];
+
+    // A City B user is outside the City A admin's reach, even for a role/scope the admin may hand out.
+    const cityBUser = await target(w.units.cityB);
+    await expect(grantAs(admin, { userId: cityBUser.userId, roleId: role, scopes })).rejects.toBeInstanceOf(ForbiddenError);
+    // A user with no employee is tenant-level: only a tenant-wide grant reaches them.
+    const tenantLevel = await createPerson(w.tenantId, "no-employee", { withEmployee: false });
+    await expect(grantAs(admin, { userId: tenantLevel.userId, roleId: role, scopes })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(grantAs(w.ceo, { userId: tenantLevel.userId, roleId: role, scopes })).resolves.toBeDefined();
+    // A City A user is fine.
+    await expect(grantAs(admin, { userId: (await target()).userId, roleId: role, scopes })).resolves.toBeDefined();
   });
 
   it("only lets a scoped admin grant within the scopes they hold", async () => {

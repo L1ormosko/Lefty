@@ -13,10 +13,19 @@ export type { GrantConditions } from "./conditions";
 export { can, canInTx, canViewFields } from "./can";
 export { requirePermission } from "./require-permission";
 export type { ResourceResolver } from "./require-permission";
-export { scopeFilter, scopeFilterInTx, resolveScope, buildScopeWhere, withinScope } from "./scope-filter";
-export type { ScopeColumns, ScopeOptions, ResolvedScope } from "./scope-filter";
-export { employeeScopeColumns, orgUnitScopeColumns } from "./scope-columns";
+export {
+  scopeFilter,
+  scopeFilterInTx,
+  resolveScope,
+  buildScopeWhere,
+  withinScope,
+  fieldSetsForRow,
+  projectRows,
+} from "./scope-filter";
+export type { ScopeColumns, ScopeOptions, ResolvedScope, ScopePart, RowScopeAttributes } from "./scope-filter";
+export { employeeScopeColumns, employeeScopeSelect, employeeRowAttributes, orgUnitScopeColumns } from "./scope-columns";
 export { projectFields } from "./project-fields";
+export { EMPLOYEE_FIELD_MAP, CUSTOMER_FIELD_MAP } from "./field-maps";
 export type { FieldMap } from "./project-fields";
 export { explainAccess } from "./explain-access";
 export type { AccessExplanation, AssignmentExplanation, ScopeExplanation } from "./explain-access";

@@ -274,8 +274,8 @@ describe("conditions and sensitive fields", () => {
   });
 
   it("projectFields keeps only the permitted field sets and fails closed on denial", async () => {
-    const record = { name: "Ann", salary: 100, bankAccount: "X", availability: "mon-fri" };
-    const map = { salary: "financial", bankAccount: "financial", availability: "availability" };
+    const record = { name: "Ann", salary: 100, bankAccount: "X", availability: "mon-fri", surprise: 1 };
+    const map = { name: "base", salary: "financial", bankAccount: "financial", availability: "availability", unmapped: "base" };
     const target = { employeeId: w.techA1.employeeId! };
 
     const asOwner = projectFields(record, await can(w.ceo.actor, "employees.view", target), map);
