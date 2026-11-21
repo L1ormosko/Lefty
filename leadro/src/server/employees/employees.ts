@@ -205,6 +205,11 @@ export async function terminateEmployee(
     const employee = await tx.employee.findFirst({ where: { id: employeeId, tenantId: actor.tenantId }, select: employeeSelect(now) });
     if (!employee) throw new NotFoundError();
     if (employee.status === "TERMINATED") throw new InvalidStateTransitionError({ message: "The employee is already terminated." });
+    // Same guard as deactivating a user: nobody ends their own employment record (they would lock
+    // themselves out, and could dodge the review a colleague's decision gets).
+    if (employee.userId === actor.userId || employee.id === actor.employeeId) {
+      throw new ForbiddenError({ message: "You cannot terminate your own employee record." });
+    }
     if (input.terminationDate.getTime() > now.getTime()) {
       throw new ValidationError({ message: "The termination date cannot be in the future.", field: "terminationDate" });
     }
@@ -242,8 +247,10 @@ export async function terminateEmployee(
     // for a user administrator and the audit event says so.
     if (employee.userId && mayDeactivateLogin) {
       await tx.user.update({ where: { id: employee.userId }, data: { status: "DEACTIVATED" } });
-      revokedSessions = await revokeAllSessionsForUser(tx, actor.tenantId, employee.userId);
     }
+    // Sessions end ALWAYS: losing the employment record is what ends access, whoever recorded it, so no
+    // live session of a terminated employee may linger (this needs no user-administration authority).
+    if (employee.userId) revokedSessions = await revokeAllSessionsForUser(tx, actor.tenantId, employee.userId);
 
     const terminated = await tx.employee.update({
       where: { id: employee.id },

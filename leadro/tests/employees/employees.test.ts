@@ -227,3 +227,27 @@ describe("terminating people with privileged logins", () => {
     expect(event.newValue).toMatchObject({ loginLeftActiveForUserAdministrator: true, deactivatedUserId: null });
   });
 });
+
+describe("termination side effects and guards (round 2)", () => {
+  it("always revokes the sessions of the terminated employee, even when the login stays for a user administrator", async () => {
+    const worker = await createPerson(w.tenantId, "sessions", { orgUnitId: w.units.cityA });
+    const cookie = await sessionCookie(worker, w.tenantId);
+    expect((await call(terminate, "POST", "/x", { cookie: hr, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-01", reason: "x" } })).status).toBe(200);
+    await withTenant(w.tenantId, async (tx) => {
+      expect((await tx.user.findUniqueOrThrow({ where: { id: worker.userId } })).status).toBe("ACTIVE");
+      expect((await tx.session.findMany({ where: { userId: worker.userId } })).every((row) => row.revokedAt !== null)).toBe(true);
+    });
+    expect((await call(listEmployees, "GET", "/x", { cookie })).status).toBe(401);
+    const [event] = await auditEvents(w.tenantId, "employee.terminate", worker.employeeId!);
+    expect((event.newValue as { revokedSessions: number }).revokedSessions).toBe(1);
+  });
+
+  it("nobody terminates their own employee record", async () => {
+    const self = await createPerson(w.tenantId, "self-term", { orgUnitId: w.units.cityA });
+    const role = await makeRole(w.tenantId, "self terminator", [{ permission: "employees.archive" }]);
+    await grantTemplate(w.tenantId, self, role, [{ type: "TENANT" }]);
+    const result = await call(terminate, "POST", "/x", { cookie: await sessionCookie(self, w.tenantId), params: { id: self.employeeId! }, body: { terminationDate: "2026-11-01", reason: "x" } });
+    expect(result.status).toBe(403);
+    expect((await withTenant(w.tenantId, (tx) => tx.employee.findUniqueOrThrow({ where: { id: self.employeeId! } }))).status).toBe("ACTIVE");
+  });
+});
