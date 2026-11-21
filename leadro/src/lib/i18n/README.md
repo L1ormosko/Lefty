@@ -29,6 +29,6 @@ widen the DB CHECK constraints on locale columns. `npm run i18n:check` tells you
 
 ## i18n:check
 `npm run i18n:check` fails on missing/extra keys, bad key format, empty values, placeholder drift, and
-hardcoded user-facing text in `src/app` and `src/components` `.tsx` files (heuristic: prose between tags and
+hardcoded user-facing text in `src/app` and `src/components` `.tsx` files (parsed with the TypeScript compiler: JsxText nodes and
 literal `title/placeholder/alt/aria-label` attributes). Ignores `src/app/dev/**` and test files. For a legitimate
 literal (brand name) add an `i18n-ignore` comment on the same line.

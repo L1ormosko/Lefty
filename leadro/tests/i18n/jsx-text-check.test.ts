@@ -45,6 +45,36 @@ describe("hardcoded JSX text heuristic", () => {
     expect(findHardcodedJsxText(source)).toEqual([]);
   });
 
+  it("does not treat TypeScript code between JSX expressions as text (round 2 regressions)", () => {
+    const source = `
+      export function DataTable() {
+        return (
+          <th>
+            {sort.direction === "desc" ? (
+              <DownIcon />
+            ) : sort.direction === "asc" ? (
+              <UpIcon />
+            ) : null}
+          </th>
+        );
+      }
+      export function FieldError({ id }: FieldErrorProps) {
+        return <p id={id} />;
+      }
+      export interface FieldProps {
+        label: string;
+      }
+      export function Field({ label }: FieldProps) {
+        return <label>{label}</label>;
+      }
+      const toneIcon = { success: <Check />, warning: <Warn />, danger: <X />, info: <I />, neutral: <Dot /> };
+      export function StatusBadge({ tone }: StatusBadgeProps) {
+        return <span>{toneIcon[tone]}</span>;
+      }
+      export const Icon = (props: IconProps & { size?: number }) => <svg {...props} />;`;
+    expect(findHardcodedJsxText(source)).toEqual([]);
+  });
+
   it("accepts translated text, expressions, symbols and non-text attributes", () => {
     const source = `
       const A = () => (
