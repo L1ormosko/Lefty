@@ -15,6 +15,8 @@ export const USER_FIELD_MAP = baseFieldMap([
   "mfaEnabled",
   "lastLoginAt",
   "employeeId",
+  "employeeStatus",
+  "loginPendingDeactivation",
   "firstName",
   "lastName",
   "createdAt",
@@ -27,6 +29,12 @@ const activePlacement = (at: Date): Prisma.OrganizationalAssignmentWhereInput =>
 });
 
 /**
+ * A terminated employee has no open placement, so the org-unit scope below no longer reaches their
+ * user: such users (above all those whose login is `loginPendingDeactivation`) are visible only to
+ * tenant-wide user administrators, who are also the only ones who can deactivate them. Decided in
+ * Task 5 fix round 2 (the alternative, keeping them visible through their last unit, would need
+ * history-based scopes in authz).
+ *
  * A user's place in the org tree is that of their employee record: org-unit scopes follow the
  * employee's active placements, legal-entity scopes their legal employer, OWN their own employee.
  * A user with no employee record (e.g. the company Owner) belongs to no unit, so only a TENANT scope
@@ -53,6 +61,7 @@ export const userEmployeeSelect = (at: Date) =>
     id: true,
     firstName: true,
     lastName: true,
+    status: true,
     legalEntityId: true,
     assignments: { where: activePlacement(at), select: { orgUnitId: true } },
   }) satisfies Prisma.EmployeeSelect;
@@ -79,6 +88,9 @@ export function flattenUser(row: UserRow) {
   return {
     ...user,
     employeeId: employee?.id ?? null,
+    employeeStatus: employee?.status ?? null,
+    // Employment ended but the login is still usable: a user administrator must deactivate it.
+    loginPendingDeactivation: employee?.status === "TERMINATED" && user.status === "ACTIVE",
     firstName: employee?.firstName ?? null,
     lastName: employee?.lastName ?? null,
     // not in USER_FIELD_MAP, so removed by projection; kept for `userRowAttributes`

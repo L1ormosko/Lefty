@@ -123,3 +123,29 @@ describe("deactivating a user", () => {
     expect((await withTenant(w.tenantId, (tx) => tx.user.findUniqueOrThrow({ where: { id: w.techB.userId } }))).status).toBe("ACTIVE");
   });
 });
+
+describe("logins pending deactivation (terminated employee, login still ACTIVE)", () => {
+  it("are flagged and filterable, visible to tenant-wide user administrators, and can then be deactivated", async () => {
+    const { POST: terminate } = await import("@/app/api/v1/employees/[id]/terminate/route");
+    const hr = await sessionCookie(w.hr, w.tenantId);
+    const worker = await createPerson(w.tenantId, "pending", { orgUnitId: w.units.cityA });
+    expect((await call(terminate, "POST", "/x", { cookie: hr, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-01", reason: "x" } })).status).toBe(200);
+
+    const pending = await call(listUsers, "GET", "/x", { cookie: ceo, query: { pendingDeactivation: "true", limit: "200" } });
+    const row = pending.json.data.find((user: { id: string }) => user.id === worker.userId);
+    expect(row).toMatchObject({ employeeStatus: "TERMINATED", loginPendingDeactivation: true, status: "ACTIVE" });
+    expect(pending.json.data.every((user: { loginPendingDeactivation: boolean }) => user.loginPendingDeactivation)).toBe(true);
+
+    const healthy = await call(getUser, "GET", "/x", { cookie: ceo, params: { id: w.techA1.userId } });
+    expect(healthy.json.data).toMatchObject({ employeeStatus: "ACTIVE", loginPendingDeactivation: false });
+
+    // A unit-scoped administrator no longer reaches them (no open placement): documented; tenant-wide admins do.
+    const scoped = await call(listUsers, "GET", "/x", { cookie: adminCookie, query: { pendingDeactivation: "true" } });
+    expect(scoped.json.data.some((user: { id: string }) => user.id === worker.userId)).toBe(false);
+    expect((await call(deactivate, "POST", "/x", { cookie: adminCookie, params: { id: worker.userId }, body: { reason: "x" } })).status).toBe(404);
+
+    expect((await call(deactivate, "POST", "/x", { cookie: ceo, params: { id: worker.userId }, body: { reason: "Employment ended" } })).status).toBe(200);
+    const after = await call(listUsers, "GET", "/x", { cookie: ceo, query: { pendingDeactivation: "true", limit: "200" } });
+    expect(after.json.data.some((user: { id: string }) => user.id === worker.userId)).toBe(false);
+  });
+});

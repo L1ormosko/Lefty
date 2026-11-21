@@ -7,6 +7,8 @@ export const userIdSchema = z.string().trim().min(1).max(64);
 export const listUsersQuerySchema = pageQuerySchema.extend({
   status: z.enum(["INVITED", "ACTIVE", "LOCKED", "DEACTIVATED"]).optional(),
   search: z.string().trim().min(1).max(100).optional(),
+  /** `true`: only logins that are still ACTIVE although the employee was terminated (to be deactivated). */
+  pendingDeactivation: z.enum(["true"]).optional(),
 });
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 

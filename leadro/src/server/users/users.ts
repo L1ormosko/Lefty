@@ -53,6 +53,7 @@ export async function listUsers(actor: Actor, query: ListUsersQuery): Promise<Pa
     const callerWhere: Prisma.UserWhereInput = {
       tenantId: actor.tenantId,
       ...(query.status ? { status: query.status } : {}),
+      ...(query.pendingDeactivation ? { status: "ACTIVE" as const, employee: { status: "TERMINATED" as const } } : {}),
       ...(query.search
         ? {
             OR: [
