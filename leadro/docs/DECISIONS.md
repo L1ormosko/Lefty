@@ -218,3 +218,87 @@ Requested by the Task 3 brief (cost 12). TOTP and AES-256-GCM use `node:crypto`;
     touching org models), and re-check inviter and role at accept. Migration `*_auth_fix_round_1`
     (columns only, RLS unchanged).
 16. **bcrypt outside transactions** in login, invitation accept and password reset.
+## Task 4 decisions (authorization engine)
+
+No new dependencies (Zod already present). No schema change and no migration: everything fits the Task 1 schema.
+
+1. **Scopes belong to the assignment, not to the permission.** The schema (and §4.2) attach `AccessScope` to a
+   `RoleAssignment`, but the 4.5 matrix gives one role different scopes per module (Dispatcher: employees by
+   unit, dispatch "Full scope"). Resolution: a template lists permissions plus `suggestedScopeTypes`; every
+   permission of the role uses the assignment's scopes. Dispatcher and Lead Ops therefore default to `ORG_UNIT`
+   (their territory/team), which is narrower than the matrix's "Full scope" (least privilege); grant `TENANT`
+   at assignment time when a company wants that. A per-permission scope would need a schema change
+   (`RolePermission.scopeType`) — deferred, easy to add later.
+2. **Public API.** `can(subject, "module.action", resource?)` -> `{ allowed, reason, via }`; `scopeFilter(subject,
+   permission, columns, { satisfiedSets? })` -> where-fragment; `explainAccess(subject, permission, resource?)`
+   (interpretation of "targetUser|resource": the *subject* is the user being asked about, the route requires
+   `permissions.view`); `canViewFields(subject, "employees.financial_fields", resource?)`;
+   `requirePermission(permission, resolver?)`; `assertNotSelfApproval`; `provisionRoleTemplates(tx, tenantId)`;
+   `assignRole(tx, input)`; `listAuditEventsAsActor(actor, options)`. `subject` is `{ tenantId, userId }` (an `Actor` fits).
+3. **Active grant** = assignment not revoked, `effectiveFrom <= now`, `effectiveTo` null or `> now`, role `active`,
+   user `ACTIVE` and (if linked) employee not `TERMINATED`. Employee id for OWN/ASSIGNED comes from the DB, not
+   from `actor.employeeId`. Every call re-reads the database; nothing is cached (§25.5).
+4. **Org tree "as of now"**: scope roots are expanded by a recursive CTE over *active* units. An archived unit is
+   dropped and the walk does not pass through it, so its whole subtree grants nothing. An employee is in a unit
+   scope if ANY of their active (`effectiveFrom <= now < effectiveTo`) placements is.
+5. **"Manager loses organizational assignment"** is modelled as: the role assignment is revoked/expired, its
+   scope row is removed, the scoped unit is archived or moved out of the subtree, or the employee's placement
+   ends. All take effect on the next request (tests cover each). Scope is not derived from `OrgUnitManager`.
+6. **Conditions** (`RolePermission.conditions`): `fields` (only this field set), `excludeFields`, `set` (only records
+   of a named set). Unknown keys make the grant unusable (fail closed). `set` is checked against
+   `ResourceRef.sets`; for list filters it is ignored unless the caller passes `satisfiedSets`. A "fields"-limited
+   grant still passes the capability check `employees.view`; routes use `canViewFields` for sensitive field sets.
+7. **Resources.** `ResourceRef` carries attributes the *server* loaded (org unit, employee, legal entity, owner,
+   assigned employees, sets). Employee/org-unit/legal-entity ids are verified to exist in the tenant (RLS), so a
+   forged or cross-tenant id gives `RESOURCE_NOT_FOUND` even for a TENANT-scoped grant. `{}` is a tenant-level
+   record (audit log): only TENANT scopes match. No resource = capability check.
+8. **Error mapping in `requirePermission`**: no grant -> 403; out of scope / missing / cross-tenant record -> 404
+   (existence not confirmed). Every denial is written to the audit log (`authz.denied`, outcome DENIED), best
+   effort, with `sourceApp: API` (the `authorize` hook has no request context).
+9. **MFA flag** (`Role.requiresMfa`): templates Owner/CEO, Finance Director and HR Manager always; plus any role
+   holding `permissions.manage`, `permissions.assign` or any `*.configure` (the brief said manage/configure; I also
+   included `permissions.assign` because it can hand out sensitive roles, which makes the COO template MFA-required).
+   The authz engine does not enforce MFA; authentication reads the flag at login. Documented in PERMISSIONS.md.
+10. **Duplicate active assignments (T1 review minor)**: enforced in the service (`assignRole`), not by a DB
+    constraint. Scopes live in a child table, so an exclusion constraint on `RoleAssignment` cannot see them, and
+    forbidding any second (user, role) row would block legitimate temporary extra scopes. A per-(tenant, user)
+    advisory lock serialises concurrent grants. Anyone who writes `RoleAssignment` rows directly bypasses the
+    guard; all application code must go through `assignRole`.
+11. **Templates added by analogy** (Regional Manager, Team Leader, Customer Relations, HR Manager) are my
+    derivation from 4.4 text; flagged for confirmation. COO's `permissions.assign` carries `{ set:
+    "non_sensitive_roles" }`: the permissions module (later) must enforce "non-sensitive roles only".
+12. **Audit read gate (T2 note)**: `listAuditEventsAsActor` requires `audit.view` with a TENANT scope; the raw
+    `listAuditEvents` stays ungated for internal use.
+13. **Employee/org-unit scope column presets** (`employeeScopeColumns`, `orgUnitScopeColumns`) ship with the
+    engine; other models define their own `ScopeColumns` when their modules arrive.
+
+### Task 4 fix round 1 (review findings)
+
+14. **Field sets are explicit and opt-in.** `AccessDecision.fieldSets` lists what a grant covers: a plain grant = `base`;
+    `includeFields` adds sensitive sets (`financial`, `billing`); `fields: x` = only set `x`. Union over matching grants.
+    `projectFields(record, decision, fieldMap)` is the projection helper; routes must use it. `excludeFields` is gone.
+    Only Owner/CEO and Finance Director hold financial/billing sets; HR gets base employee fields only (design call: §4.4
+    lists employee records, employment info, training, certifications and development, not pay).
+15. **Technician loses `financial_reports.view`** (ruling): own summary is self-service, not the module permission.
+16. **`requirePermission` order**: capability (403) -> resolver (same transaction, may return `null` = missing) -> check
+    against the record; once a record is involved every denial is 404. A resource key present but undefined/null
+    (`{ orgUnitId: undefined }`) fails closed as RESOURCE_NOT_FOUND instead of becoming tenant-level.
+17. **`scopeFilter` shape**: `{ AND: [{ OR: parts }] }`; use `withinScope(scope, callerWhere)` to combine. No coverage is
+    `{ AND: [{ id: { in: [] } }] }` because a nested `OR: []` matches EVERYTHING in Prisma (found by a test).
+18. **`explainAccess(actor, targetUserId, permission, resource?)`** is gated inside the function (permissions.view + target and
+    record in the actor's scope; 403/404).
+19. **`assignRole(tx, actor, input)`** enforces anti-escalation (see PERMISSIONS.md); the actor-less variant is renamed
+    `bootstrapRoleAssignment` for seeds/tests only. Coverage rules: TENANT needs tenant-wide; ORG_UNIT needs the unit and its
+    active subtree inside the granter's scope; OWN/ASSIGNED need any scope of the granter; LEGAL_ENTITY needs that entity.
+
+### Task 4 fix round 2
+
+20. **Per-scope field sets.** `ResolvedScope.parts` = one entry per (active grant, scope) with that grant's field sets; the
+    scope-blind `fieldSets` union is removed. Archived-unit scopes yield no part (so no field sets). Rows are projected with
+    `fieldSetsForRow` / `projectRows`. `can()` was already per matched scope; its `fieldSets` is only meaningful with a resource.
+21. **Anti-escalation per held grant**: for each granted scope a single held part must cover the scope AND the role grant's
+    field sets (`partCovers` + `fieldSetsCover`). Two parts are never combined (stricter than needed, never looser).
+22. **`projectFields` requires a field map**; unmapped fields are dropped. Central maps in `field-maps.ts`; financial/billing
+    keys are reserved ahead of their columns so they cannot leak by default.
+23. **Target in scope**: `assignRole` checks the target user (employee placement, or tenant-level when none) against the
+    granter's `permissions.assign` via `canInTx`, passing `non_sensitive_roles` as the record set when the role is not sensitive.
