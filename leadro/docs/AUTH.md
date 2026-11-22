@@ -37,6 +37,9 @@ Rules and invariants:
 - Invitations (72 h) and password-reset tokens (1 h) are single-use (conditional UPDATE), stored
   hashed, and report a single generic error for unknown/expired/used tokens. Reset request answers
   identically whether or not the account exists. Completing a reset revokes all sessions.
+  The per-account limit (3 per 15 min) deliberately answers `202` like a normal request and sends
+  nothing: any different answer would reveal that the account exists (enumeration safety). Only the
+  per-IP limit is visible (`429`).
 - MFA: TOTP (RFC 6238, `src/lib/totp.ts`, node:crypto). Required when ANY active role assignment has
   `Role.requiresMfa` (`userRequiresMfa`, the one function to repoint at `authz` later) or the user
   already enrolled. A password-correct login then yields an `mfaPending` session that is refused
