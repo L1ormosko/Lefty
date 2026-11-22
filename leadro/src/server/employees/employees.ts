@@ -254,6 +254,15 @@ export async function terminateEmployee(
     // live session of a terminated employee may linger (this needs no user-administration authority).
     if (employee.userId) revokedSessions = await revokeAllSessionsForUser(tx, actor.tenantId, employee.userId);
 
+    // An invitation sent for this employee must not still be usable after the employment ended
+    // (accepting it would create a working login for someone who has left).
+    const revokedInvitations = (
+      await tx.invitation.updateMany({
+        where: { tenantId: actor.tenantId, employeeId: employee.id, acceptedAt: null, revokedAt: null },
+        data: { revokedAt: now },
+      })
+    ).count;
+
     const terminated = await tx.employee.update({
       where: { id: employee.id },
       data: { status: "TERMINATED", terminationDate: input.terminationDate },
@@ -273,6 +282,7 @@ export async function terminateEmployee(
         deactivatedUserId: mayDeactivateLogin ? employee.userId : null,
         loginLeftActiveForUserAdministrator: Boolean(employee.userId) && !mayDeactivateLogin,
         revokedSessions,
+        revokedInvitations,
       },
       reason: input.reason,
     });
