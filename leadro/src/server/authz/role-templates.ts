@@ -4,6 +4,7 @@ import {
   PERMISSION_CATALOG,
   SENSITIVE_FIELD_CATEGORIES,
   isPermissionKey,
+  permissionKey,
   type PermissionActionName,
 } from "./permission-catalog";
 
@@ -41,9 +42,40 @@ export function isMfaTriggeringPermission(key: string): boolean {
   return key === "permissions.manage" || key === "permissions.assign" || key.endsWith(".configure");
 }
 
+const SENSITIVE_PERMISSION_KEYS: ReadonlySet<string> = new Set(
+  PERMISSION_CATALOG.filter((entry) => entry.sensitive).map(permissionKey),
+);
+const SENSITIVE_FIELD_TAGS: ReadonlySet<string> = new Set(SENSITIVE_FIELD_CATEGORIES.map((category) => category.tag));
+
+/**
+ * Does this grant reveal something sensitive? Same meaning of "sensitive" as the permission module's
+ * lock-out and escalation rules (`Permission.sensitive`), plus the sensitive field sets (financial,
+ * billing) a grant can opt into with `includeFields` or be limited to with `fields`.
+ */
+function isSensitiveGrant(grant: TemplateGrant): boolean {
+  if (isMfaTriggeringPermission(grant.permission) || SENSITIVE_PERMISSION_KEYS.has(grant.permission)) return true;
+  const conditions = grant.conditions;
+  if (!conditions) return false;
+  return (
+    (conditions.fields !== undefined && SENSITIVE_FIELD_TAGS.has(conditions.fields)) ||
+    (conditions.includeFields ?? []).some((tag) => SENSITIVE_FIELD_TAGS.has(tag))
+  );
+}
+
 /** MFA rule for a template: explicit sensitive roles, or any role holding a triggering permission. */
 export function templateRequiresMfa(key: string, grants: TemplateGrant[]): boolean {
   return ALWAYS_REQUIRE_MFA.has(key) || grants.some((grant) => isMfaTriggeringPermission(grant.permission));
+}
+
+/**
+ * MFA rule for a CUSTOM role: the template rule, or ANY sensitive grant (a `Permission.sensitive`
+ * permission, or a sensitive field set). This is the same meaning of "sensitive" the lock-out and
+ * escalation rules use, so a custom role cannot hold what those rules protect without MFA. It is
+ * computed on every custom-role save. The shipped templates keep `templateRequiresMfa` (their
+ * operational roles, e.g. Technician, deliberately do not require MFA by default).
+ */
+export function customRoleRequiresMfa(grants: TemplateGrant[]): boolean {
+  return templateRequiresMfa("", grants) || grants.some(isSensitiveGrant);
 }
 
 // ───────── Builders (fail fast on a typo: every key must exist in the catalog) ─────────

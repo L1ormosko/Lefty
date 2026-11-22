@@ -36,7 +36,7 @@ export type { AccessExplanation, AssignmentExplanation, ScopeExplanation } from 
 export { assertNotSelfApproval, assertNotHoldingRole } from "./separation-of-duties";
 export { listAuditEventsAsActor } from "./audit-access";
 
-export { ROLE_TEMPLATES, templateRequiresMfa, isMfaTriggeringPermission } from "./role-templates";
+export { ROLE_TEMPLATES, templateRequiresMfa, customRoleRequiresMfa, isMfaTriggeringPermission } from "./role-templates";
 export type { RoleTemplate, TemplateGrant } from "./role-templates";
 export { provisionRoleTemplates, syncPermissionCatalog } from "./provision-role-templates";
 export { bootstrapRoleAssignment } from "./assign-role";

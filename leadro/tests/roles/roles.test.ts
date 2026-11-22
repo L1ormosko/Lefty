@@ -145,6 +145,21 @@ describe("editing permissions", () => {
     expect(paged.json.page.nextCursor).toBeTruthy();
   });
 
+  it("requires MFA for custom roles holding a sensitive permission or a sensitive field set, not for harmless ones", async () => {
+    const harmless = await create(ceo, { name: unique("Harmless"), permissions: [{ permission: "jobs.view" }] });
+    expect(harmless.json.data.requiresMfa).toBe(false);
+    const money = await create(ceo, { name: unique("Money"), requiresMfa: false, permissions: [{ permission: "financial_reports.view" }] });
+    expect(money.json.data.requiresMfa).toBe(true);
+    const exporter = await create(ceo, { name: unique("Exporter"), permissions: [{ permission: "employees.export" }] });
+    expect(exporter.json.data.requiresMfa).toBe(true);
+    const financialFields = await create(ceo, { name: unique("FinFields"), permissions: [{ permission: "employees.view", conditions: { includeFields: ["financial"] } }] });
+    expect(financialFields.json.data.requiresMfa).toBe(true);
+
+    // Editing a harmless role into a sensitive one raises the flag on save.
+    const raised = await call(putPermissions, "PUT", "/x", { cookie: ceo, params: { id: harmless.json.data.id }, body: { permissions: [{ permission: "jobs.view" }, { permission: "compensation.view" }] } });
+    expect(raised.json.data.requiresMfa).toBe(true);
+  });
+
   it("a no-op replacement writes nothing; adding an MFA-triggering permission raises the MFA flag", async () => {
     const role = (await create(ceo, { name: unique("Stable"), permissions: [{ permission: "jobs.view" }] })).json.data;
     const same = await call(putPermissions, "PUT", "/x", { cookie: ceo, params: { id: role.id }, body: { permissions: [{ permission: "jobs.view" }] } });
