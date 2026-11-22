@@ -1,6 +1,6 @@
 import type { AssignmentKind, OrganizationalAssignment, Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
-import { enforceInTx } from "@/server/authz";
+import { enforceInTx, openEndedWhere } from "@/server/authz";
 import {
   ConflictError,
   ForbiddenError,
@@ -80,7 +80,7 @@ const toView = (row: OrganizationalAssignment, previousOrgUnitId: string | null)
 /** Existing rows whose period overlaps [from, to); `to` null = open-ended. */
 const overlapsWindow = (from: Date, to: Date | null): Prisma.OrganizationalAssignmentWhereInput => ({
   ...(to ? { effectiveFrom: { lt: to } } : {}),
-  OR: [{ effectiveTo: null }, { effectiveTo: { gt: from } }],
+  ...openEndedWhere(from),
 });
 
 /** Closes the open PRIMARY row at `from` when this is a transfer; returns the unit being left. */
