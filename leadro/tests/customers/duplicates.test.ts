@@ -52,7 +52,7 @@ describe("detection on create", () => {
     expect(flags).toHaveLength(1);
     expect(flags[0]).toMatchObject({ kind: "CUSTOMER_CUSTOMER", status: "OPEN", matchedOn: ["PHONE"] });
     expect([flags[0].customerId, flags[0].otherCustomerId].sort()).toEqual([first.id, second.json.data.id].sort());
-    expect(flags[0].customerId < flags[0].otherCustomerId!).toBe(true);
+    expect(flags[0].customerId! < flags[0].otherCustomerId!).toBe(true);
     // Both records still exist: nothing was merged.
     const count = await withTenant(w.tenantId, (tx) => tx.customer.count({ where: { id: { in: [first.id, second.json.data.id] } } }));
     expect(count).toBe(2);
