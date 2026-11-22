@@ -1,4 +1,4 @@
-export { authenticateRequest, authenticateMfaRequest, requireSession } from "./authenticate";
+export { authenticateRequest, authenticateMfaRequest, requireSession, readSession } from "./authenticate";
 export { login, logout } from "./login-service";
 export type { LoginInput, LoginResult } from "./login-service";
 export { listOwnSessions, revokeOwnSession, revokeAllSessionsForUser } from "./session-service";

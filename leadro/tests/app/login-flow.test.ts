@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { base32Decode, hotp, totpTimeStep } from "@/lib/totp";
 import { SESSION_COOKIE_NAME } from "@/server/auth";
+import { withTenant } from "@/server/db";
 import { createTenantWithUser, assignRole, TEST_PASSWORD, resetAuthTestState, useTestEncryptionKey, loadUser } from "../auth/auth-helpers";
 import {
   getFakeCookie,
@@ -64,6 +65,16 @@ describe("loginAction", () => {
     expect(destination).toBe("/login/mfa");
     expect(await readSessionState()).toMatchObject({ mfaPending: true });
     expect(await redirectOf(() => AppLayout({ children: null }))).toBe("/login/mfa");
+  });
+
+  it("renders MFA-pending pages without writing a false DENIED audit row", async () => {
+    const user = await createTenantWithUser();
+    await assignRole(user, { requiresMfa: true });
+    await redirectOf(() => loginAction({}, loginForm({ tenantSlug: user.tenantSlug, email: user.email, password: TEST_PASSWORD })));
+    await readSessionState();
+    await redirectOf(() => AppLayout({ children: null }));
+    const denied = await withTenant(user.tenantId, (tx) => tx.auditEvent.findMany({ where: { tenantId: user.tenantId, outcome: "DENIED" } }));
+    expect(denied).toHaveLength(0);
   });
 
   it("gives the same generic message for a wrong password and an unknown company (no enumeration)", async () => {
