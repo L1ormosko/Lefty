@@ -1,7 +1,6 @@
-import { enforceInTx } from "@/server/authz";
+import { activePlacementWhere, enforceInTx } from "@/server/authz";
 import { ForbiddenError, NotFoundError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { effectiveAt } from "./active-window";
 
 /** The operational placement an employee had at one instant. */
 export interface OrgUnitAtResult {
@@ -26,7 +25,7 @@ export async function orgUnitAtInTx(
   at: Date,
 ): Promise<OrgUnitAtResult | null> {
   const row = await tx.organizationalAssignment.findFirst({
-    where: { tenantId, employeeId, kind: "PRIMARY", ...effectiveAt(at) },
+    where: { tenantId, employeeId, kind: "PRIMARY", ...activePlacementWhere(at) },
     orderBy: { effectiveFrom: "desc" },
     select: { id: true, orgUnitId: true, effectiveFrom: true, effectiveTo: true },
   });

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { TenantTx } from "@/server/db";
+import { activePlacementWhere } from "./time-windows";
 
 /**
  * The ONE definition of an "active" role assignment in a Prisma where-clause: not revoked, already
@@ -8,8 +9,7 @@ import type { TenantTx } from "@/server/db";
  */
 export const activeAssignmentWhere = (now: Date): Prisma.RoleAssignmentWhereInput => ({
   revokedAt: null,
-  effectiveFrom: { lte: now },
-  OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+  ...activePlacementWhere(now),
 });
 
 /**

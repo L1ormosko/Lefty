@@ -1,3 +1,4 @@
+import { liveOrFutureAssignmentWhere } from "./time-windows";
 import { ForbiddenError, ValidationError } from "@/server/core";
 import type { TenantTx } from "@/server/db";
 import { fieldSetsCover, grantFieldSets, parseConditions } from "./conditions";
@@ -69,7 +70,7 @@ export async function assertMayGrantToExistingHolders(
 ): Promise<void> {
   if (grants.length === 0) return;
   const assignments = await tx.roleAssignment.findMany({
-    where: { tenantId: actor.tenantId, roleId, revokedAt: null, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+    where: { tenantId: actor.tenantId, roleId, ...liveOrFutureAssignmentWhere(now) },
     select: { scopes: { select: { type: true, legalEntityId: true, orgUnitId: true, includeDescendants: true } } },
   });
   for (const grant of grants) {

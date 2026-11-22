@@ -1,10 +1,10 @@
-import type { Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import {
   EMPLOYEE_FIELD_MAP,
   employeeRowAttributes,
   employeeScopeSelect,
   enforceInTx,
+  openEndedWhere,
   projectRows,
   resolveScope,
 } from "@/server/authz";
@@ -41,8 +41,6 @@ export interface UnitManagerView {
   employee: { firstName?: string; lastName?: string } | null;
 }
 
-const isOpen = (now: Date): Prisma.OrgUnitManagerWhereInput => ({ OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] });
-
 /**
  * Makes `employeeId` a manager of the unit, effective now. Needs `organization.assign` over the unit
  * and `employees.view` over the employee (so ids of employees you cannot see are not confirmed).
@@ -74,7 +72,7 @@ export async function assignUnitManager(
 
     const now = new Date();
     const duplicate = await tx.orgUnitManager.findFirst({
-      where: { tenantId: actor.tenantId, orgUnitId: unitId, employeeId: input.employeeId, ...isOpen(now) },
+      where: { tenantId: actor.tenantId, orgUnitId: unitId, employeeId: input.employeeId, ...openEndedWhere(now) },
       select: { id: true },
     });
     if (duplicate) throw new ConflictError({ message: "This employee already manages the unit." });
@@ -82,7 +80,7 @@ export async function assignUnitManager(
     let demoted = 0;
     if (input.isPrimary) {
       ({ count: demoted } = await tx.orgUnitManager.updateMany({
-        where: { tenantId: actor.tenantId, orgUnitId: unitId, isPrimary: true, ...isOpen(now) },
+        where: { tenantId: actor.tenantId, orgUnitId: unitId, isPrimary: true, ...openEndedWhere(now) },
         data: { isPrimary: false },
       }));
     }
@@ -163,7 +161,7 @@ export async function listUnitManagers(
     await enforceInTx(tx, actor, "organization.view", { orgUnitId: unitId });
     const now = new Date();
     const rows = await tx.orgUnitManager.findMany({
-      where: { tenantId: actor.tenantId, orgUnitId: unitId, ...(query.includeEnded ? {} : isOpen(now)) },
+      where: { tenantId: actor.tenantId, orgUnitId: unitId, ...(query.includeEnded ? {} : openEndedWhere(now)) },
       orderBy: [{ effectiveFrom: "desc" }, { id: "asc" }],
       select: {
         id: true,

@@ -1,4 +1,5 @@
 import { withTenant } from "@/server/db";
+import { activePlacementWhere } from "@/server/authz";
 import {
   buildLocaleChain,
   directionOf,
@@ -88,8 +89,7 @@ async function primaryOrgUnitId(
       tenantId,
       kind: "PRIMARY",
       employee: { userId, tenantId },
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      ...activePlacementWhere(now),
     },
     orderBy: { effectiveFrom: "desc" },
     select: { orgUnitId: true },

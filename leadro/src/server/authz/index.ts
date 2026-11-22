@@ -47,5 +47,6 @@ export type { RevokeRoleAssignmentInput } from "./revoke-role-assignment";
 export { assertMayDisableUser } from "./disable-user";
 export { assertMayDefineGrants, assertMayGrantToExistingHolders } from "./define-grants";
 export type { RoleGrantDefinition } from "./define-grants";
+export { activePlacementWhere, openEndedWhere, liveOrFutureAssignmentWhere } from "./time-windows";
 export { activeAssignmentWhere, holdsMfaRequiringRole } from "./active-assignments";
 export type { AssignRoleInput, ScopeInput } from "./assign-role";

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { baseFieldMap, type RowScopeAttributes, type ScopeColumns } from "@/server/authz";
+import { activePlacementWhere, baseFieldMap, type RowScopeAttributes, type ScopeColumns } from "@/server/authz";
 
 /**
  * What the users API may return. Deliberately NOT included (so they can never leak, even if a
@@ -23,11 +23,6 @@ export const USER_FIELD_MAP = baseFieldMap([
   "updatedAt",
 ]);
 
-const activePlacement = (at: Date): Prisma.OrganizationalAssignmentWhereInput => ({
-  effectiveFrom: { lte: at },
-  OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }],
-});
-
 /**
  * A terminated employee has no open placement, so the org-unit scope below no longer reaches their
  * user: such users (above all those whose login is `loginPendingDeactivation`) are visible only to
@@ -42,7 +37,7 @@ const activePlacement = (at: Date): Prisma.OrganizationalAssignmentWhereInput =>
  * and the single-record check always agree.
  */
 export const userInOrgUnits = (orgUnitIds: string[], at: Date): Prisma.UserWhereInput => ({
-  employee: { assignments: { some: { orgUnitId: { in: orgUnitIds }, ...activePlacement(at) } } },
+  employee: { assignments: { some: { orgUnitId: { in: orgUnitIds }, ...activePlacementWhere(at) } } },
 });
 export const userInLegalEntities = (legalEntityIds: string[]): Prisma.UserWhereInput => ({
   employee: { legalEntityId: { in: legalEntityIds } },
@@ -63,7 +58,7 @@ export const userEmployeeSelect = (at: Date) =>
     lastName: true,
     status: true,
     legalEntityId: true,
-    assignments: { where: activePlacement(at), select: { orgUnitId: true } },
+    assignments: { where: activePlacementWhere(at), select: { orgUnitId: true } },
   }) satisfies Prisma.EmployeeSelect;
 
 export const userSelect = (at: Date) =>

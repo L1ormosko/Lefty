@@ -1,3 +1,4 @@
+import { liveOrFutureAssignmentWhere } from "./time-windows";
 import { ForbiddenError } from "@/server/core";
 import type { TenantTx } from "@/server/db";
 import type { AccessSubject } from "./types";
@@ -30,8 +31,7 @@ export async function assertNotHoldingRole(tx: TenantTx, actor: AccessSubject, r
       tenantId: actor.tenantId,
       userId: actor.userId,
       roleId,
-      revokedAt: null,
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      ...liveOrFutureAssignmentWhere(now),
     },
     select: { id: true },
   });
