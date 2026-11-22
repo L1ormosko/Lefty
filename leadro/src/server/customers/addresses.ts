@@ -5,7 +5,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx, type ResourceRef } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { customerResourceRef } from "./customer-access";
+import { assertCustomerActive, customerResourceRef, revealableDuplicates } from "./customer-access";
 import { flagCustomerDuplicates } from "./duplicate-detection";
 import { ADDRESS_COLUMNS, addressView, type AddressView } from "./fields";
 import { assertServiceAreaUsable } from "./service-area";
@@ -30,7 +30,10 @@ async function enforceOnCustomer(tx: TenantTx, actor: Actor, permission: "custom
   const ref = await customerResourceRef(tx, actor.tenantId, customerId);
   if (!ref) throw new NotFoundError();
   const decision = await enforceInTx(tx, actor, permission, ref);
-  if (permission === "customers.edit" && !decision.fieldSets.includes("base")) throw new ForbiddenError();
+  if (permission === "customers.edit") {
+    if (!decision.fieldSets.includes("base")) throw new ForbiddenError();
+    await assertCustomerActive(tx, actor.tenantId, customerId);
+  }
   return { decision, ref };
 }
 
@@ -110,7 +113,7 @@ export async function addAddress(actor: Actor, ctx: RequestContext, customerId: 
       targetId: address.id,
       newValue: { customerId, ...input },
     });
-    const possibleDuplicates = await flagCustomerDuplicates(tx, ctx, customerId);
+    const possibleDuplicates = await revealableDuplicates(tx, actor, await flagCustomerDuplicates(tx, ctx, customerId));
     return { address, possibleDuplicates };
   });
 }
@@ -171,7 +174,7 @@ export async function updateAddress(
       previousValue: previous,
       newValue: next,
     });
-    const possibleDuplicates = await flagCustomerDuplicates(tx, ctx, customerId);
+    const possibleDuplicates = await revealableDuplicates(tx, actor, await flagCustomerDuplicates(tx, ctx, customerId));
     return { address: addressView(updated), possibleDuplicates };
   });
 }

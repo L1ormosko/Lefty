@@ -2,7 +2,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
-import { customerResourceRef } from "./customer-access";
+import { assertCustomerActive, customerResourceRef } from "./customer-access";
 import type { SetEmployeePreferencesInput } from "./schemas";
 
 /**
@@ -43,6 +43,7 @@ export async function setEmployeePreferences(
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "customers.edit", ref);
     if (!decision.fieldSets.includes("base")) throw new ForbiddenError();
+    await assertCustomerActive(tx, actor.tenantId, customerId);
 
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-preferences:${customerId}`}))`;
     const existing = await tx.customerPreferredEmployee.findMany({

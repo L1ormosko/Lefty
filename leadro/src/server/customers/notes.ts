@@ -2,7 +2,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, NotFoundError, pageArgs, toPage, type Actor, type Page, type PageQuery, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
-import { customerResourceRef } from "./customer-access";
+import { assertCustomerActive, customerResourceRef } from "./customer-access";
 import type { CreateNoteInput } from "./schemas";
 
 /**
@@ -38,6 +38,7 @@ export async function addNote(actor: Actor, ctx: RequestContext, customerId: str
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "customers.edit", ref);
     if (!decision.fieldSets.includes("base")) throw new ForbiddenError();
+    await assertCustomerActive(tx, actor.tenantId, customerId);
 
     const note = await tx.customerNote.create({
       data: { tenantId: actor.tenantId, customerId, authorId: actor.userId, body: input.body },

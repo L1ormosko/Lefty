@@ -1,8 +1,7 @@
-import type { Prisma } from "@prisma/client";
-import { buildScopeWhere, canInTx, enforceInTx, resolveScope, withinScope, type ScopeColumns } from "@/server/authz";
+import { buildScopeWhere, canInTx, enforceInTx, resolveScope, withinScope } from "@/server/authz";
 import { NotFoundError, type Actor } from "@/server/core";
 import { withTenant } from "@/server/db";
-import { jobAssignedToWhere, leadAssignedToWhere } from "./assignment-access";
+import { jobScopeColumns, leadScopeColumns } from "./assignment-access";
 import { customerResourceRef } from "./customer-access";
 import type { HistoryQuery } from "./schemas";
 
@@ -16,21 +15,8 @@ import type { HistoryQuery } from "./schemas";
  * Money and other sensitive job fields are never selected. A grant qualified by any other record set
  * contributes nothing here (fail closed).
  *
- * The scope columns below describe how ORG_UNIT / LEGAL_ENTITY / ASSIGNED apply to leads and jobs;
- * ASSIGNED comes from the shared `assignment-access.ts` so it cannot drift from the leads/jobs modules.
+ * Scope columns for leads and jobs are the shared ones from `assignment-access.ts`.
  */
-
-const leadScopeColumns: ScopeColumns<Prisma.LeadWhereInput> = {
-  orgUnit: (orgUnitIds) => ({ orgUnitId: { in: orgUnitIds } }),
-  legalEntity: (legalEntityIds) => ({ orgUnit: { legalEntityId: { in: legalEntityIds } } }),
-  assigned: leadAssignedToWhere,
-};
-
-const jobScopeColumns: ScopeColumns<Prisma.JobWhereInput> = {
-  orgUnit: (orgUnitIds) => ({ orgUnitId: { in: orgUnitIds } }),
-  legalEntity: (legalEntityIds) => ({ orgUnit: { legalEntityId: { in: legalEntityIds } } }),
-  assigned: jobAssignedToWhere,
-};
 
 export interface CustomerHistoryEntry {
   id: string;

@@ -30,10 +30,12 @@ export { listDuplicateFlags, resolveDuplicateFlag } from "./duplicate-flags";
 export {
   leadAssignedToWhere,
   jobAssignedToWhere,
+  leadScopeColumns,
+  jobScopeColumns,
   customerAssignedToWhere,
   assignedEmployeeIdsByCustomer,
 } from "./assignment-access";
-export { customerResourceRef, resolveCustomerListAccess, visibleCustomerIds } from "./customer-access";
+export { customerResourceRef, resolveCustomerListAccess, visibleCustomerIds, revealableDuplicates, assertCustomerActive } from "./customer-access";
 export type { CustomerListAccess } from "./customer-access";
 
 export {

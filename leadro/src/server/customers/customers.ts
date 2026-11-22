@@ -29,10 +29,10 @@ import {
   customerResourceRef,
   customerRowAttributes,
   resolveCustomerListAccess,
+  revealableDuplicates,
   toResourceRef,
-  visibleCustomerIds,
 } from "./customer-access";
-import { flagCustomerDuplicates, type OpenDuplicate } from "./duplicate-detection";
+import { flagCustomerDuplicates } from "./duplicate-detection";
 import {
   ADDRESS_COLUMNS,
   CUSTOMER_API_FIELD_MAP,
@@ -111,12 +111,6 @@ async function activeAddresses(tx: TenantTx, tenantId: string, customerId: strin
   return rows.map(addressView);
 }
 
-/** Duplicate flags of a just-written customer that the caller is allowed to know about (both sides in scope). */
-async function revealableDuplicates(tx: TenantTx, actor: Actor, open: OpenDuplicate[]): Promise<OpenDuplicate[]> {
-  const visible = await visibleCustomerIds(tx, actor, open.map((entry) => entry.customerId));
-  return open.filter((entry) => visible.has(entry.customerId));
-}
-
 /**
  * Creates a customer (and optional service addresses). Needs `customers.create` over the service-area
  * unit; without a unit the customer is tenant-level and a tenant-wide grant is required. A grant
@@ -149,10 +143,14 @@ export async function createCustomer(
     assertWritableFields(decision, definedKeys(fields), CUSTOMER_FIELD_MAP);
 
     const phoneE164 = fields.phone ? normalizePhoneE164(fields.phone) : null;
+    // Numbers come from a SEPARATE short transaction, taken only after every check passed: holding the counter
+    // row lock for the whole create (addresses, duplicate detection) would serialise all customer creation of
+    // the tenant. A failed create leaves a gap in the numbers, never a repeat.
+    const number = await withTenant(actor.tenantId, (numberTx) => nextNumber(numberTx, actor.tenantId, "customer"));
     const customer = await tx.customer.create({
       data: {
         tenantId: actor.tenantId,
-        number: await nextNumber(tx, actor.tenantId, "customer"),
+        number,
         kind: fields.kind,
         name: fields.name,
         email: fields.email ?? null,

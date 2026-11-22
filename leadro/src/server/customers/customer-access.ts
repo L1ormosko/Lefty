@@ -9,9 +9,10 @@ import {
   type RowScopeAttributes,
   type ScopeColumns,
 } from "@/server/authz";
-import type { Actor } from "@/server/core";
+import { InvalidStateTransitionError, NotFoundError, type Actor } from "@/server/core";
 import type { TenantTx } from "@/server/db";
 import { assignedEmployeeIdsByCustomer, customerAssignedToWhere } from "./assignment-access";
+import type { OpenDuplicate } from "./duplicate-detection";
 
 /**
  * How data scopes apply to customers (§4.2, PERMISSIONS.md section 4).
@@ -186,4 +187,21 @@ export async function visibleCustomerIds(
     select: { id: true },
   });
   return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * Duplicate flags the caller may be told about: only those whose other customer they may view. Detection is
+ * tenant-wide, so EVERY response that carries `possibleDuplicates` must pass through this (a duplicate in
+ * someone else's scope must not leak its id, flag id or matched fields).
+ */
+export async function revealableDuplicates(tx: TenantTx, actor: Actor, open: OpenDuplicate[]): Promise<OpenDuplicate[]> {
+  const visible = await visibleCustomerIds(tx, actor, open.map((entry) => entry.customerId));
+  return open.filter((entry) => visible.has(entry.customerId));
+}
+
+/** One guard for every write under a customer: archived customers are read-only until restored (404 if missing). */
+export async function assertCustomerActive(tx: TenantTx, tenantId: string, customerId: string): Promise<void> {
+  const row = await tx.customer.findFirst({ where: { id: customerId, tenantId }, select: { archivedAt: true } });
+  if (!row) throw new NotFoundError();
+  if (row.archivedAt) throw new InvalidStateTransitionError({ message: "An archived customer cannot be changed. Restore it first." });
 }

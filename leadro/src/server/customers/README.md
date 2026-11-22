@@ -20,11 +20,13 @@ Public API (`index.ts`):
 - `customerAssignedToWhere(employeeId, now)`: customers with a lead or job assigned to E.
 - `assignedEmployeeIdsByCustomer(tx, tenantId, customerIds, now)` -> `Map<customerId, employeeId[]>`: the same rule as ids,
   for `ResourceRef.assignedEmployeeIds` (single-record checks). A test pins both forms to agree.
-Use the where-fragments as `ScopeColumns.assigned` of the leads/jobs modules, and build each job/lead `ResourceRef` with
+The complete `leadScopeColumns` / `jobScopeColumns` (ORG_UNIT, LEGAL_ENTITY, ASSIGNED) are exported too: leads and jobs MUST import them for `buildScopeWhere` instead of declaring their own. Use the where-fragments as `ScopeColumns.assigned`, and build each job/lead `ResourceRef` with
 `assignedEmployeeIds` = the active assignment employees (jobs: expand team rows to the team's current members, as
 `assignedEmployeeIdsByCustomer` does). Assignments count until they are ENDED, so leads/jobs services must end the
 assignment when work reaches a state that should stop granting access. Team members are the employees placed in exactly
-that org unit (teams are leaf units).
+that org unit (teams are leaf units); an archived team unit expands to nobody.
+
+`revealableDuplicates` (every response carrying `possibleDuplicates` must pass through it) and `assertCustomerActive` (guard for any write under a customer) are exported for leads/jobs too.
 
 ## How scopes apply to customers (`customer-access.ts`)
 - ORG_UNIT / LEGAL_ENTITY follow `Customer.orgUnitId` (service-area branch/city). No unit = tenant-level (TENANT scope only).
