@@ -38,7 +38,7 @@ describe("roles actions", () => {
   it("refuses role administration to a City Manager on the server", async () => {
     const world = await buildWorld("admin-roles-deny");
     await signInPerson(world.cityManagerA, world.tenantId);
-    expect((await createRoleAction({}, formWith({ name: "Sneaky" }, ["employees.view"]))).error).toBeTruthy();
+    expect((await createRoleAction({}, formWith({ name: "Sneaky" }, ["employees.view"]))).error).toBe(en("ERROR.FORBIDDEN"));
     expect(((await RolesPage(noParams)) as { type: unknown }).type).toBe(AccessDenied);
   });
 
@@ -46,7 +46,7 @@ describe("roles actions", () => {
     const world = await buildWorld("admin-roles-escalation");
     await signInPerson(world.ceo, world.tenantId);
     const result = await createRoleAction({}, formWith({ name: "Bogus" }, ["not.a_permission"]));
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBe(en("ERROR.VALIDATION_FAILED"));
   });
 
   it("grants a role with a scope and expiry, then revokes it with a reason", async () => {
@@ -58,7 +58,7 @@ describe("roles actions", () => {
     expect(assignment.effectiveTo).not.toBeNull();
 
     const noScope = await grantRoleAction({}, form({ roleId: world.roles.TEAM_LEADER, userId: world.techB.userId, reason: "x" }));
-    expect(noScope.error).toBeTruthy();
+    expect(noScope.error).toBe(en("ERROR.VALIDATION_FAILED"));
     expect((await revokeAssignmentAction({}, form({ assignmentId: assignment.id, roleId: world.roles.TEAM_LEADER, reason: "Done" }))).success).toBe(en("ADMIN.ROLES_REVOKED"));
     expect((await withTenant(world.tenantId, (tx) => tx.roleAssignment.findUniqueOrThrow({ where: { id: assignment.id } }))).revokedAt).not.toBeNull();
   });
@@ -67,7 +67,7 @@ describe("roles actions", () => {
     const world = await buildWorld("admin-roles-grant-deny");
     await signInPerson(world.hr, world.tenantId);
     const result = await grantRoleAction({}, form({ roleId: world.roles.TEAM_LEADER, userId: world.techB.userId, scopeType: "OWN", reason: "x" }));
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBe(en("ERROR.FORBIDDEN"));
   });
 });
 

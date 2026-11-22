@@ -65,7 +65,17 @@ export const headersModule = {
   headers: async () => requestHeaders,
 };
 
+/** `notFound()` in Next throws; the fake throws this so tests can assert a 404 page. */
+export class NotFoundSignal extends Error {
+  constructor() {
+    super("not-found");
+  }
+}
+
 export const navigationModule = {
+  notFound: (): never => {
+    throw new NotFoundSignal();
+  },
   redirect: (destination: string): never => {
     throw new RedirectSignal(destination);
   },

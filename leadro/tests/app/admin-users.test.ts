@@ -35,10 +35,10 @@ describe("users page and actions", () => {
   it("deactivates a login with a reason, refuses self-deactivation and unauthorised callers", async () => {
     const world = await buildWorld("admin-users-deactivate");
     await signInPerson(world.techA1, world.tenantId);
-    expect((await deactivateUserAction({}, form({ userId: world.techB.userId, reason: "x" }))).error).toBeTruthy();
+    expect((await deactivateUserAction({}, form({ userId: world.techB.userId, reason: "x" }))).error).toBe(en("ERROR.FORBIDDEN"));
 
     await signInPerson(world.ceo, world.tenantId);
-    expect((await deactivateUserAction({}, form({ userId: world.ceo.userId, reason: "me" }))).error).toBeTruthy();
+    expect((await deactivateUserAction({}, form({ userId: world.ceo.userId, reason: "me" }))).error).toBe(en("ERROR.FORBIDDEN"));
     expect((await deactivateUserAction({}, form({ userId: world.techB.userId }))).error).toBe(en("ADMIN.ERROR_FIELD_REASON"));
     expect((await deactivateUserAction({}, form({ userId: world.techB.userId, reason: "Left the company" }))).success).toBe(en("ADMIN.USERS_DEACTIVATED"));
     const user = await withTenant(world.tenantId, (tx) => tx.user.findUniqueOrThrow({ where: { id: world.techB.userId } }));

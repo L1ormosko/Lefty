@@ -62,7 +62,7 @@ describe("branch actions", () => {
     const world = await buildWorld("admin-branch-zip");
     await signInPerson(world.ceo, world.tenantId);
     const result = await createBranchAction({}, form({ ...validBranch(world.units.cityA), addressPostalCode: "ABC" }));
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBe(en("ERROR.VALIDATION_FAILED"));
     expect(result.success).toBeUndefined();
   });
 
@@ -84,7 +84,7 @@ describe("branch actions", () => {
     expect(edited.success).toBe(en("ADMIN.SAVED"));
 
     const elsewhere = await createBranchAction({}, form({ ...validBranch(world.units.cityB), name: "Elsewhere" }));
-    expect(elsewhere.error).toBeTruthy();
+    expect(elsewhere.error).toBe(en("ERROR.NOT_FOUND"));
   });
 });
 

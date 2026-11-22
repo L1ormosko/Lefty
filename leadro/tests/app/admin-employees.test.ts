@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CATALOGS } from "@/lib/i18n";
 import { withTenant } from "@/server/db";
 import { buildWorld } from "../authz/fixtures";
-import { resetFakeRequest } from "./next-fakes";
+import { NotFoundSignal, resetFakeRequest } from "./next-fakes";
 import { form, htmlOf, signInPerson } from "./admin-test-helpers";
 
 vi.mock("next/headers", async () => (await import("./next-fakes")).headersModule);
@@ -76,7 +76,7 @@ describe("employee profile", () => {
   it("is a 404 for an employee outside the caller's scope", async () => {
     const world = await buildWorld("admin-emp-404");
     await signInPerson(world.cityManagerA, world.tenantId);
-    await expect(EmployeeProfilePage({ params: Promise.resolve({ id: world.techB.employeeId ?? "" }), ...noParams })).rejects.toThrow();
+    await expect(EmployeeProfilePage({ params: Promise.resolve({ id: world.techB.employeeId ?? "" }), ...noParams })).rejects.toBeInstanceOf(NotFoundSignal);
   });
 });
 
@@ -87,7 +87,7 @@ describe("employee actions", () => {
     const ok = await createEmployeeAction({}, form({ firstName: "New", lastName: "Hire", orgUnitId: world.units.cityA, employeeNumber: "E-1" }));
     expect(ok.success).toBe(en("ADMIN.EMPLOYEE_ADDED"));
     const elsewhere = await createEmployeeAction({}, form({ firstName: "Out", lastName: "Side", orgUnitId: world.units.cityB }));
-    expect(elsewhere.error).toBeTruthy();
+    expect(elsewhere.error).toBe(en("ERROR.NOT_FOUND"));
     const duplicate = await createEmployeeAction({}, form({ firstName: "Dup", lastName: "Number", orgUnitId: world.units.cityA, employeeNumber: "E-1" }));
     expect(duplicate.error).toBe(en("ADMIN.ERROR_FIELD_EMPLOYEE_NUMBER"));
   });
@@ -107,7 +107,7 @@ describe("employee actions", () => {
     const employeeId = world.techA1.employeeId ?? "";
     for (const person of [world.dispatcher, world.techA1Other]) {
       await signInPerson(person, world.tenantId);
-      expect((await updateEmployeeAction({}, form({ employeeId, firstName: "Hacked", lastName: "X" }))).error).toBeTruthy();
+      expect((await updateEmployeeAction({}, form({ employeeId, firstName: "Hacked", lastName: "X" }))).error).toBe(en("ERROR.FORBIDDEN"));
     }
     const row = await withTenant(world.tenantId, (tx) => tx.employee.findUniqueOrThrow({ where: { id: employeeId } }));
     expect(row.firstName).toBe("tech-a1");
@@ -137,12 +137,12 @@ describe("employee actions", () => {
     const created = await withTenant(world.tenantId, (tx) => tx.employee.findFirstOrThrow({ where: { tenantId: world.tenantId, firstName: "Invitee" } }));
 
     await signInPerson(world.techA1, world.tenantId);
-    expect((await inviteEmployeeAction({}, form({ employeeId: created.id }))).error).toBeTruthy();
+    expect((await inviteEmployeeAction({}, form({ employeeId: created.id }))).error).toBe(en("ERROR.FORBIDDEN"));
 
     await signInPerson(world.ceo, world.tenantId);
     const ok = await inviteEmployeeAction({}, form({ employeeId: created.id, roleId: world.roles.TECHNICIAN, scopeType: "OWN" }));
     expect(ok.success).toBe(en("ADMIN.INVITE_SENT"));
     const noScope = await inviteEmployeeAction({}, form({ employeeId: created.id, roleId: world.roles.TECHNICIAN }));
-    expect(noScope.error).toBeTruthy();
+    expect(noScope.error).toBe(en("ERROR.VALIDATION_FAILED"));
   });
 });

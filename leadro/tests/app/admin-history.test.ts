@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildWorld } from "../authz/fixtures";
-import { resetFakeRequest } from "./next-fakes";
+import { NotFoundSignal, resetFakeRequest } from "./next-fakes";
 import { form, signInPerson } from "./admin-test-helpers";
 
 vi.mock("next/headers", async () => (await import("./next-fakes")).headersModule);
@@ -32,6 +32,6 @@ describe("organization history page", () => {
   it("answers 404 for a unit outside a City Manager's scope", async () => {
     const world = await buildWorld("admin-history-scope");
     await signInPerson(world.cityManagerA, world.tenantId);
-    await expect(OrganizationHistoryPage({ searchParams: Promise.resolve({ unit: world.units.cityB }) })).rejects.toThrow();
+    await expect(OrganizationHistoryPage({ searchParams: Promise.resolve({ unit: world.units.cityB }) })).rejects.toBeInstanceOf(NotFoundSignal);
   });
 });

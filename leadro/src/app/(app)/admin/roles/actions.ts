@@ -13,7 +13,6 @@ import {
   saveRoleDefinition,
   revokeAssignment,
   revokeAssignmentSchema,
-  updateRole,
   updateRoleSchema,
 } from "@/server/roles";
 import type { FormState } from "../../../_lib/form-state";

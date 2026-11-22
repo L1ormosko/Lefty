@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CATALOGS } from "@/lib/i18n";
 import { withTenant } from "@/server/db";
 import { buildWorld } from "../authz/fixtures";
 import { resetFakeRequest } from "./next-fakes";
@@ -13,6 +14,7 @@ import { AccessDenied } from "@/app/(app)/admin/_components/AdminPage";
 import CompanyOverviewPage from "@/app/(app)/admin/company/page";
 
 beforeEach(resetFakeRequest);
+const en = (key: string) => CATALOGS["en-US"].messages[key];
 
 describe("company overview actions", () => {
   it("lets the CEO rename the company and audits it", async () => {
@@ -35,7 +37,7 @@ describe("company overview actions", () => {
     const world = await buildWorld("admin-company-zone");
     await signInPerson(world.ceo, world.tenantId);
     const result = await updateCompanyProfileAction({}, form({ defaultTimeZone: "Mars/Olympus" }));
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBe(en("ERROR.VALIDATION_FAILED"));
     expect(result.success).toBeUndefined();
   });
 
@@ -45,7 +47,7 @@ describe("company overview actions", () => {
     const before = await withTenant(world.tenantId, (tx) => tx.tenant.findUniqueOrThrow({ where: { id: world.tenantId } }));
 
     const result = await updateCompanyProfileAction({}, form({ name: "Hacked" }));
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBe(en("ERROR.FORBIDDEN"));
     const after = await withTenant(world.tenantId, (tx) => tx.tenant.findUniqueOrThrow({ where: { id: world.tenantId } }));
     expect(after.name).toBe(before.name);
   });
@@ -53,7 +55,7 @@ describe("company overview actions", () => {
   it("adds a legal entity for the CEO and refuses a unit-scoped manager", async () => {
     const world = await buildWorld("admin-company-entity");
     await signInPerson(world.cityManagerA, world.tenantId);
-    expect((await createLegalEntityAction({}, form({ name: "Sneaky LLC" }))).error).toBeTruthy();
+    expect((await createLegalEntityAction({}, form({ name: "Sneaky LLC" }))).error).toBe(en("ERROR.FORBIDDEN"));
 
     await signInPerson(world.ceo, world.tenantId);
     expect((await createLegalEntityAction({}, form({ name: "Second LLC" }))).success).toBeTruthy();

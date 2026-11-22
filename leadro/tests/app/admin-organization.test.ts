@@ -48,7 +48,7 @@ describe("organization actions", () => {
     const world = await buildWorld("admin-org-scope");
     await signInPerson(world.cityManagerA, world.tenantId);
     const result = await moveUnitAction({}, form({ unitId: world.units.teamA1, newParentId: world.units.cityB }));
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBe(en("ERROR.NOT_FOUND"));
     expect(await parentOf(world.tenantId, world.units.teamA1)).toBe(world.units.cityA);
   });
 
@@ -61,7 +61,7 @@ describe("organization actions", () => {
       archiveUnitAction({}, form({ unitId: world.units.teamA1 })),
       assignManagerAction({}, form({ unitId: world.units.cityA, employeeId: world.techA1.employeeId ?? "" })),
     ]);
-    for (const result of results) expect(result.error).toBeTruthy();
+    for (const result of results) expect(result.error).toBe(en("ERROR.FORBIDDEN"));
     const name = await withTenant(world.tenantId, async (tx) => (await tx.orgUnit.findUniqueOrThrow({ where: { id: world.units.cityA } })).name);
     expect(name).toBe("City A");
   });
@@ -92,7 +92,7 @@ describe("organization actions", () => {
     const world = await buildWorld("admin-org-archive");
     await signInPerson(world.ceo, world.tenantId);
     const result = await archiveUnitAction({}, form({ unitId: world.units.teamA1 }));
-    expect(result.error).toBeTruthy(); // technicians are placed in Team A1
+    expect(result.error).toBe(en("ERROR.INVALID_STATE_TRANSITION")); // technicians are placed in Team A1
   });
 });
 

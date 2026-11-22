@@ -26,13 +26,13 @@ describe("localization override admin", () => {
     expect(await loadReviewedOverrides(world.tenantId)).toEqual({});
 
     // The editor may not approve their own text.
-    expect((await reviewOverrideAction({}, form({ locale: "en-US", key: KEY, reviewedValue: "Store" }))).error).toBeTruthy();
+    expect((await reviewOverrideAction({}, form({ locale: "en-US", key: KEY, reviewedValue: "Store" }))).error).toBe(en("ERROR.FORBIDDEN"));
 
     // A second administrator with localization.configure reviews it.
     const reviewer = await createPerson(world.tenantId, "reviewer", { withEmployee: false });
     await grantTemplate(world.tenantId, reviewer, world.roles.OWNER_CEO, [{ type: "TENANT" }]);
     await signInPerson(reviewer, world.tenantId);
-    expect((await reviewOverrideAction({}, form({ locale: "en-US", key: KEY, reviewedValue: "Other text" }))).error).toBeTruthy(); // not the text on the server
+    expect((await reviewOverrideAction({}, form({ locale: "en-US", key: KEY, reviewedValue: "Other text" }))).error).toBe(en("ERROR.CONFLICT")); // not the text on the server
     expect((await reviewOverrideAction({}, form({ locale: "en-US", key: KEY, reviewedValue: "Store" }))).success).toBe(en("ADMIN.LOCALIZATION_REVIEWED"));
     expect((await loadReviewedOverrides(world.tenantId))["en-US"]?.[KEY]).toBe("Store");
 
@@ -52,7 +52,7 @@ describe("localization override admin", () => {
   it("refuses edits without permission and denies the page to a Technician; unauthorised users cannot list", async () => {
     const world = await buildWorld("admin-loc-deny");
     await signInPerson(world.cityManagerA, world.tenantId);
-    expect((await saveOverrideAction({}, form({ locale: "en-US", key: KEY, value: "Hack" }))).error).toBeTruthy();
+    expect((await saveOverrideAction({}, form({ locale: "en-US", key: KEY, value: "Hack" }))).error).toBe(en("ERROR.FORBIDDEN"));
     const rows = await withTenant(world.tenantId, (tx) => tx.translationResource.count({ where: { tenantId: world.tenantId } }));
     expect(rows).toBe(0);
 
