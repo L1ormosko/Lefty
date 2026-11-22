@@ -33,9 +33,21 @@ export const employeeSelect = (now: Date) =>
 
 export type EmployeeRow = Prisma.EmployeeGetPayload<{ select: ReturnType<typeof employeeSelect> }>;
 
-/** A fetched row with its derived field, ready for `projectFields` / `projectRows`. */
+/** `date` columns come back as UTC-midnight `Date`s; the API shows calendar dates as `YYYY-MM-DD` (API_CONVENTIONS). */
+const toDateOnly = (value: Date | null): string | null => (value ? value.toISOString().slice(0, 10) : null);
+
+/**
+ * A fetched row ready for `projectFields` / `projectRows`: with its derived field, and with the
+ * date-only columns (hireDate, terminationDate) turned into `YYYY-MM-DD` strings. Timestamps
+ * (createdAt, ...) stay ISO datetimes.
+ */
 export function withDerivedFields(row: EmployeeRow) {
-  return { ...row, currentOrgUnitIds: row.assignments.map((placement) => placement.orgUnitId) };
+  return {
+    ...row,
+    hireDate: toDateOnly(row.hireDate),
+    terminationDate: toDateOnly(row.terminationDate),
+    currentOrgUnitIds: row.assignments.map((placement) => placement.orgUnitId),
+  };
 }
 
 export { employeeRowAttributes };
