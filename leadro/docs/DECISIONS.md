@@ -538,3 +538,35 @@ Migration `20261122140000_phase2_schema_fixes` (the first migration was already 
 - **Technician write limits** are now defined: `LEAD_STATUS_FIELDS`, `JOB_EXECUTION_FIELDS`, the `*_WRITE_ALLOWLISTS` maps and `assertWritableFields` / `writableFields` in `authz/writable-fields.ts` (field maps classify reads; allowlists define the narrow write sets). Tests in `tests/authz/writable-fields.test.ts`. Tasks 5/6 must call `assertWritableFields` for every lead/job update.
 - **JSON / polymorphic reference contract** (ids only, tenant-scoped resolution plus authz re-check, never copy names/PII): in ERD. Also documented: intake must always set `sourceId`; availability windows cannot cross midnight (split night shifts, evaluate per local date incl. DST).
 - Seed: branch coordinates and per-technician job-category permissions added (`seedOperationalData`).
+
+### Phase 2 Task 4: notifications engine (§14)
+Code: `src/server/notifications/`, `src/lib/notification-rules.ts`, `/api/v1/notifications/**`, catalog keys `NOTIFICATION.*`.
+- **Write in the business transaction, deliver after commit.** `notifyInTx(tx, event)` only inserts `Notification` + attempt-1
+  `NotificationDelivery` rows; `deliverAfterCommit` / `deliverPending` send afterwards and never throw into the caller. A rolled
+  back business change therefore leaves no notification, and a broken provider can never undo a committed one. Unsent rows stay
+  PENDING for the worker (`deliverPendingForAllTenants`); no scheduler is wired in yet (no worker infrastructure exists), the
+  function is ready to be called from one.
+- **Typed event catalog** (`NOTIFICATION_EVENTS`): event type -> template key, critical flag, link target type. Callers pass only the
+  event type, so a template key can never disagree with the event; new events are one row plus six catalog keys. `job.cancelled`,
+  `qualification.expired` and `account.security_alert` are critical (mandatory operational/security notices, §14.1).
+- **Params contract enforced in code**: names are camelCase, values are numbers, booleans or identifier-like strings
+  (`[A-Za-z0-9_.:-]{1,64}`, so no spaces, `@`, `+`): names, emails and phone numbers cannot be stored. Text is rendered at read time
+  (`renderNotification` / `renderNotificationForRecipient`) in the RECIPIENT's locale chain with reviewed tenant overrides. The API returns key + params, not text.
+- **Idempotency**: unique `(tenant, recipient, idempotencyKey)`, default key `<eventType>:<eventId>`; inserted with
+  `createMany(skipDuplicates)` (ON CONFLICT DO NOTHING) so a race cannot abort a business transaction. Only recipients that were
+  actually inserted get delivery rows.
+- **Channels**: IN_APP always (the row is the inbox), plus the tenant's `OperationsSettings.enabledChannels`. In-app cannot be opted
+  out of (it is the record of the event). Non-critical opt-outs create a SKIPPED row (truthful record); critical events ignore
+  opt-outs. PUSH/EMAIL/SMS default to `notConfiguredChannel` -> status NOT_CONFIGURED, `provider` null, never SENT (§28.3). A provider is
+  installed with `setNotificationChannel`.
+- **Retries**: one row per attempt. A retryable FAILED attempt gets `retryStatus = SCHEDULED` + `nextRetryAt` (1 min, then 5 min, 3 attempts);
+  the sweep claims it (SCHEDULED -> NONE) and inserts attempt n+1. After the last attempt the row is EXHAUSTED; a non-retryable failure is NONE.
+  Workers claim PENDING rows by stamping `attemptedAt` (claims older than 5 min are reclaimed after a crash), so concurrent workers never double-send,
+  and channel I/O runs outside any transaction. A thrown channel error is stored as `CHANNEL_ERROR` (provider text may contain addresses; it goes only to the log).
+- **Recipient resolution** (`resolveRecipientsByPermission`, `resolveLeadOperationsRecipients`): SQL pre-selects ACTIVE users with an active assignment of an
+  active role carrying the permission, then every candidate is confirmed with authz `canInTx(... { orgUnitId })`, so scope rules have one implementation. Lead
+  Operations = `leads.assign` over the unit (descendants included); only if nobody holds it, widen to `leads.view` so a lead is never unannounced. Grants qualified
+  by a record set do not match a plain unit reference and are not recipients.
+- **Not audited**: mark-read and preference changes are per-user conveniences, not business changes; events are audited by the business write that raised them.
+- **Preference rows**: absent = enabled; a specific event row beats the `*` row. PUT refuses critical events and IN_APP instead of storing rows that would be ignored.
+- Not built (later tasks): the TopNav bell UI, a scheduler for the worker sweep, real providers.
