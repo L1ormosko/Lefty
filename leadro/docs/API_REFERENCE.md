@@ -1647,3 +1647,176 @@ that reached dispatch (`QUALIFIED, SCHEDULED, DISPATCHED, CONVERTED`). Outside t
 
 - **Purpose**: rename or switch a source on or off (sources are never deleted). **Permission**: `leads.manage` with a TENANT scope.
 - **Request body** (strict): `name`, `active`. **Response**: `200`. **Errors**: `404`. **Audit**: `lead_source.update`.
+
+## Jobs (`/api/v1/jobs`) - Phase 2
+
+Code: `src/server/jobs` (README there), pure status machine `src/lib/job-lifecycle.ts`, routes `src/app/api/v1/jobs/**`.
+Design decisions: `DECISIONS.md` "Phase 2 Task 6".
+
+Job fields: `id, number, customerId, serviceAddressId, jobTypeId, orgUnitId, leadId, parentJobId, origin (LEAD_CONVERSION |
+RECURRING_AGREEMENT | MANUAL | INTEGRATION | CUSTOMER_FOLLOW_UP), status, statusChangedAt, priority (LOW | NORMAL | HIGH | URGENT),
+title, description, instructions, appointmentWindowStart/End (customer arrival window), scheduledStartAt/EndAt (the dispatcher's
+slot), timeZone, estimatedDurationMinutes, startedAt, completedAt, closedAt, cancelledAt, statusReason, archivedAt, createdById,
+createdAt, updatedAt` are `base`; `quotedAmountMinor, currency` are the opt-in `financial` set (`jobs.financial_fields`: a grant
+must name it, Owner/CEO, COO and Finance do; Dispatcher and Technician do not). Reads add `assignments` (ACTIVE assignments:
+`{ id, employeeId | teamOrgUnitId, role, method, assignedAt }`) and, on a single job, `requirements` (the job's own rows:
+`{ skillId | certificationId, minLevel, source: JOB_TYPE | MANUAL }`, copied from the job type at creation). Writes may add
+`warnings: [{ code, params }]` (`DURATION_EXCEEDS_WINDOW`, `SLOT_SHORTER_THAN_DURATION`, `ASSIGNEE_ELIGIBILITY_CONFLICT`;
+clients translate `JOB.WARNING.<code>`); a warning never blocks the change (§25.2).
+
+Statuses (`JOB.STATUS.<status>`): `CREATED, PENDING_ASSIGNMENT, ASSIGNED, SCHEDULED, EN_ROUTE, ARRIVED, IN_PROGRESS, COMPLETED,
+AWAITING_REVIEW, CLOSED, CANCELLED, CUSTOMER_UNAVAILABLE, RESCHEDULED, FAILED, ON_HOLD, REQUIRES_RETURN_VISIT`. The allowed
+transitions are `GET /jobs/workflow-settings` (`core` ones always on, `optional` ones a tenant may switch off). A refused
+change is `409 INVALID_STATE_TRANSITION` with a message naming why (no such edge, switched off by the company, or a guard).
+
+Data scope: `ORG_UNIT` / `LEGAL_ENTITY` follow `orgUnitId`; `ASSIGNED` = the caller has an ACTIVE assignment, directly or as a
+current member of an assigned team; `OWN` matches nothing; record-set grants (`recovery_related`, `customer_history`) do not
+apply to these endpoints. Outside the scope a job is `404`, never `403`. Assignment access ends when the job is CLOSED, CANCELLED
+or unassigned.
+
+### GET /api/v1/jobs
+
+- **Purpose**: list jobs, newest first (`createdAt desc, id desc`).
+- **Auth**: session. **Permission**: `jobs.view`, capability; scope in the query; each row projected with the field sets of the
+  grants that cover that row.
+- **Request query**: `cursor`, `limit`; `status` (comma-separated list), `priority`, `orgUnitId`, `customerId`, `jobTypeId`,
+  `assignedEmployeeId` (direct or through a team), `unassigned` (`true` | `false`), `scheduledFrom` / `scheduledTo` (ISO instants,
+  on `scheduledStartAt`), `q` (title substring or `#number`), `archived` `exclude` (default) | `include` | `only`. Filters only
+  match rows the caller sees with the `base` set (a financial-only grant such as Finance gets no rows from a filtered query).
+- **Response**: `200 { data: [job + assignments], page }`. **Errors**: `400` bad query. **Audit**: none.
+
+### POST /api/v1/jobs
+
+- **Purpose**: create a job by hand (origin `MANUAL` or `CUSTOMER_FOLLOW_UP`). It starts at `PENDING_ASSIGNMENT`
+  (history rows `null > CREATED` by the caller and `CREATED > PENDING_ASSIGNMENT` by the system); the job type's skills and
+  credentials are copied onto it. Jobs from a lead are created by the leads module (`createJobFromLead`), not here.
+- **Auth**: session. **Permission**: `jobs.create` over the service-area unit (the address's unit, else the customer's; an
+  explicit `orgUnitId` must lie inside it, and then the caller needs the permission over the customer's unit too). A customer
+  with no unit needs a tenant-wide `jobs.create` (`403` otherwise). Money needs the `financial` grant.
+- **Request body** (strict): `customerId`, `serviceAddressId` (an active address OF that customer), `jobTypeId` (active) required;
+  `orgUnitId`, `origin` (default `MANUAL`), `parentJobId` (a job of the same customer), `title` (default the job type's name),
+  `description`, `instructions`, `priority` (default the job type's), `appointmentWindow { start, end }`, `estimatedDurationMinutes`
+  5-1440 (default the job type's), `timeZone` (IANA), `quotedAmountMinor` (integer minor units), `currency` (default the
+  company's), `additionalRequirements { skills: [{ skillId, minLevel? }], certificationIds }` (§25.2, added to the type's;
+  the stricter level wins).
+- **Idempotency**: supported (`Idempotency-Key`).
+- **Response**: `201 { data: job + assignments + requirements + warnings }`, projected to what the caller may view after the write.
+- **Errors**: `403`; `404` customer / address owner / unit outside the scope; `409 INVALID_STATE_TRANSITION` archived customer;
+  `400` unknown or archived address, inactive job type, unit outside the customer's, unknown parent or requirement ids.
+- **Audit**: `job.create` (money by field name only).
+
+### GET /api/v1/jobs/mine
+
+- **Purpose**: the technician's own jobs: assigned to the caller's employee directly or through a team they currently belong to,
+  within their `jobs.view` scope. Soonest `scheduledStartAt` first, then `appointmentWindowStart`, unscheduled last, then id.
+- **Auth**: session. **Permission**: `jobs.view`.
+- **Request query**: `cursor`, `limit`; `status` (comma list), `scheduledFrom`, `scheduledTo`, `includeFinished` (`true` | `false`,
+  default `false`: CLOSED and CANCELLED are hidden unless asked for or named in `status`).
+- **Response**: `200 { data: [job + assignments], page }` (empty for a user with no employee record). **Audit**: none.
+
+### GET /api/v1/jobs/workflow-settings
+
+- **Purpose**: every transition of the lifecycle with its `optional` flag and whether the company has it `enabled`, plus the
+  `disabledTransitions` list (`"FROM>TO"`).
+- **Auth**: session. **Permission**: `job_types.view` (capability).
+- **Response**: `200 { data: { disabledTransitions: [string], transitions: [{ key, from, to, optional, enabled }] } }`.
+
+### PUT /api/v1/jobs/workflow-settings
+
+- **Purpose**: replace the list of optional transitions the company switched off. A company can only narrow the machine: naming
+  a core transition or one that does not exist is refused, and a stored name that is not optional is ignored by the machine.
+- **Auth**: session. **Permission**: `job_types.configure`, tenant-wide (`403` otherwise; the role requires MFA).
+- **Request body** (strict): `{ disabledTransitions: [string] }` (up to 200). **Response**: `200` as the GET.
+- **Errors**: `400` with `details` listing each name that is not an optional transition. **Audit**: `job.workflow_update`.
+
+### GET /api/v1/jobs/{id}
+
+- **Purpose**: one job with its active assignments and requirements.
+- **Auth**: session. **Permission**: `jobs.view` over the job. **Response**: `200 { data: job }` projected to the grant.
+  **Errors**: `404`. **Audit**: none.
+
+### PATCH /api/v1/jobs/{id}
+
+- **Purpose**: edit job facts (strict, at least one key): `title`, `description` (nullable), `instructions` (nullable), `priority`,
+  `estimatedDurationMinutes`, `timeZone` (nullable), `quotedAmountMinor` (nullable), `currency`. Status, assignment and schedule
+  have their own endpoints.
+- **Auth**: session. **Permission**: `jobs.edit` over the job AND, for every key sent, the right to write it: a Technician's
+  execution grant covers `instructions` only (anything else sent is `403`); money needs the financial grant.
+- **Response**: `200 { data: job + warnings }`; a request that changes nothing writes nothing.
+- **Errors**: `403`; `404`; `409 INVALID_STATE_TRANSITION` closed, cancelled or archived job; `400`.
+- **Audit**: `job.update` (money by field name only); events `job.updated`, and `job.priority_changed` for a priority change.
+
+### POST /api/v1/jobs/{id}/transition
+
+- **Purpose**: move the job to another status along the machine. Side effects: PENDING_ASSIGNMENT ends the assignments and
+  clears the scheduled slot; IN_PROGRESS / COMPLETED / CLOSED / CANCELLED stamp `startedAt` (first time) / `completedAt` /
+  `closedAt` / `cancelledAt`; CLOSED and CANCELLED end the assignments. Cancelling notifies the people the job was assigned to
+  (`job.cancelled`, critical).
+- **Auth**: session. **Permission**: `jobs.edit` over the job with `status` (and `statusReason` when a reason is sent) writable.
+  Edges out of AWAITING_REVIEW also need `jobs.approve` (to CLOSED) or `jobs.reject` (back to IN_PROGRESS); a move that ends an
+  assignment needs `jobs.assign`. An execution-only grant (Technician) may move a job only to `EN_ROUTE` in Phase 2 (`403` otherwise).
+- **Request body** (strict): `toStatus`; `reason` (1-500; required for CANCELLED, CUSTOMER_UNAVAILABLE, RESCHEDULED, FAILED, ON_HOLD,
+  REQUIRES_RETURN_VISIT).
+- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `400` missing reason / unknown status; `409 INVALID_STATE_TRANSITION`.
+- **Audit**: `job.status_change`; a `JobStatusHistory` row and a `job.status_changed` event.
+
+### POST /api/v1/jobs/{id}/assign
+
+- **Purpose**: give the job to ONE employee or ONE team; an existing assignment is ENDED and replaced (reassignment). Allowed in
+  PENDING_ASSIGNMENT, ASSIGNED, SCHEDULED, RESCHEDULED, ON_HOLD, CUSTOMER_UNAVAILABLE and REQUIRES_RETURN_VISIT; a PENDING_ASSIGNMENT
+  job becomes ASSIGNED, any other keeps its status. Method is `MANUAL` (dispatch recommendations arrive with the dispatch task).
+- **Hard eligibility is enforced** with the qualification engine against the job's requirement rows and, when set, its slot or
+  appointment window: employment, verified unexpired skills and credentials, job-category permission, service territory,
+  availability. A team passes when at least one current member is eligible. A failure is `409 CONFLICT` with
+  `error.details: [{ field, code, message }]` (`code` is a `QUALIFICATION.FAILURE.<code>`); nothing is written.
+- **Override**: `override: { reason }` assigns despite the failures. It needs `jobs.approve` over the job (`403` otherwise) and is
+  never accepted for employment failures (inactive or terminated employee, empty team). It is stored as method `OVERRIDE` with
+  `overrideReason`, as a `dispatch.override` event and in the audit log.
+- **Auth**: session. **Permission**: `jobs.assign` over the job with the base field set.
+- **Request body** (strict): exactly one of `employeeId`, `teamOrgUnitId` (an active TEAM unit inside the job's service area);
+  `reason`; `override { reason }`.
+- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `400` unknown employee or team; `409 CONFLICT` already assigned to
+  this target or not eligible; `409 INVALID_STATE_TRANSITION` job already on its way or finished.
+- **Audit**: `job.assign` or `job.reassign`. Events `job.assigned` / `job.reassigned`. Notifications: `job.assigned` to the new
+  assignee (every current member of a team) and `job.reassigned` to people who lost the job, after commit.
+
+### POST /api/v1/jobs/{id}/unassign
+
+- **Purpose**: take the job off its assignee(s): assignments end, the scheduled slot is cleared, the job returns to
+  PENDING_ASSIGNMENT (the transition must be enabled for the company). The previous assignee is notified (`job.reassigned`).
+- **Auth**: session. **Permission**: `jobs.assign` over the job. **Request body** (strict): `reason` (required).
+- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `409 INVALID_STATE_TRANSITION` nothing to remove / status does not allow.
+- **Audit**: `job.unassign` plus the status change; event `job.unassigned`.
+
+### POST /api/v1/jobs/{id}/reschedule
+
+- **Purpose**: change the customer arrival window and/or the dispatcher's slot (`null` clears; the slot cannot be cleared while the
+  job is SCHEDULED). A slot needs an active assignment (`400 field scheduledSlot`); setting one on an ASSIGNED, RESCHEDULED,
+  CUSTOMER_UNAVAILABLE or REQUIRES_RETURN_VISIT job moves it to SCHEDULED. Not allowed once the technician is on the way.
+  Conflicts come back as `warnings` (duration longer than the window or slot; an assigned employee not eligible or available then).
+- **Auth**: session. **Permission**: `jobs.edit` over the job with the scheduling fields writable (not part of the Technician grant).
+- **Request body** (strict, at least one span): `appointmentWindow { start, end } | null`, `scheduledSlot { start, end } | null`, `reason`.
+  End must be after start.
+- **Response**: `200 { data: job + warnings }` (a request that changes nothing writes nothing). **Errors**: `403`; `404`; `400`;
+  `409 INVALID_STATE_TRANSITION`.
+- **Audit**: `job.reschedule`; event `job.rescheduled`; notification `job.rescheduled` to the assignees after commit.
+
+### GET /api/v1/jobs/{id}/history
+
+- **Purpose**: status history, newest first: `{ id, fromStatus, toStatus, actorType (USER | SYSTEM), actorUserId, reason, occurredAt }`.
+- **Auth**: session. **Permission**: `jobs.view` over the job with the base field set (`403` for a financial-only grant).
+  Paged (`cursor`, `limit`). **Audit**: none.
+
+### GET /api/v1/jobs/{id}/events
+
+- **Purpose**: the job's event log, newest first: `{ id, type, actorType, actorUserId, occurredAt, recordedAt, payload }`. Types in
+  Phase 2: `job.created`, `job.assigned`, `job.reassigned`, `job.unassigned`, `job.rescheduled`, `job.updated`,
+  `job.priority_changed`, `job.status_changed`, `dispatch.override`; clients translate `JOB.EVENT.<NAME>` (the part after `job.`,
+  dots to underscores, upper case: `JOB.EVENT.PRIORITY_CHANGED`, `JOB.EVENT.DISPATCH_OVERRIDE`).
+- **Auth**: session. **Permission**: as `/history`. Paged. **Audit**: none.
+
+### GET /api/v1/jobs/{id}/assignments
+
+- **Purpose**: every assignment the job has had, ACTIVE first: `{ id, employeeId, teamOrgUnitId, role, state (ACTIVE | ENDED), method,
+  overrideReason, assignedAt, assignedById, reason, endedAt, endedReason }`.
+- **Auth**: session. **Permission**: as `/history`. Paged. **Audit**: none.
