@@ -92,6 +92,61 @@ describe("role template definitions", () => {
   });
 });
 
+describe("Phase 2 matrix rows (Customers, Leads, Dispatch, Jobs) and the new modules", () => {
+  const grant = (key: string, permission: string) => template(key).grants.find((g) => g.permission === permission);
+
+  it("Dispatcher has the full dispatch module, operational jobs and read-only qualifications, with nothing financial or configurable", () => {
+    for (const action of ["view", "create", "edit", "assign", "manage"]) expect(holds("DISPATCHER", `dispatch.${action}`), action).toBe(true);
+    for (const action of ["view", "create", "edit", "assign"]) expect(grant("DISPATCHER", `jobs.${action}`)?.conditions, action).toBeUndefined();
+    expect(holds("DISPATCHER", "jobs.archive")).toBe(false);
+    expect(holds("DISPATCHER", "qualifications.view")).toBe(true);
+    expect(holds("DISPATCHER", "qualifications.edit")).toBe(false);
+    expect(holds("DISPATCHER", "job_types.view")).toBe(true);
+    expect(holds("DISPATCHER", "job_types.configure")).toBe(false);
+  });
+
+  it("Lead Operations Manager has every lead action except archive, plus lead sources (leads.manage)", () => {
+    for (const action of ["view", "create", "edit", "assign", "export", "manage"]) expect(holds("LEAD_OPERATIONS_MANAGER", `leads.${action}`), action).toBe(true);
+    expect(holds("LEAD_OPERATIONS_MANAGER", "leads.archive")).toBe(false);
+    expect(template("LEAD_OPERATIONS_MANAGER").requiresMfa).toBe(false);
+  });
+
+  it("Technician sees assigned work and may change only execution / status fields", () => {
+    expect(grant("TECHNICIAN", "jobs.view")?.conditions).toBeUndefined();
+    expect(grant("TECHNICIAN", "jobs.edit")?.conditions).toEqual({ fields: "execution" });
+    expect(grant("TECHNICIAN", "leads.edit")?.conditions).toEqual({ fields: "status" });
+    for (const permission of ["jobs.create", "jobs.assign", "dispatch.assign", "customers.edit", "leads.assign", "qualifications.edit"]) {
+      expect(holds("TECHNICIAN", permission), permission).toBe(false);
+    }
+    // Plain grants never include the opt-in financial / billing sets.
+    expect(template("TECHNICIAN").grants.some((g) => g.conditions?.includeFields?.length)).toBe(false);
+  });
+
+  it("Customer Relations manages customers in scope and reads job history only through the customer history set", () => {
+    for (const action of ["view", "create", "edit"]) expect(holds("CUSTOMER_RELATIONS", `customers.${action}`), action).toBe(true);
+    expect(holds("CUSTOMER_RELATIONS", "customers.archive")).toBe(false);
+    expect(grant("CUSTOMER_RELATIONS", "jobs.view")?.conditions).toEqual({ set: "customer_history" });
+    expect(holds("CUSTOMER_RELATIONS", "jobs.edit")).toBe(false);
+  });
+
+  it("every template reads and manages its own notifications; only HR/Owner/managers touch qualifications", () => {
+    for (const t of ROLE_TEMPLATES) {
+      expect(holds(t.key, "notifications.view"), t.key).toBe(true);
+      expect(holds(t.key, "notifications.edit"), t.key).toBe(true);
+    }
+    expect(holds("HR_MANAGER", "qualifications.approve")).toBe(true);
+    expect(holds("CITY_MANAGER", "qualifications.edit")).toBe(true);
+    expect(holds("CITY_MANAGER", "qualifications.approve")).toBe(false);
+    expect(holds("FINANCE_DIRECTOR", "qualifications.view")).toBe(false);
+  });
+
+  it("job_types.configure is held by Owner and COO only, so those roles require MFA", () => {
+    const holders = ROLE_TEMPLATES.filter((t) => holds(t.key, "job_types.configure")).map((t) => t.key).sort();
+    expect(holders).toEqual(["COO", "OWNER_CEO"]);
+    for (const key of holders) expect(template(key).requiresMfa, key).toBe(true);
+  });
+});
+
 describe("provisionRoleTemplates", () => {
   it("creates every template as an editable role with its permissions, conditions and MFA flag", async () => {
     const tenant = await createTenant("authz-tpl");

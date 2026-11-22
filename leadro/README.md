@@ -63,6 +63,12 @@ printed). The Owner/CEO, COO, Finance Director and HR Manager roles require MFA 
 permissions or configure a module), so set `LEADRO_ENCRYPTION_KEY` and enroll an authenticator on first
 login. Log in to one tenant and confirm you never see the other: that is the isolation check by hand.
 
+The same command also seeds each tenant's operational catalogs (idempotent, and back-filled into tenants seeded earlier):
+6 skills, 6 certifications / licenses / equipment qualifications, 6 job types with their requirements, 6 lead sources,
+default operations settings, and field technicians (employees without a login, plus the `technician` user) with uneven
+qualifications on purpose: one license expiring in about 25 days, one expired license, one certificate pending
+verification, one technician on upcoming time off. Customers, leads and jobs are not seeded.
+
 ## Tests
 
 `npm test` first applies pending migrations to `leadro_test` (forward-only `migrate deploy`), then

@@ -45,13 +45,20 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `permissions` | view, create, edit, archive, assign*, approve, manage* |
 | `audit` | view, export* |
 | `localization` | view, edit, configure |
-| `customers` | view, create, edit, archive, export |
-| `leads` | view, create, edit, archive, assign, export |
+| `customers` | view, create, edit, archive, export, manage (duplicate matchers) |
+| `leads` | view, create, edit, archive, assign, export, manage (lead sources, lead workflow) |
 | `dispatch` | view, create, edit, assign, manage |
 | `jobs` | view, create, edit, archive, assign, approve, reject, export |
+| `qualifications` | view, create, edit, archive, approve (verify credentials), manage (skill/certification catalog) |
+| `notifications` | view, edit (own notifications only) |
+| `job_types` | view, configure (job type catalog, job workflow settings) |
 | `compensation` | view*, create, edit, approve*, reject, export, configure* |
 | `financial_reports` | view*, export* |
 | `performance` | view, export |
+
+Phase 2 additions (`qualifications`, `notifications`, `job_types`, and `manage` on customers/leads) are not rows of the
+4.5 matrix; their defaults are in section 5 ("Phase 2 modules"). `notifications.*` is a capability check: the
+service always returns only the caller's own notifications, whatever scope the assignment carries.
 
 Matrix modules map as: Company settings -> `company_settings`; Organization -> `organization`;
 Employees -> `employees`; Customers -> `customers`; Leads -> `leads`; Dispatch -> `dispatch`;
@@ -74,6 +81,25 @@ the `base` (non-sensitive) fields only; a sensitive set is visible only to a gra
 | `employees.financial_fields` | employees | `financial` |
 | `customers.billing_fields` | customers | `billing` |
 | `jobs.financial_fields` | jobs | `financial` |
+
+Field maps (`field-maps.ts`) classify every stored column of `Employee`, `Customer`, `Lead` and `Job` (a test fails when a
+column is added without a tag). Customer billing columns (`billingName`, `billingEmail`, `billingAddress`, `taxId`,
+`paymentTerms`) are `billing`; job `quotedAmountMinor` and `currency` are `financial`. Leads have no sensitive set.
+Because every field has ONE tag and read grants reveal whole sets, **read grants are plain** (no `fields` limit) for
+Dispatcher and Technician: "operational / necessary fields" means "everything except the opt-in sensitive sets".
+`fields` conditions remain on WRITE grants that must be narrower (Technician `leads.edit` -> `status`,
+`jobs.edit` -> `execution`). The allowed fields are exported allowlists (`LEAD_STATUS_FIELDS` = status, closedReason;
+`JOB_EXECUTION_FIELDS` = status, statusReason, startedAt, completedAt, instructions; `LEAD_WRITE_ALLOWLISTS` /
+`JOB_WRITE_ALLOWLISTS` map tag -> list). Services MUST call, before applying an update, with the decision for the
+record:
+
+```ts
+assertWritableFields(decision, Object.keys(changes), JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS); // throws ForbiddenError naming the fields
+```
+
+A named tag with an allowlist writes exactly that list; a plain grant (`base`) writes every non-sensitive field of the
+map; sensitive sets only when named; unknown tags and denied decisions write nothing. **Technician customers**: the matrix's
+"necessary fields" now means every non-billing field (plain `customers.view` grant with ASSIGNED scope; billing is opt-in).
 
 ### 3.2 Grant conditions (`RolePermission.conditions`)
 
@@ -139,10 +165,10 @@ Cell vocabulary from the spec -> grants:
 | Company settings | `company_settings.*` T | view, edit (no configure) T | - | - | - | - | - | - |
 | Organization | `organization.*` T | view T | - | view, edit, assign, create ORG_UNIT | same, narrower unit | - | - | - |
 | Employees | `employees.*` T | view, create, edit, assign ORG_UNIT | view, cond `{fields:"financial"}` T | view, create, edit, assign ORG_UNIT | same | view, cond `{fields:"availability"}` ORG_UNIT | view, assign cond `{set:"lead_team"}` | view OWN |
-| Customers | `customers.*` T | view, create, edit ORG_UNIT/T | view cond `{fields:"billing"}` T | view, create, edit ORG_UNIT | same | view cond `{set:"job_related"}` | view, create, edit cond `{set:"lead_related"}` | view ASSIGNED (necessary fields) |
-| Leads | `leads.*` T | view T | - | view, create, edit, assign ORG_UNIT | same | view cond `{set:"dispatch_related"}` | `leads.*` (non-archive) T | view, edit status ASSIGNED |
+| Customers | `customers.*` T | view, create, edit ORG_UNIT/T | view cond `{fields:"billing"}` T | view, create, edit ORG_UNIT | same | view cond `{set:"job_related"}` | view, create, edit cond `{set:"lead_related"}` | view ASSIGNED (plain grant: base fields, never billing) |
+| Leads | `leads.*` T | view T | - | view, create, edit, assign ORG_UNIT | same | view cond `{set:"dispatch_related"}` | `leads.*` incl. `manage`, no archive | view ASSIGNED, edit cond `{fields:"status"}` |
 | Dispatch | `dispatch.*` T | `dispatch.*` T | - | view, create, edit, assign ORG_UNIT | same | `dispatch.*` T | view (limited) ORG_UNIT | view OWN |
-| Jobs | `jobs.*` T | `jobs.*` T | view cond `{fields:"financial"}` T | view, create, edit, assign ORG_UNIT | same | view, create, edit, assign (operational fields) T | view cond `{set:"recovery_related"}` | view, edit (execution) ASSIGNED |
+| Jobs | `jobs.*` T | `jobs.*` T | view cond `{fields:"financial"}` T | view, create, edit, assign ORG_UNIT | same | view, create, edit, assign (plain grants = operational fields, no financial set) T | view cond `{set:"recovery_related"}` | view ASSIGNED, edit cond `{fields:"execution"}` |
 | Compensation | `compensation.*` T | view T | `compensation.*` T | configurable (default view ORG_UNIT) | view (limited) ORG_UNIT | - | - | view OWN (own statements) |
 | Financial reports | view, export T | view T | view, export T | view ORG_UNIT | view (limited) ORG_UNIT | - | - | - (self-service, not the module permission) |
 | Performance | view, export T | view T | - | view ORG_UNIT | view ORG_UNIT | - | view cond `{set:"lead_team"}` | view OWN |
@@ -156,7 +182,7 @@ modules that consume it (Phase 2/3) and is recorded then.
 `suggestedScopeTypes`: Owner/CEO, COO, Finance, HR -> `TENANT`; State/Regional/City Manager, Team Leader,
 Dispatcher, Lead Ops, Customer Relations -> `ORG_UNIT` (Dispatcher and Lead Ops are narrower than the
 matrix's "Full scope"; assign `TENANT` when a company wants that); Technician -> `OWN` + `ASSIGNED`.
-Technician-specific qualifiers use `fields` (`necessary`, `status`, `execution`); the COO's
+Technician-specific write qualifiers use `fields` (`status`, `execution`; reads are plain); the COO's
 `permissions.assign` carries `{ set: "non_sensitive_roles" }`, to be enforced by the permissions module.
 
 **MFA.** `Role.requiresMfa = true` for the Owner/CEO, Finance Director and HR Manager templates, for
@@ -185,6 +211,21 @@ hold `permissions.view` (403) and the target user/record to be inside the actor'
 scope) over an overlapping period (service check with an advisory lock; not expressible as a DB
 constraint because scopes are a child table).
 
+**Phase 2 modules (defaults, not in the 4.5 table).**
+
+| Module | Owner/CEO | COO | State/Regional/City Mgr | Team Leader | Dispatcher | Lead Ops | Customer Relations | HR | Technician | Finance |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `qualifications` | `*` | view | view, create, edit | view | view | - | - | `*` (incl. approve, manage) | view (OWN) | - |
+| `notifications` | view, edit | view, edit | view, edit | view, edit | view, edit | view, edit | view, edit | view, edit | view, edit | view, edit |
+| `job_types` | `*` | `*` (view, configure) | view | view | view | view | view | - | view | - |
+| `customers.manage` | yes | - | - | - | - | - | - | - | - | - |
+| `leads.manage` | yes | - | - | - | - | yes | - | - | - | - |
+| `jobs.view {set:"customer_history"}` | (full) | (full) | (full) | - | - | - | yes | - | - | - |
+
+`job_types.configure` makes the role require MFA (every `*.configure` does), which is why only Owner and COO hold it.
+`qualifications.approve` (verifying licenses and certifications) stays with HR and the Owner so managers who record
+credentials do not verify them. The `customer_history` set is passed by the customer history view only.
+
 Additional 4.4 role templates not in the 4.5 table are derived by analogy and flagged for
 confirmation in `DECISIONS.md`:
 
@@ -192,7 +233,7 @@ confirmation in `DECISIONS.md`:
 |---|---|---|
 | Regional Manager | State Manager | ORG_UNIT (region) |
 | Team Leader | City Manager, read-mostly | ORG_UNIT (team) |
-| Customer Relations | Customers scoped + leads view | ORG_UNIT |
+| Customer Relations | Customers scoped + leads view + job history (`customer_history` set) | ORG_UNIT |
 | HR Manager | employees.* (incl. training/cert records later), base fields only (financial fields are opt-in) | TENANT |
 
 Platform modules (not in 4.5): `users` and `audit` follow `permissions`/`company_settings`

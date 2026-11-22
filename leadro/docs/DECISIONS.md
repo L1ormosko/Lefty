@@ -428,3 +428,113 @@ No new dependencies (Zod already present). No schema change and no migration: ev
 - The seed re-uses `prisma/seed/seed-tenant.ts` and enrols the CEO in MFA by writing the encrypted seed directly (`@/server/auth/secret-box`, a deep import because `encryptSecret` is not exported from the auth index; test tooling only). Specs derive codes with the app's own `@/lib/totp`.
 - UI text is looked up from the i18n catalogs (`e2e/helpers.ts: text`), never hard-coded; the one exception is Next's built-in "This page could not be found." for the 404 check.
 - Finding: the brief expected a Technician visiting `/admin/employees` to be refused. By design (SPEC 4.5, the navigation comment) a Technician has `employees.view` over their OWN record, so the page renders with only their own row and no "add" action. The spec asserts that behaviour; access-denied is asserted for company, users, roles and localization.
+
+
+## Phase 2 Task 1: operational core schema + permission catalog
+
+Foundation for the parallel Phase 2 tasks (customers, qualifications, notifications, leads, jobs, dispatch, UI,
+technician app). Model guide, diagram and index table: `docs/ERD.md` "Phase 2". Constraint names are a contract
+(asserted in `tests/db/phase2-schema.test.ts`). No new dependencies.
+
+### Schema design
+- **One migration** (`20261122121345_phase2_operational_core`): Prisma-generated DDL, then a hand-written block (RLS
+  DO-block re-run, CHECKs, partial unique indexes, append-only triggers). `CREATE EXTENSION pg_trgm` (trusted extension)
+  for fuzzy customer/lead name search; trigram GIN indexes are declared in the Prisma schema (`ops: raw("gin_trgm_ops")`)
+  so `prisma migrate dev` sees no drift (verified: an immediate second `migrate dev` produced an empty migration).
+- **Composite tenant-safe FKs everywhere**, plus one stricter pattern: `Job` and `Lead` reference
+  `CustomerAddress (id, customerId, tenantId)`, so a job's service address must belong to the job's own customer.
+  `Lead.customerAddressId` without a `customerId` is rejected by `lead_address_needs_customer` (a composite FK with a
+  NULL column is not checked: MATCH SIMPLE).
+- **Current assignee is a query, not a column.** No `assignedTo` on `Lead`/`Job`: the ACTIVE `LeadAssignment` /
+  `JobAssignment` row is the single source of truth (no drift between two copies), enforced by partial unique indexes
+  (one ACTIVE owner per lead; one ACTIVE `LEAD` per job; an employee/team at most once among a job's ACTIVE rows).
+  ASSIGNED scope resolves through those rows; `(tenantId, employeeId, state)` indexes serve "my leads/jobs".
+  Prisma cannot express partial indexes, so they live in the SQL (verified that `migrate dev` does not drop them).
+- **Money**: `Int` minor units + `char(3)` currency, CHECK >= 0 (Int tops out near 21.4M major units; ample for a
+  quote). Final/collected amounts are Phase 4 and not modeled. `quotedAmountMinor`/`currency` on jobs are the
+  `financial` field set (`jobs.financial_fields`); on leads they are plain base fields (a sales estimate, not billing).
+- **Identifiers and numbers**: ids are cuids; human numbers (`Customer|Lead|Job.number`) come from `NumberSequence`
+  (increment with `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`), unique per tenant. Phone: typed + E.164 columns
+  (`phone`, `phoneE164`; `contactPhone`, `contactPhoneE164`); email lower-case by CHECK; `normalizedKey` for addresses.
+  The services compute the normalized values; the DB only validates shape.
+- **Open vocabularies are strings, closed ones are enums.** Statuses and kinds the spec fixes are enums
+  (`LeadStatus`, `JobStatus`, `DispatchMode`...). `JobEvent.type`, `Notification.eventType`,
+  `NotificationPreference.eventType` are dotted lower-case strings (`job.assigned`, `lead.assigned`) validated by CHECK,
+  because later tasks must be able to add event types without a migration (they may not add migrations).
+- **Notifications store keys, not text**: `templateKey` + `params`, rendered at read time in the recipient's language
+  (EN/ES/HE), so a user who changes language sees old notifications in the new one. `Notification` is per recipient
+  (a `User`); `NotificationDelivery` is one row per channel ATTEMPT (`attempt` 1, 2...), carrying provider response,
+  failure reason and retry status (spec 14.3). `NOT_CONFIGURED` is a delivery status so unconfigured channels are
+  recorded truthfully (spec 28.3). Idempotency: unique `(tenant, recipient, idempotencyKey)`.
+- **Time**: instants are `timestamptz`; `Job.appointmentWindow*` (customer-facing arrival window) and
+  `scheduledStartAt/EndAt` (dispatcher's slot) are separate; `Job.timeZone` is nullable (fallback: org unit, tenant,
+  like `User.timeZone`). `Availability` weekly windows are minutes after LOCAL midnight in an IANA `timeZone`, ISO
+  day-of-week 1-7, exceptions are UTC intervals that override weekly windows. The service validates the zone name.
+- **Qualifications**: `Skill` (level 1-5 on the employee row) and `Certification` (type CERTIFICATION | LICENSE |
+  EQUIPMENT, i.e. "equipment qualification" = authorization to operate a piece of equipment). `EmployeeQualification` is
+  skill XOR certification by CHECK; `kind` must match `Certification.type` (service check, not expressible as CHECK).
+  A renewal is a new row (history); skills are unique per employee. Eligibility counts a row only when `VERIFIED` and
+  not expired; `VERIFIED` requires `verifiedById` + `verifiedAt`. `JobType.requiredEquipment` (string list) is an
+  informational "what to bring" list, NOT an eligibility rule. `JobRequirement` snapshots a job's requirements (type
+  defaults + manual additions, spec 25.2 "requires additional qualification"): the eligibility engine reads only it.
+- **Foresight additions beyond the brief's model list** (so the parallel tasks need no migration):
+  `NumberSequence`; `OperationsSettings` (dispatch mode, disabled-transition lists for narrowing-only lifecycles,
+  duplicate matcher config, enabled channels, open-attempt window for the spec 25.1 conflict rule, expiry warning days);
+  `CustomerNote` (notes with author and time instead of one blob); `JobTypeSkill`, `JobTypeCertification`,
+  `JobRequirement` (required skills/certifications as rows, not arrays); `DispatchRecommendation` (the ranked candidates
+  with per-factor explanation, blocking reasons, decision: spec 7.4/25.2) and `JobAssignment.method/overrideReason/
+  recommendationId` (manual override recorded, CHECK: an override needs a reason).
+- **DuplicateFlag** covers LEAD_LEAD, CUSTOMER_CUSTOMER and LEAD_CUSTOMER pairs with real FK columns (so composite FKs
+  protect them). Same-type pairs are stored with the ids in sorted order (CHECK) and a unique `pairKey`, so each pair is
+  flagged once. Statuses: OPEN, NOT_DUPLICATE, CONFIRMED_DUPLICATE (no MERGED: merging is not in Phase 2).
+- **Open contact attempt** (spec 25.1) = a `LeadInteraction` of kind CONTACT_ATTEMPT with `closedAt` null and newer than
+  `OperationsSettings.contactAttemptOpenMinutes` (default 30).
+- **History tables are append-only** (`LeadStatusHistory`, `JobStatusHistory`, `JobEvent`), like `AuditEvent`, via the
+  generic `leadro_append_only()` trigger. Soft-remove everywhere else: `archivedAt`, never hard delete (all FKs RESTRICT).
+- **Territories** are org units covered with `includeDescendants`; the dispatch eligibility check is "the job's org unit
+  is inside one of the employee's active territories". `Job.orgUnitId` is required (service area) so ORG_UNIT scope and the
+  territory check always have a target; `Customer.orgUnitId` / `Lead.orgUnitId` are nullable (unrouted = tenant-level scopes only).
+- **Not modeled yet (later phases)**: attachments, complaints, payments/finance, shifts, recovery cases, materials,
+  completion form submissions. `JobType.completionFormSchema` is a stored-but-uninterpreted JSON placeholder.
+
+### Permission catalog
+- Added modules `qualifications` (view, create, edit, archive, approve, manage), `notifications` (view, edit: OWN only; the
+  service filters on the caller, so the grant's scope is irrelevant), `job_types` (view, configure: the catalog and job workflow
+  settings; `configure` makes a role require MFA by the existing rule, so only Owner and COO hold it), and `manage` on
+  `customers` (duplicate matchers) and `leads` (lead sources, lead workflow). The brief named `job_types.configure`;
+  `job_types.view` was added so Dispatcher/Lead Ops/Technician can read the catalog without holding a configure right.
+- **Role templates** (rationale in `docs/PERMISSIONS.md` section 5): every template gets `notifications.view/edit`; HR gets
+  `qualifications.*` (HR verifies credentials); State/Regional/City managers `qualifications.view/create/edit` (no approve:
+  separation from HR) and `job_types.view`; Lead Ops gains `leads.manage` (still no archive); Dispatcher keeps
+  `dispatch.*`, plain job grants and read-only qualifications; Technician: plain `view` on customers/leads/jobs/dispatch,
+  `leads.edit {fields:"status"}`, `jobs.edit {fields:"execution"}`; Customer Relations gets `jobs.view {set:"customer_history"}`.
+- **Fixed a Phase 1 template flaw**: grants `{fields:"operational"}` (Dispatcher jobs), `{fields:"necessary"}` (Technician
+  customers) and `{fields:"status"}` on leads.view/ `{fields:"execution"}` on jobs.view limit a READ to one field set, but a
+  field map assigns each field exactly one tag and base readers (Owner...) do not hold those tags, so those reads would have
+  returned nothing (or required tagging every field twice). Read grants are now plain: the sensitive sets (`financial`,
+  `billing`) are opt-in, so "operational/necessary fields" already means "everything except financial/billing". The write
+  limits for the Technician stay as field-set conditions on the EDIT grants; Tasks 5/6 define the allowed-field allowlists.
+- **Field maps** (`CUSTOMER_FIELD_MAP`, new `LEAD_FIELD_MAP`, `JOB_FIELD_MAP`) classify every stored column; a test fails when
+  a column is added without a tag. Money on jobs = `financial`; customer billing columns = `billing` (the "customers.billing"
+  sensitive set; its category key is `customers.billing_fields`, unchanged).
+
+### Seed
+- `prisma/seed/seed-operations.ts` (`seedOperationalData(tenantId, slug)`, idempotent, also back-fills tenants seeded before
+  Phase 2) adds 6 skills, 6 certifications/licenses/equipment qualifications, 6 job types with requirements, 6 lead sources,
+  default `OperationsSettings`, and technicians. It is separate from `seedTenant` on purpose: the e2e fixture and the seed
+  tests rely on `seedTenant` creating exactly one employee per role template. Extra technicians are employees WITHOUT a login
+  (no password to manage): per team 3 profiles (electrician with a license expiring in 25 days, junior with a PENDING
+  EPA certificate and short hours, plumber with an EXPIRED license and upcoming time off), and the seeded `technician`
+  login gets the senior HVAC profile. Territories cover the technician's city (senior: the whole region); availability is
+  weekly windows in the branch time zone. No customers, leads or jobs.
+
+
+### Phase 2 Task 1, fix round 1
+Migration `20261122140000_phase2_schema_fixes` (the first migration was already applied to the shared test DB, so it is untouched). Full description in `docs/ERD.md` "Phase 2 fix round 1".
+- **Job-category permissions**: chose a separate table `EmployeeJobPermission` (job type XOR category, time-bounded, granted by a user) over a `JOB_CATEGORY` qualification kind: it is an authorization decision with its own validity and grantor, not a credential with a number/issuer/verification, and keeping it out of `EmployeeQualification` leaves that table's kind/target CHECKs simple. `TRAINING` added to `QualificationKind` (backed by a `Certification` of type TRAINING).
+- **Distance origins**: `OrgUnit.latitude/longitude` and `Employee.startLatitude/startLongitude`, validated `Decimal(9,6)`. The existing untyped `OrgUnit.address` JSON stays for display only. Straight-line estimates need origin + `CustomerAddress` coordinates; absent coordinates = "distance unknown".
+- **Customer preference** is `CustomerPreferredEmployee` (PREFERRED | AVOID, composite FKs) instead of an id inside `contactPreferences` JSON.
+- **Stricter composite FKs**: assignment recommendation must belong to the same job; a job's lead must belong to the job's customer (so conversion links the lead to its customer first); `OperationsSettings.updatedById` is an FK; qualification kind is bound to `Certification.type` by a composite FK to `Certification (id, type, tenantId)` (replaces the former service-only check).
+- **Technician write limits** are now defined: `LEAD_STATUS_FIELDS`, `JOB_EXECUTION_FIELDS`, the `*_WRITE_ALLOWLISTS` maps and `assertWritableFields` / `writableFields` in `authz/writable-fields.ts` (field maps classify reads; allowlists define the narrow write sets). Tests in `tests/authz/writable-fields.test.ts`. Tasks 5/6 must call `assertWritableFields` for every lead/job update.
+- **JSON / polymorphic reference contract** (ids only, tenant-scoped resolution plus authz re-check, never copy names/PII): in ERD. Also documented: intake must always set `sourceId`; availability windows cannot cross midnight (split night shifts, evaluate per local date incl. DST).
+- Seed: branch coordinates and per-technician job-category permissions added (`seedOperationalData`).

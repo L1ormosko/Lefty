@@ -1,4 +1,4 @@
-// LEADRO core schema (Phase 1 foundation). See docs/ERD.md and docs/DECISIONS.md.
+// LEADRO schema: Phase 1 foundation + Phase 2 operational core. See docs/ERD.md and docs/DECISIONS.md.
 //
 // Conventions
 // - Every tenant-owned table has a non-null "tenantId" (FK to Tenant) and is protected by a
@@ -140,6 +140,38 @@ model Tenant {
   auditEvents     AuditEvent[]
   idempotency     IdempotencyRecord[]
   translations    TranslationResource[]
+
+  // Phase 2 (operational core)
+  numberSequences            NumberSequence[]
+  operationsSettings         OperationsSettings?
+  customers                  Customer[]
+  customerAddresses          CustomerAddress[]
+  customerNotes              CustomerNote[]
+  leadSources                LeadSource[]
+  leads                      Lead[]
+  leadAssignments            LeadAssignment[]
+  leadStatusHistory          LeadStatusHistory[]
+  leadInteractions           LeadInteraction[]
+  duplicateFlags             DuplicateFlag[]
+  skills                     Skill[]
+  certifications             Certification[]
+  jobTypes                   JobType[]
+  jobTypeSkills              JobTypeSkill[]
+  jobTypeCertifications      JobTypeCertification[]
+  jobs                       Job[]
+  jobRequirements            JobRequirement[]
+  jobAssignments             JobAssignment[]
+  jobStatusHistory           JobStatusHistory[]
+  jobEvents                  JobEvent[]
+  dispatchRecommendations    DispatchRecommendation[]
+  employeeQualifications     EmployeeQualification[]
+  serviceTerritories         ServiceTerritory[]
+  availabilities             Availability[]
+  notifications              Notification[]
+  notificationDeliveries     NotificationDelivery[]
+  notificationPreferences    NotificationPreference[]
+  employeeJobPermissions     EmployeeJobPermission[]
+  customerPreferredEmployees CustomerPreferredEmployee[]
 }
 
 model LegalEntity {
@@ -177,6 +209,9 @@ model OrgUnit {
   timeZone       String?
   defaultLocale  String?
   operatingHours Json?
+  /// Branch / depot coordinates: origin of straight-line distance estimates (range CHECKs in the fixes migration).
+  latitude       Decimal?    @db.Decimal(9, 6)
+  longitude      Decimal?    @db.Decimal(9, 6)
   createdAt      DateTime    @default(now()) @db.Timestamptz(3)
   updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
 
@@ -187,6 +222,14 @@ model OrgUnit {
   managers    OrgUnitManager[]
   assignments OrganizationalAssignment[]
   scopes      AccessScope[]
+
+  // Phase 2
+  customers          Customer[]
+  customerAddresses  CustomerAddress[]
+  leads              Lead[]
+  jobs               Job[]
+  teamJobAssignments JobAssignment[]
+  serviceTerritories ServiceTerritory[]
 
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
@@ -209,6 +252,9 @@ model Employee {
   status          EmployeeStatus @default(ACTIVE)
   hireDate        DateTime?      @db.Date
   terminationDate DateTime?      @db.Date
+  /// Optional start location (home/depot): origin of straight-line distance estimates.
+  startLatitude   Decimal?       @db.Decimal(9, 6)
+  startLongitude  Decimal?       @db.Decimal(9, 6)
   createdAt       DateTime       @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
 
@@ -217,6 +263,16 @@ model Employee {
   legalEntity  LegalEntity?               @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
   assignments  OrganizationalAssignment[]
   managedUnits OrgUnitManager[]
+
+  // Phase 2
+  jobPermissions          EmployeeJobPermission[]
+  customerPreferences     CustomerPreferredEmployee[]
+  qualifications          EmployeeQualification[]
+  serviceTerritories      ServiceTerritory[]
+  availabilities          Availability[]
+  leadAssignments         LeadAssignment[]
+  jobAssignments          JobAssignment[]
+  dispatchRecommendations DispatchRecommendation[]
 
   @@unique([id, tenantId])
   @@unique([userId, tenantId])
@@ -305,6 +361,27 @@ model User {
   orgAssignmentsMade   OrganizationalAssignment[] @relation("AssignmentCreatedBy")
   translationsEdited   TranslationResource[]      @relation("TranslationEditedBy")
   translationsReviewed TranslationResource[]      @relation("TranslationReviewedBy")
+
+  // Phase 2
+  customersCreated        Customer[]               @relation("CustomerCreatedBy")
+  customerNotesWritten    CustomerNote[]           @relation("CustomerNoteAuthor")
+  leadsCreated            Lead[]                   @relation("LeadCreatedBy")
+  leadAssignmentsMade     LeadAssignment[]         @relation("LeadAssignmentAssignedBy")
+  leadStatusChanges       LeadStatusHistory[]      @relation("LeadStatusChangedBy")
+  leadInteractionsWritten LeadInteraction[]        @relation("LeadInteractionAuthor")
+  duplicatesResolved      DuplicateFlag[]          @relation("DuplicateFlagResolvedBy")
+  jobsCreated             Job[]                    @relation("JobCreatedBy")
+  jobAssignmentsMade      JobAssignment[]          @relation("JobAssignmentAssignedBy")
+  jobStatusChanges        JobStatusHistory[]       @relation("JobStatusChangedBy")
+  jobEventsRecorded       JobEvent[]               @relation("JobEventActor")
+  dispatchRecsGenerated   DispatchRecommendation[] @relation("DispatchRecGeneratedBy")
+  dispatchRecsDecided     DispatchRecommendation[] @relation("DispatchRecDecidedBy")
+  qualificationsVerified  EmployeeQualification[]  @relation("QualificationVerifiedBy")
+  notificationsReceived   Notification[]           @relation("NotificationRecipient")
+  notificationPreferences NotificationPreference[]
+
+  jobPermissionsGranted     EmployeeJobPermission[] @relation("JobPermissionGrantedBy")
+  operationsSettingsUpdated OperationsSettings[]    @relation("OperationsSettingsUpdatedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -576,4 +653,1177 @@ model TranslationResource {
 
   @@unique([id, tenantId])
   @@unique([tenantId, locale, key])
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// PHASE 2: OPERATIONAL CORE (customers, leads, jobs, qualifications, dispatch, notifications)
+//
+// Extra conventions for this section (details: docs/ERD.md "Phase 2", docs/DECISIONS.md "Phase 2 Task 1")
+// - Status enums are language-neutral identifiers. Allowed transitions live in ONE pure module per entity
+//   (src/lib/<entity>-lifecycle.ts), never in the database; the *StatusHistory tables are append-only.
+// - The CURRENT assignee of a lead/job is the ACTIVE row of LeadAssignment / JobAssignment (single source
+//   of truth, no denormalized "assignedTo" column). ASSIGNED scope resolves through those rows.
+// - Money = integer minor units (cents) + ISO-4217 currency. Never floats.
+// - Phone numbers are stored as typed AND normalized (E.164, "+15551234567") for matching; emails are
+//   stored lower-case (CHECK). Both feed duplicate detection and search.
+// - Human-friendly numbers (customer/lead/job) come from NumberSequence, unique per tenant.
+// - Open-ended log vocabularies (notification event types, job event types) are dotted lower-case STRINGS
+//   (CHECK-validated), not enums, so a later task can add a value without a schema migration.
+// - Hand-written constraints (CHECKs, partial unique indexes, append-only triggers) are in the migration
+//   SQL and verified by tests/db/phase2-schema.test.ts.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+
+// ───────────────────────── Phase 2 enums ─────────────────────────
+
+enum ContactChannel {
+  PHONE
+  SMS
+  EMAIL
+  IN_PERSON
+  CHAT
+  OTHER
+}
+
+enum CustomerKind {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum LeadSourceType {
+  MANUAL
+  PHONE
+  WEBSITE
+  MARKETING_CAMPAIGN
+  EXTERNAL_CRM
+  API
+  IMPORT
+  INTEGRATION
+}
+
+/// Spec 6.3. Valid transitions are defined in src/lib/lead-lifecycle.ts.
+enum LeadStatus {
+  NEW
+  UNASSIGNED
+  ASSIGNED
+  CONTACT_ATTEMPTED
+  CONTACTED
+  QUALIFIED
+  SCHEDULED
+  DISPATCHED
+  CONVERTED
+  LOST
+  DUPLICATE
+  CANCELLED
+}
+
+/// Shared by leads and jobs.
+enum WorkPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// ACTIVE = the current owner/assignee; ENDED = history (reassigned, unassigned, completed).
+enum AssignmentState {
+  ACTIVE
+  ENDED
+}
+
+enum InteractionKind {
+  CONTACT_ATTEMPT
+  NOTE
+  CUSTOMER_MESSAGE
+  FOLLOW_UP
+}
+
+enum InteractionDirection {
+  OUTBOUND
+  INBOUND
+  INTERNAL
+}
+
+enum ContactOutcome {
+  REACHED
+  NO_ANSWER
+  VOICEMAIL
+  BUSY
+  WRONG_NUMBER
+  CALLBACK_REQUESTED
+  DECLINED
+}
+
+enum DuplicateKind {
+  LEAD_LEAD
+  CUSTOMER_CUSTOMER
+  LEAD_CUSTOMER
+}
+
+enum DuplicateMatchField {
+  PHONE
+  EMAIL
+  ADDRESS
+  NAME
+  EXTERNAL_ID
+  RECENT_HISTORY
+}
+
+enum DuplicateStatus {
+  OPEN
+  NOT_DUPLICATE
+  CONFIRMED_DUPLICATE
+}
+
+enum JobOrigin {
+  LEAD_CONVERSION
+  RECURRING_AGREEMENT
+  MANUAL
+  INTEGRATION
+  CUSTOMER_FOLLOW_UP
+}
+
+/// Spec 7.2 (default path first, then exceptional statuses). Transitions: src/lib/job-lifecycle.ts.
+enum JobStatus {
+  CREATED
+  PENDING_ASSIGNMENT
+  ASSIGNED
+  SCHEDULED
+  EN_ROUTE
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  AWAITING_REVIEW
+  CLOSED
+  CANCELLED
+  CUSTOMER_UNAVAILABLE
+  RESCHEDULED
+  FAILED
+  ON_HOLD
+  REQUIRES_RETURN_VISIT
+}
+
+enum JobAssignmentRole {
+  LEAD
+  CREW
+}
+
+enum AssignmentMethod {
+  MANUAL
+  RECOMMENDATION_APPROVED
+  RECOMMENDATION_MODIFIED
+  OVERRIDE
+}
+
+enum RequirementSource {
+  JOB_TYPE
+  MANUAL
+}
+
+/// SKILL has no Certification row; the other three are the Certification.type values.
+enum QualificationKind {
+  SKILL
+  CERTIFICATION
+  LICENSE
+  EQUIPMENT
+  /// Completed training course (spec 10.1 "Training"); a Certification catalog row of this type.
+  TRAINING
+}
+
+enum CustomerEmployeePreference {
+  PREFERRED
+  AVOID
+}
+
+enum QualificationStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  REVOKED
+}
+
+enum AvailabilityKind {
+  WEEKLY_WINDOW
+  EXCEPTION_AVAILABLE
+  EXCEPTION_UNAVAILABLE
+}
+
+/// Spec 7.5. RULE_BASED_AUTO and OPTIMIZATION exist as configuration values only; the service refuses them in Phase 2.
+enum DispatchMode {
+  MANUAL
+  AI_ASSISTED
+  RULE_BASED_AUTO
+  OPTIMIZATION
+}
+
+enum DispatchRecommendationStatus {
+  PENDING
+  APPROVED
+  MODIFIED
+  REJECTED
+  SUPERSEDED
+}
+
+/// Spec 14.1.
+enum NotificationChannel {
+  IN_APP
+  PUSH
+  EMAIL
+  SMS
+}
+
+/// NOT_CONFIGURED = the channel has no provider; recorded truthfully, never faked as sent (spec 28.3).
+/// SKIPPED = the recipient opted out of this non-critical channel.
+enum DeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  NOT_CONFIGURED
+  SKIPPED
+}
+
+enum RetryStatus {
+  NONE
+  SCHEDULED
+  EXHAUSTED
+}
+
+// ───────────────────────── Platform helpers ─────────────────────────
+
+/// Per-tenant counters for human-friendly numbers ("J-1042"). Increment atomically:
+/// INSERT ... ON CONFLICT (tenantId, name) DO UPDATE SET "lastValue" = "lastValue" + 1 RETURNING "lastValue".
+/// Names in use: "customer", "lead", "job".
+model NumberSequence {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  lastValue Int      @default(0)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+}
+
+/// ONE row per tenant (created lazily by the services; absent = the defaults below). Holds the
+/// tenant-level knobs of the operational modules. Tenants may only NARROW lifecycles: the disabled
+/// lists name optional transitions ("FROM>TO", e.g. "CREATED>CANCELLED") a tenant switched off; the
+/// lifecycle modules ignore entries that are not valid optional transitions.
+model OperationsSettings {
+  id                        String                @id @default(cuid())
+  tenantId                  String
+  dispatchMode              DispatchMode          @default(AI_ASSISTED)
+  disabledLeadTransitions   String[]              @default([])
+  disabledJobTransitions    String[]              @default([])
+  /// Duplicate matchers, e.g. {"phone":true,"email":true,"address":true,"name":false}. Null = defaults.
+  duplicateMatchers         Json?
+  enabledChannels           NotificationChannel[] @default([IN_APP])
+  /// Spec 25.1: a contact attempt counts as "open" (blocks silent reassignment) for this long.
+  contactAttemptOpenMinutes Int                   @default(30)
+  /// Days before expiry at which "certification expiring" notifications are raised.
+  qualificationWarningDays  Int                   @default(30)
+  defaultCurrency           String                @default("USD") @db.Char(3)
+  updatedAt                 DateTime              @updatedAt @db.Timestamptz(3)
+  updatedById               String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  updatedBy User? @relation("OperationsSettingsUpdatedBy", fields: [updatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId])
+}
+
+// ───────────────────────── Customers (spec 6.1) ─────────────────────────
+
+model Customer {
+  id                      String          @id @default(cuid())
+  tenantId                String
+  /// Human-friendly number from NumberSequence "customer"; unique per tenant.
+  number                  Int
+  kind                    CustomerKind    @default(INDIVIDUAL)
+  /// Display name (person or company).
+  name                    String
+  email                   String?
+  phone                   String?
+  /// `phone` normalized to E.164 ("+15551234567"); the matching and search key.
+  phoneE164               String?
+  preferredLocale         String?
+  preferredContactChannel ContactChannel?
+  /// Free-form preferences (quiet hours, do-not-text windows...). Opt-outs that matter are columns.
+  contactPreferences      Json?
+  doNotContact            Boolean         @default(false)
+  /// Service-area org unit (branch/city). Drives ORG_UNIT scope; null = tenant-level only.
+  orgUnitId               String?
+  // Billing field set (`customers.billing_fields`, tag "billing"): opt-in, see authz field-maps.ts.
+  billingName             String?
+  billingEmail            String?
+  billingAddress          Json?
+  taxId                   String?
+  paymentTerms            String?
+  archivedAt              DateTime?       @db.Timestamptz(3)
+  createdById             String?
+  createdAt               DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime        @updatedAt @db.Timestamptz(3)
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orgUnit        OrgUnit?          @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy      User?             @relation("CustomerCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  addresses      CustomerAddress[]
+  notes          CustomerNote[]
+  leads          Lead[]
+  jobs           Job[]
+  flagsAsPrimary DuplicateFlag[]   @relation("DuplicateCustomer")
+  flagsAsOther   DuplicateFlag[]   @relation("DuplicateOtherCustomer")
+
+  preferredEmployees CustomerPreferredEmployee[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, number])
+  @@index([tenantId, archivedAt, createdAt])
+  @@index([tenantId, phoneE164])
+  @@index([tenantId, email])
+  @@index([tenantId, orgUnitId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Customer_name_trgm_idx")
+}
+
+/// Service (and optionally other) addresses of a customer. Coordinates are optional: no geocoding
+/// provider is integrated in Phase 2, so they exist only when entered or imported (spec 28.3).
+model CustomerAddress {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  customerId         String
+  label              String?
+  line1              String
+  line2              String?
+  city               String
+  /// State / province / region.
+  region             String
+  postalCode         String
+  /// ISO 3166-1 alpha-2.
+  countryCode        String    @default("US") @db.Char(2)
+  latitude           Decimal?  @db.Decimal(9, 6)
+  longitude          Decimal?  @db.Decimal(9, 6)
+  /// How the coordinates were obtained ("manual", "import", ...). Null when there are none.
+  coordinateSource   String?
+  /// Lower-case "line1|line2|city|region|postalCode|country" with collapsed whitespace; the
+  /// duplicate-address matching key, computed by the customers service.
+  normalizedKey      String
+  accessInstructions String?   @db.Text
+  isPrimary          Boolean   @default(false)
+  /// Service-area org unit for this address (branch/city); copied to jobs created for it.
+  orgUnitId          String?
+  archivedAt         DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit  OrgUnit? @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  leads    Lead[]
+  jobs     Job[]
+
+  @@unique([id, tenantId])
+  // Lets Lead/Job reference (address, customer) together so an address can never belong to another customer.
+  @@unique([id, customerId, tenantId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, normalizedKey])
+  @@index([tenantId, orgUnitId])
+  @@index([tenantId, postalCode])
+}
+
+model CustomerNote {
+  id         String   @id @default(cuid())
+  tenantId   String
+  customerId String
+  authorId   String?
+  body       String   @db.Text
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  author   User?    @relation("CustomerNoteAuthor", fields: [authorId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, customerId, createdAt])
+}
+
+// ───────────────────────── Leads (spec 6.2-6.4) ─────────────────────────
+
+model LeadSource {
+  id        String         @id @default(cuid())
+  tenantId  String
+  /// Stable lower-case key, unique per tenant (CHECK: ^[a-z0-9][a-z0-9_-]{0,62}$).
+  code      String
+  name      String
+  type      LeadSourceType
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime       @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  leads  Lead[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+}
+
+model Lead {
+  id                   String       @id @default(cuid())
+  tenantId             String
+  /// Human-friendly number from NumberSequence "lead".
+  number               Int
+  status               LeadStatus   @default(NEW)
+  statusChangedAt      DateTime     @default(now()) @db.Timestamptz(3)
+  priority             WorkPriority @default(NORMAL)
+  sourceId             String?
+  /// Marketing campaign label.
+  campaign             String?
+  /// Id of the lead in the external system; with `sourceId` it makes webhook retries idempotent (spec 25.1).
+  externalId           String?
+  /// Known customer, once linked or created. Null while the lead is still an unknown contact.
+  customerId           String?
+  // Contact as received (a lead may arrive before any Customer exists).
+  contactName          String?
+  contactPhone         String?
+  contactPhoneE164     String?
+  contactEmail         String?
+  customerAddressId    String?
+  // Address as received when no CustomerAddress is linked (may be incomplete, spec 25.1).
+  addressLine1         String?
+  addressLine2         String?
+  addressCity          String?
+  addressRegion        String?
+  addressPostalCode    String?
+  /// Matching key, same format as CustomerAddress.normalizedKey.
+  addressNormalizedKey String?
+  jobTypeId            String?
+  /// Category as received when no JobType matches.
+  serviceCategory      String?
+  requestedWork        String?      @db.Text
+  preferredWindowStart DateTime?    @db.Timestamptz(3)
+  preferredWindowEnd   DateTime?    @db.Timestamptz(3)
+  preferredTimeNote    String?
+  notes                String?      @db.Text
+  quotedAmountMinor    Int?
+  currency             String       @default("USD") @db.Char(3)
+  /// Service-area org unit (routing). Null = unrouted, visible only to tenant-level scopes.
+  orgUnitId            String?
+  nextFollowUpAt       DateTime?    @db.Timestamptz(3)
+  /// Set when status = DUPLICATE: the lead this one duplicates.
+  duplicateOfLeadId    String?
+  /// Reason when status = LOST or CANCELLED (the full trail is in LeadStatusHistory).
+  closedReason         String?
+  archivedAt           DateTime?    @db.Timestamptz(3)
+  createdById          String?
+  createdAt            DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime     @updatedAt @db.Timestamptz(3)
+
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  source         LeadSource?         @relation(fields: [sourceId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer       Customer?           @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  address        CustomerAddress?    @relation(fields: [customerAddressId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  jobType        JobType?            @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit        OrgUnit?            @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  duplicateOf    Lead?               @relation("LeadDuplicateOf", fields: [duplicateOfLeadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  duplicates     Lead[]              @relation("LeadDuplicateOf")
+  createdBy      User?               @relation("LeadCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignments    LeadAssignment[]
+  statusHistory  LeadStatusHistory[]
+  interactions   LeadInteraction[]
+  jobs           Job[]
+  flagsAsPrimary DuplicateFlag[]     @relation("DuplicateLead")
+  flagsAsOther   DuplicateFlag[]     @relation("DuplicateOtherLead")
+
+  @@unique([id, tenantId])
+  @@unique([id, customerId, tenantId])
+  @@unique([tenantId, number])
+  @@unique([tenantId, sourceId, externalId])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, status, nextFollowUpAt])
+  @@index([tenantId, orgUnitId, status])
+  @@index([tenantId, priority, status])
+  @@index([tenantId, customerId])
+  @@index([tenantId, sourceId, createdAt])
+  @@index([tenantId, contactPhoneE164])
+  @@index([tenantId, contactEmail])
+  @@index([tenantId, addressNormalizedKey])
+  @@index([tenantId, archivedAt, createdAt])
+  @@index([contactName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_contactName_trgm_idx")
+}
+
+/// Who owns a lead, over time. At most one ACTIVE row per lead (partial unique index in the migration).
+model LeadAssignment {
+  id                String          @id @default(cuid())
+  tenantId          String
+  leadId            String
+  employeeId        String
+  state             AssignmentState @default(ACTIVE)
+  assignedAt        DateTime        @default(now()) @db.Timestamptz(3)
+  assignedById      String?
+  /// Why it was assigned/reassigned (the service requires it when replacing another owner).
+  reason            String?
+  /// Spec 25.1: true when the reassignment happened while another employee had an open contact
+  /// attempt and the assigner explicitly confirmed it.
+  conflictConfirmed Boolean         @default(false)
+  endedAt           DateTime?       @db.Timestamptz(3)
+  endedReason       String?
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lead       Lead     @relation(fields: [leadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee   Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedBy User?    @relation("LeadAssignmentAssignedBy", fields: [assignedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, state])
+  @@index([tenantId, leadId, state])
+}
+
+/// Append-only (trigger). One row per status change; the initial status is a row with fromStatus null.
+model LeadStatusHistory {
+  id          String         @id @default(cuid())
+  tenantId    String
+  leadId      String
+  fromStatus  LeadStatus?
+  toStatus    LeadStatus
+  actorType   AuditActorType @default(USER)
+  actorUserId String?
+  reason      String?
+  occurredAt  DateTime       @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lead      Lead   @relation(fields: [leadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  changedBy User?  @relation("LeadStatusChangedBy", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, toStatus, occurredAt])
+}
+
+/// Contact attempts, notes and customer messages on a lead. A CONTACT_ATTEMPT is "open" (spec 25.1)
+/// while `closedAt` is null and it is newer than OperationsSettings.contactAttemptOpenMinutes.
+model LeadInteraction {
+  id              String               @id @default(cuid())
+  tenantId        String
+  leadId          String
+  kind            InteractionKind
+  direction       InteractionDirection @default(OUTBOUND)
+  channel         ContactChannel?
+  outcome         ContactOutcome?
+  body            String?              @db.Text
+  occurredAt      DateTime             @default(now()) @db.Timestamptz(3)
+  closedAt        DateTime?            @db.Timestamptz(3)
+  durationSeconds Int?
+  /// When kind = FOLLOW_UP (or an attempt asked for one): the due date it set.
+  followUpAt      DateTime?            @db.Timestamptz(3)
+  authorId        String?
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lead   Lead   @relation(fields: [leadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  author User?  @relation("LeadInteractionAuthor", fields: [authorId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, kind, closedAt, occurredAt])
+}
+
+/// A pair flagged as possible duplicates. Never merged automatically (spec 6.4). Exactly one row per
+/// pair: `pairKey` = "<kind>:<idA>:<idB>" (ids of the same type in sorted order; a CHECK enforces the
+/// ordering on the id columns), unique per tenant.
+///   LEAD_LEAD         -> leadId, otherLeadId
+///   CUSTOMER_CUSTOMER -> customerId, otherCustomerId
+///   LEAD_CUSTOMER     -> leadId, customerId (a lead whose contact matches an existing customer)
+model DuplicateFlag {
+  id              String                @id @default(cuid())
+  tenantId        String
+  kind            DuplicateKind
+  pairKey         String
+  leadId          String?
+  otherLeadId     String?
+  customerId      String?
+  otherCustomerId String?
+  matchedOn       DuplicateMatchField[]
+  /// Human-readable explanation (e.g. "same phone +15551234567").
+  reason          String?
+  status          DuplicateStatus       @default(OPEN)
+  detectedAt      DateTime              @default(now()) @db.Timestamptz(3)
+  resolvedAt      DateTime?             @db.Timestamptz(3)
+  resolvedById    String?
+  resolutionNote  String?
+
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lead          Lead?     @relation("DuplicateLead", fields: [leadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  otherLead     Lead?     @relation("DuplicateOtherLead", fields: [otherLeadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer      Customer? @relation("DuplicateCustomer", fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  otherCustomer Customer? @relation("DuplicateOtherCustomer", fields: [otherCustomerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  resolvedBy    User?     @relation("DuplicateFlagResolvedBy", fields: [resolvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, pairKey])
+  @@index([tenantId, status, detectedAt])
+  @@index([tenantId, leadId, status])
+  @@index([tenantId, otherLeadId])
+  @@index([tenantId, customerId, status])
+  @@index([tenantId, otherCustomerId])
+}
+
+// ───────────────────────── Workforce qualifications (spec 10.1) ─────────────────────────
+
+model Skill {
+  id          String   @id @default(cuid())
+  tenantId    String
+  /// Stable lower-case key, unique per tenant (CHECK: ^[a-z0-9][a-z0-9_-]{0,62}$).
+  code        String
+  name        String
+  category    String?
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  jobTypes        JobTypeSkill[]
+  jobRequirements JobRequirement[]
+  qualifications  EmployeeQualification[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+}
+
+/// Catalog of credentials: `type` CERTIFICATION, LICENSE or EQUIPMENT (an authorization to operate a
+/// piece of equipment). Never SKILL (CHECK). Skills live in Skill.
+model Certification {
+  id               String            @id @default(cuid())
+  tenantId         String
+  code             String
+  name             String
+  type             QualificationKind @default(CERTIFICATION)
+  issuingAuthority String?
+  /// Typical validity; the actual expiry is on the employee's qualification. Null = does not expire by default.
+  validityMonths   Int?
+  /// The employee's qualification must carry a credential number (licenses usually do).
+  requiresNumber   Boolean           @default(false)
+  description      String?
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  jobTypes        JobTypeCertification[]
+  jobRequirements JobRequirement[]
+  qualifications  EmployeeQualification[]
+
+  @@unique([id, tenantId])
+  @@unique([id, type, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+}
+
+/// An employee holds a skill OR a credential (exactly one of skillId / certificationId; `kind`
+/// names which, and a CHECK ties it to the id columns; the service ties it to Certification.type).
+/// A renewed credential is a NEW row (history); skills are unique per employee.
+/// Eligibility counts a row only when status = VERIFIED and it is not expired.
+model EmployeeQualification {
+  id               String              @id @default(cuid())
+  tenantId         String
+  employeeId       String
+  kind             QualificationKind
+  skillId          String?
+  certificationId  String?
+  /// Proficiency 1-5 for skills (CHECK). Null for credentials.
+  level            Int?
+  /// License / certificate number.
+  number           String?
+  issuingAuthority String?
+  issuedAt         DateTime?           @db.Date
+  /// Null = does not expire.
+  expiresAt        DateTime?           @db.Date
+  status           QualificationStatus @default(PENDING_VERIFICATION)
+  verifiedById     String?
+  verifiedAt       DateTime?           @db.Timestamptz(3)
+  notes            String?
+  createdAt        DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime            @updatedAt @db.Timestamptz(3)
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee      Employee       @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  skill         Skill?         @relation(fields: [skillId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  certification Certification? @relation(fields: [certificationId, kind, tenantId], references: [id, type, tenantId], onDelete: Restrict)
+  verifiedBy    User?          @relation("QualificationVerifiedBy", fields: [verifiedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, employeeId, skillId])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, skillId])
+  @@index([tenantId, certificationId])
+  @@index([tenantId, expiresAt])
+}
+
+/// Which org units an employee may be dispatched into (geographic restriction, spec 10.1 / 7.3
+/// "approved service territory"). Covers descendants of the unit when includeDescendants.
+model ServiceTerritory {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  employeeId         String
+  orgUnitId          String
+  includeDescendants Boolean   @default(true)
+  effectiveFrom      DateTime  @default(now()) @db.Timestamptz(3)
+  effectiveTo        DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit  OrgUnit  @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, employeeId, orgUnitId])
+  @@index([tenantId, orgUnitId])
+}
+
+/// Employee availability, time-zone aware. Two shapes in one table (CHECKs keep them apart):
+///  - WEEKLY_WINDOW: recurring on `isoDayOfWeek` (1 = Monday .. 7 = Sunday) from `startMinute` to
+///    `endMinute` (minutes after LOCAL midnight in `timeZone`), optionally bounded by validFrom/validTo.
+///    Several windows on a day = split shift.
+///  - EXCEPTION_AVAILABLE / EXCEPTION_UNAVAILABLE: a concrete UTC interval [startsAt, endsAt) that
+///    adds availability or blocks it (time off, sick leave). Exceptions beat weekly windows.
+model Availability {
+  id           String           @id @default(cuid())
+  tenantId     String
+  employeeId   String
+  kind         AvailabilityKind
+  /// IANA zone name the window is interpreted in (validated by the service).
+  timeZone     String
+  isoDayOfWeek Int?
+  startMinute  Int?
+  endMinute    Int?
+  validFrom    DateTime?        @db.Date
+  validTo      DateTime?        @db.Date
+  startsAt     DateTime?        @db.Timestamptz(3)
+  endsAt       DateTime?        @db.Timestamptz(3)
+  note         String?
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, kind, isoDayOfWeek])
+  @@index([tenantId, employeeId, startsAt, endsAt])
+}
+
+// ───────────────────────── Jobs (spec 7.1-7.2) ─────────────────────────
+
+model JobType {
+  id                     String       @id @default(cuid())
+  tenantId               String
+  /// Stable lower-case key, unique per tenant.
+  code                   String
+  name                   String
+  /// Job category (spec 7.1), tenant-defined, e.g. "installation", "repair", "inspection".
+  category               String
+  description            String?
+  defaultDurationMinutes Int
+  defaultPriority        WorkPriority @default(NORMAL)
+  /// Completed jobs of this type pass through AWAITING_REVIEW before CLOSED (spec 7.2).
+  requiresReview         Boolean      @default(false)
+  /// What to bring / have on site, shown to technicians. Informational: it is NOT an eligibility rule
+  /// (eligibility uses required skills and certifications, incl. EQUIPMENT-type qualifications).
+  requiredEquipment      String[]     @default([])
+  /// Placeholder for the Phase 3 completion form definition (spec 8.6). Phase 2 stores, never interprets it.
+  completionFormSchema   Json?
+  active                 Boolean      @default(true)
+  createdAt              DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime     @updatedAt @db.Timestamptz(3)
+
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  skills         JobTypeSkill[]
+  certifications JobTypeCertification[]
+  jobs           Job[]
+  leads          Lead[]
+
+  employeePermissions EmployeeJobPermission[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, category])
+}
+
+model JobTypeSkill {
+  tenantId  String
+  jobTypeId String
+  skillId   String
+  /// Minimum proficiency 1-5; null = any level.
+  minLevel  Int?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  jobType JobType @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  skill   Skill   @relation(fields: [skillId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@id([jobTypeId, skillId])
+  @@index([tenantId, skillId])
+}
+
+/// Certifications, licenses and equipment qualifications a job type requires.
+model JobTypeCertification {
+  tenantId        String
+  jobTypeId       String
+  certificationId String
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  jobType       JobType       @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  certification Certification @relation(fields: [certificationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@id([jobTypeId, certificationId])
+  @@index([tenantId, certificationId])
+}
+
+model Job {
+  id                       String       @id @default(cuid())
+  tenantId                 String
+  /// Human-friendly number from NumberSequence "job".
+  number                   Int
+  customerId               String
+  serviceAddressId         String
+  jobTypeId                String
+  /// Service-area org unit (branch/city/team). Drives ORG_UNIT scope and the territory check.
+  orgUnitId                String
+  /// The lead this job was created from (at most one job per converted lead).
+  leadId                   String?
+  /// Original job when this is a return visit / follow-up.
+  parentJobId              String?
+  origin                   JobOrigin    @default(MANUAL)
+  status                   JobStatus    @default(CREATED)
+  statusChangedAt          DateTime     @default(now()) @db.Timestamptz(3)
+  priority                 WorkPriority @default(NORMAL)
+  title                    String
+  /// Work description (customer-facing wording).
+  description              String?      @db.Text
+  /// Instructions for the technician (access, hazards, what to bring).
+  instructions             String?      @db.Text
+  /// Customer-facing arrival window (UTC instants). Both or neither; end > start.
+  appointmentWindowStart   DateTime?    @db.Timestamptz(3)
+  appointmentWindowEnd     DateTime?    @db.Timestamptz(3)
+  /// The dispatcher's concrete slot. Both or neither; end > start.
+  scheduledStartAt         DateTime?    @db.Timestamptz(3)
+  scheduledEndAt           DateTime?    @db.Timestamptz(3)
+  /// IANA zone the appointment is expressed in; null = the org unit's, then the tenant's.
+  timeZone                 String?
+  estimatedDurationMinutes Int
+  quotedAmountMinor        Int?
+  currency                 String       @default("USD") @db.Char(3)
+  /// Phase 3 execution milestones (denormalized for lists; the full trail is JobEvent).
+  startedAt                DateTime?    @db.Timestamptz(3)
+  completedAt              DateTime?    @db.Timestamptz(3)
+  closedAt                 DateTime?    @db.Timestamptz(3)
+  cancelledAt              DateTime?    @db.Timestamptz(3)
+  /// Reason when CANCELLED / FAILED / ON_HOLD etc. (the full trail is in JobStatusHistory).
+  statusReason             String?
+  archivedAt               DateTime?    @db.Timestamptz(3)
+  createdById              String?
+  createdAt                DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime     @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer        Customer                 @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  serviceAddress  CustomerAddress          @relation(fields: [serviceAddressId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  jobType         JobType                  @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit         OrgUnit                  @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lead            Lead?                    @relation(fields: [leadId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  parentJob       Job?                     @relation("JobFollowUps", fields: [parentJobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  followUps       Job[]                    @relation("JobFollowUps")
+  createdBy       User?                    @relation("JobCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requirements    JobRequirement[]
+  assignments     JobAssignment[]
+  statusHistory   JobStatusHistory[]
+  events          JobEvent[]
+  recommendations DispatchRecommendation[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, number])
+  @@unique([leadId, tenantId])
+  @@index([tenantId, status, scheduledStartAt])
+  @@index([tenantId, orgUnitId, status, scheduledStartAt])
+  @@index([tenantId, scheduledStartAt])
+  @@index([tenantId, appointmentWindowStart])
+  @@index([tenantId, customerId, createdAt])
+  @@index([tenantId, jobTypeId, status])
+  @@index([tenantId, priority, status])
+  @@index([tenantId, parentJobId])
+  @@index([tenantId, archivedAt, createdAt])
+}
+
+/// What THIS job requires (copied from the job type at creation, plus manual additions such as
+/// "requires additional qualification", spec 25.2). The eligibility engine reads only this table.
+/// Exactly one of skillId / certificationId (CHECK).
+model JobRequirement {
+  id              String            @id @default(cuid())
+  tenantId        String
+  jobId           String
+  skillId         String?
+  certificationId String?
+  minLevel        Int?
+  source          RequirementSource @default(JOB_TYPE)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  skill         Skill?         @relation(fields: [skillId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  certification Certification? @relation(fields: [certificationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, jobId, skillId])
+  @@unique([tenantId, jobId, certificationId])
+  @@index([tenantId, skillId])
+  @@index([tenantId, certificationId])
+}
+
+/// Who does a job, over time: an employee (LEAD or CREW) or a whole team org unit (exactly one of
+/// employeeId / teamOrgUnitId, CHECK). ACTIVE rows are the current crew: at most one ACTIVE LEAD per
+/// job and one ACTIVE row per (job, employee) (partial unique indexes in the migration).
+model JobAssignment {
+  id               String            @id @default(cuid())
+  tenantId         String
+  jobId            String
+  employeeId       String?
+  teamOrgUnitId    String?
+  role             JobAssignmentRole @default(LEAD)
+  state            AssignmentState   @default(ACTIVE)
+  method           AssignmentMethod  @default(MANUAL)
+  /// Required (CHECK) when method = OVERRIDE: why the dispatcher departed from the recommendation or the rules.
+  overrideReason   String?
+  /// The recommendation this assignment came from (APPROVED / MODIFIED), if any.
+  recommendationId String?
+  assignedAt       DateTime          @default(now()) @db.Timestamptz(3)
+  assignedById     String?
+  reason           String?
+  endedAt          DateTime?         @db.Timestamptz(3)
+  endedReason      String?
+
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job            Job                     @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee       Employee?               @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  teamOrgUnit    OrgUnit?                @relation(fields: [teamOrgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedBy     User?                   @relation("JobAssignmentAssignedBy", fields: [assignedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recommendation DispatchRecommendation? @relation("RecommendationAssignments", fields: [recommendationId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, state])
+  @@index([tenantId, jobId, state])
+  @@index([tenantId, teamOrgUnitId, state])
+  @@index([tenantId, recommendationId])
+}
+
+/// Append-only (trigger). One row per status change; the initial status is a row with fromStatus null.
+model JobStatusHistory {
+  id          String         @id @default(cuid())
+  tenantId    String
+  jobId       String
+  fromStatus  JobStatus?
+  toStatus    JobStatus
+  actorType   AuditActorType @default(USER)
+  actorUserId String?
+  reason      String?
+  occurredAt  DateTime       @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job       Job    @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  changedBy User?  @relation("JobStatusChangedBy", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, jobId, occurredAt])
+  @@index([tenantId, toStatus, occurredAt])
+}
+
+/// Append-only (trigger) log of everything that happens to a job (assigned, rescheduled, note, and in
+/// Phase 3 arrival / start / completion). `type` is a dotted lower-case key (CHECK
+/// ^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$), e.g. "job.assigned", "job.rescheduled", "dispatch.override".
+/// `clientEventId` is the technician app's idempotency key: a double submit (spec 25.3) hits the
+/// unique index instead of creating a second event.
+model JobEvent {
+  id            String         @id @default(cuid())
+  tenantId      String
+  jobId         String
+  type          String
+  actorType     AuditActorType @default(USER)
+  actorUserId   String?
+  /// When it happened (device clock for offline events) vs `recordedAt` (server clock).
+  occurredAt    DateTime       @default(now()) @db.Timestamptz(3)
+  recordedAt    DateTime       @default(now()) @db.Timestamptz(3)
+  clientEventId String?
+  payload       Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job    Job    @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  actor  User?  @relation("JobEventActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, jobId, clientEventId])
+  @@index([tenantId, jobId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+}
+
+/// One dispatch recommendation for a job (spec 7.4): the ranked candidates with every factor and its
+/// contribution, the conflicts, or - when nobody is eligible - the blocking reasons (spec 25.2).
+/// Rule-based and explainable; the dispatcher decides. All JSON is written by the dispatch service.
+model DispatchRecommendation {
+  id               String                       @id @default(cuid())
+  tenantId         String
+  jobId            String
+  mode             DispatchMode
+  status           DispatchRecommendationStatus @default(PENDING)
+  /// Ranked candidates: [{ employeeId, rank, score, factors: [{ key, value, contribution, explanation }], conflicts: [...] }].
+  candidates       Json
+  /// Per-employee hard-requirement failures (why nobody / this person is not eligible).
+  blockingReasons  Json?
+  generatedAt      DateTime                     @default(now()) @db.Timestamptz(3)
+  generatedById    String?
+  /// The employee finally assigned (may differ from rank 1 when MODIFIED / overridden).
+  chosenEmployeeId String?
+  decidedAt        DateTime?                    @db.Timestamptz(3)
+  decidedById      String?
+  decisionReason   String?
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job         Job             @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  generatedBy User?           @relation("DispatchRecGeneratedBy", fields: [generatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  decidedBy   User?           @relation("DispatchRecDecidedBy", fields: [decidedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  chosen      Employee?       @relation(fields: [chosenEmployeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignments JobAssignment[] @relation("RecommendationAssignments")
+
+  @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
+  @@index([tenantId, jobId, generatedAt])
+  @@index([tenantId, status, generatedAt])
+}
+
+// ───────────────────────── Notifications (spec 14) ─────────────────────────
+
+/// One notification for one recipient (the in-app inbox row). The text is NOT stored rendered: it is
+/// rendered at read time in the recipient's language from `templateKey` + `params`. Idempotent per
+/// (recipient, idempotencyKey) so a retried business action never notifies twice.
+/// `eventType` is a dotted lower-case key (CHECK), e.g. "lead.assigned", "job.assigned".
+model Notification {
+  id             String    @id @default(cuid())
+  tenantId       String
+  recipientId    String
+  eventType      String
+  /// The business event it came from (e.g. the lead id + transition) - spec 14.3 "Event ID".
+  eventId        String
+  idempotencyKey String
+  /// i18n key of the message; params are the interpolation values (JSON, language-neutral).
+  templateKey    String
+  params         Json?
+  /// Deep link target, e.g. targetType "job", targetId <jobId>.
+  targetType     String?
+  targetId       String?
+  /// Critical (mandatory security/operational) notifications ignore opt-outs (spec 14.1).
+  critical       Boolean   @default(false)
+  readAt         DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recipient  User                   @relation("NotificationRecipient", fields: [recipientId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  deliveries NotificationDelivery[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, recipientId, idempotencyKey])
+  @@index([tenantId, recipientId, readAt, createdAt])
+  @@index([tenantId, eventId])
+  @@index([tenantId, eventType, createdAt])
+}
+
+/// One delivery ATTEMPT of a notification on one channel (spec 14.3): attempt 1, 2, ... Each row
+/// records the provider response, failure reason and whether a retry is scheduled. IN_APP is
+/// delivered by the notification row itself; EMAIL/SMS/PUSH without a provider record NOT_CONFIGURED.
+model NotificationDelivery {
+  id               String              @id @default(cuid())
+  tenantId         String
+  notificationId   String
+  channel          NotificationChannel
+  attempt          Int                 @default(1)
+  status           DeliveryStatus      @default(PENDING)
+  provider         String?
+  providerResponse Json?
+  failureReason    String?
+  retryStatus      RetryStatus         @default(NONE)
+  nextRetryAt      DateTime?           @db.Timestamptz(3)
+  createdAt        DateTime            @default(now()) @db.Timestamptz(3)
+  attemptedAt      DateTime?           @db.Timestamptz(3)
+  deliveredAt      DateTime?           @db.Timestamptz(3)
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  notification Notification @relation(fields: [notificationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([notificationId, channel, attempt])
+  @@index([tenantId, notificationId])
+  @@index([tenantId, status, nextRetryAt])
+}
+
+/// A user's opt-in/out for one event type on one channel. Only non-critical notifications honor it
+/// (spec 14.1). eventType "*" = every non-critical event. Absent row = the tenant default (enabled).
+model NotificationPreference {
+  id        String              @id @default(cuid())
+  tenantId  String
+  userId    String
+  eventType String
+  channel   NotificationChannel
+  enabled   Boolean             @default(true)
+  updatedAt DateTime            @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, userId, eventType, channel])
+}
+
+/// Job-category permission (spec 10.1): an employee may take jobs of ONE job type or ONE category
+/// (exactly one of jobTypeId / category, CHECK). Time-bounded and granted by a user. The
+/// qualification engine requires a matching active row (it defines how "no rows at all" is treated).
+model EmployeeJobPermission {
+  id            String    @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  jobTypeId     String?
+  /// Matches JobType.category (case-sensitive, tenant-defined).
+  category      String?
+  effectiveFrom DateTime  @default(now()) @db.Timestamptz(3)
+  effectiveTo   DateTime? @db.Timestamptz(3)
+  grantedById   String?
+  reason        String?
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee  Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  jobType   JobType? @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  grantedBy User?    @relation("JobPermissionGrantedBy", fields: [grantedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, effectiveTo])
+  @@index([tenantId, jobTypeId])
+  @@index([tenantId, category])
+}
+
+/// A customer's employee preference (spec 7.3 soft factor "customer preference"): PREFERRED ranks
+/// that employee higher, AVOID lower (never an eligibility rule). Real FKs, not ids inside JSON.
+model CustomerPreferredEmployee {
+  id         String                     @id @default(cuid())
+  tenantId   String
+  customerId String
+  employeeId String
+  kind       CustomerEmployeePreference @default(PREFERRED)
+  note       String?
+  createdAt  DateTime                   @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, customerId, employeeId])
+  @@index([tenantId, employeeId])
 }
