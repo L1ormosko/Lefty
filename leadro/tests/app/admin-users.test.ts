@@ -46,6 +46,24 @@ describe("users page and actions", () => {
   });
 });
 
+describe("failed web access is audited", () => {
+  const deniedFor = (tenantId: string, userId: string) =>
+    withTenant(tenantId, (tx) => tx.auditEvent.findMany({ where: { tenantId, actorUserId: userId, action: "authz.denied", outcome: "DENIED" } }));
+
+  it("records a denied page load and a refused server action as authz.denied (source WEB)", async () => {
+    const world = await buildWorld("admin-users-denials");
+    await signInPerson(world.cityManagerA, world.tenantId);
+    await UsersPage(noParams); // no users.view -> access-denied panel
+    expect(await deniedFor(world.tenantId, world.cityManagerA.userId)).toHaveLength(1);
+
+    await signInPerson(world.techA1, world.tenantId);
+    await deactivateUserAction({}, form({ userId: world.techB.userId, reason: "x" }));
+    const events = await deniedFor(world.tenantId, world.techA1.userId);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.sourceApp).toBe("WEB");
+  });
+});
+
 describe("listInvitations", () => {
   it("shows a pending invitation with its employee and role, never the token, and respects scope", async () => {
     const world = await buildWorld("admin-invitations");

@@ -14,6 +14,8 @@ export { can, canInTx, canViewFields } from "./can";
 export { enforceInTx, enforceOnUser } from "./enforce";
 export { requirePermission, requireTenantLevelPermission } from "./require-permission";
 export type { ResourceResolver } from "./require-permission";
+export { recordAuthzDenial } from "./denial-audit";
+export type { DenialContext } from "./denial-audit";
 export {
   scopeFilter,
   scopeFilterInTx,

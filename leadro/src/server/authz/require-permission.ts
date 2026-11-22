@@ -1,8 +1,7 @@
 import { ForbiddenError, NotFoundError, type Actor, type RequestContext } from "@/server/core";
-import { recordAudit } from "@/server/audit";
 import { withTenant, type TenantTx } from "@/server/db";
-import { logger } from "@/server/logging";
 import { canInTx } from "./can";
+import { recordAuthzDenial } from "./denial-audit";
 import { isPermissionKey } from "./permission-catalog";
 import type { AccessDecision, ResourceRef } from "./types";
 
@@ -16,34 +15,6 @@ export type ResourceResolver<TInput> = (
   input: TInput,
   tx: TenantTx,
 ) => ResourceRef | null | Promise<ResourceRef | null>;
-
-/** Best effort: a failing audit write must never turn a denial into a success or a 500. */
-async function auditDenial(
-  actor: Actor,
-  permission: string,
-  decision: AccessDecision,
-  ctx: RequestContext | undefined,
-): Promise<void> {
-  try {
-    await withTenant(actor.tenantId, (tx) =>
-      recordAudit(tx, {
-        tenantId: actor.tenantId,
-        actorUserId: actor.userId,
-        action: "authz.denied",
-        targetType: "Permission",
-        targetId: permission,
-        newValue: { reason: decision.reason },
-        outcome: "DENIED",
-        // The request context carries the id defineRoute generated, so the denial can be found
-        // from the `x-correlation-id` the client received.
-        sourceApp: ctx?.sourceApp ?? "API",
-        correlationId: ctx?.correlationId,
-      }),
-    );
-  } catch (error) {
-    logger.error("failed to record authorization denial", { permission, error: String(error) });
-  }
-}
 
 /**
  * Returns a function for `defineRoute({ authorize })` that enforces `permission`.
@@ -82,7 +53,7 @@ export function requirePermission<TInput = unknown>(
     });
     if (decision.allowed) return;
 
-    await auditDenial(actor, permission, decision, ctx);
+    await recordAuthzDenial(actor, permission, ctx, decision.reason);
     if (recordInvolved) throw new NotFoundError();
     throw new ForbiddenError();
   };
@@ -102,7 +73,7 @@ export function requireTenantLevelPermission(
   return async (actor, _input, ctx) => {
     const decision = await withTenant(actor.tenantId, (tx) => canInTx(tx, actor, permission, {}));
     if (decision.allowed) return;
-    await auditDenial(actor, permission, decision, ctx);
+    await recordAuthzDenial(actor, permission, ctx, decision.reason);
     throw new ForbiddenError();
   };
 }

@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 import type { MessageKey, TranslateFn } from "@/lib/i18n";
 import type { ClientInfo } from "@/server/auth";
-import { AppError, ConflictError, ValidationError, type Actor, type RequestContext } from "@/server/core";
+import { recordAuthzDenial } from "@/server/authz";
+import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { logger } from "@/server/logging";
 import type { FormState } from "../../../_lib/form-state";
 import { requireFullSession, type PageContext } from "../../../_lib/page-context";
@@ -112,6 +113,8 @@ export async function runAdminAction(formData: FormData, options: AdminActionOpt
     for (const path of options.revalidate) revalidatePath(path);
     return { success };
   } catch (error) {
+    // The enforcement helpers inside services stay silent, so refusals of web actions are audited here.
+    if (error instanceof ForbiddenError || error instanceof NotFoundError) await recordAuthzDenial(page.actor, null, context.ctx);
     return { error: adminErrorMessage(error, page.t) };
   }
 }

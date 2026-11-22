@@ -3,7 +3,9 @@ import type { Actor, RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
 import type { Person } from "../authz/fixtures";
 
-/** Creates a live session for a fixture person and returns the cookie header value a browser would send. */
+/**
+ * Creates a live session for a fixture person (as if any MFA challenge had already been passed:
+ * `mfaVerifiedAt` is set) and returns the cookie header value a browser would send. */
 export async function sessionCookie(person: Person, tenantId: string): Promise<string> {
   const token = `${tenantId}.${randomBytes(32).toString("base64url")}`;
   await withTenant(tenantId, (tx) =>
@@ -13,6 +15,7 @@ export async function sessionCookie(person: Person, tenantId: string): Promise<s
         userId: person.userId,
         tokenHash: createHash("sha256").update(token).digest("hex"),
         expiresAt: new Date(Date.now() + 3_600_000),
+        mfaVerifiedAt: new Date(),
       },
     }),
   );
