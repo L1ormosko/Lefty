@@ -1,0 +1,59 @@
+# Manager rulings — Phase 0 + 1
+
+Every decision the project manager (Claude) took on the product owner's behalf during Phase 0+1, in order, with what it costs if wrong. Review and overturn any of them.
+
+- Build LEADRO in leadro/ subdir; never touch VELTO at root — repo holds an unrelated product; spec §28.2 forbids overwriting working functionality — cost if wrong: move dir to new repo later (cheap).
+- Scope this session = Phase 0 + Phase 1 only — §27 roadmap is incremental and §28 forbids one uncontrolled session — cost: none.
+- §4.5 matrix treated as the approved default permission matrix for §28.5 — it is the only matrix given and is configurable — cost: re-map role templates.
+- Phase 4 financial formulas NOT implemented — §28.4 requires an approved compensation spec that was not provided — cost: none.
+- Local credential auth behind an interface instead of a managed IdP — no IdP account/creds available; documented per §2.4 — cost: adapter swap later.
+- User belongs to one tenant; login by company code + email — simplest RLS-compatible identity — cost: multi-tenant users need a membership table later.
+- Tenant isolation = RLS FORCE + app checks via withTenant — §3.1 "database-level controls where supported".
+- db:reset:test replaced by forward-only db:migrate:test — Prisma blocks agent resets; wipe is a manual documented step — cost: test DB grows.
+- camelCase columns accepted — Prisma default — cost: none.
+- derived role templates (Regional Mgr, Team Leader, Customer Relations, HR) accepted provisionally, flagged for product confirmation — templates are configurable — cost: re-map.
+- trigger-only audit immutability accepted for Phase 1; separate DDL role → Phase 8 hardening.
+- parallel via isolated worktrees per user request; merge by manager — cost: merge conflicts in package.json/DECISIONS.md
+- T1 minor #1/#2 → global constraint: any new tenant table migration must apply the same ENABLE+FORCE RLS + tenant_isolation policy; update rls.test expected count.
+- T1 minor #4 (org cycle race) → Task 5 brief: lock in service. #7 (duplicate RoleAssignment) → Task 4 brief. #5 REVOKE on Permission/Tenant → Phase 8 hardening list. #3,#6 → final sweep.
+- API_CONVENTIONS.md error codes to be aligned to code (FORBIDDEN/INTERNAL) — code is the brief's contract. Ruling: listAuditEvents permission → T4 must gate audit.read.
+- unblock T3/T4 in parallel; review fixes merged on top — cost: small rework in T3/T4 if core contract changes. Wave B dispatched from 4ef368a: T3, T4.
+- @testing-library/dom peer dep accepted. Ruling: root layout imports globals.css in Task 7b.
+- translation_review migration accepted. Ruling: override mutations get AppError + audit + permission gating when wired to admin (deferred to integration fix after merge) — parallel modules were unavailable.
+- fold Hebrew/Spanish terminology minors (#1,#2) and review TOCTOU (#3) into fix round 1 — translations are user-facing product quality and §16.6 reviewed-content guarantee — cost: slightly larger fix diff.
+- scope stays on RoleAssignment for Phase 1 (a user may hold several assignments with different scopes; templates carry suggestedScopeTypes) — no schema churn while parallel tasks run — cost: per-permission scope column later if product requires.
+- requiresMfa extended to permissions.assign holders (COO) accepted — security precedence (spec §0) — cost: COO must enroll MFA.
+- defineRoute authorize hook gets RequestContext so denials carry correlation id — fix in integration step after T3/T4 merge.
+- in-memory rate limit accepted for Phase 1 (DB lockout is the control) — documented; shared store in Phase 8.
+- withSessionCookie wrapper accepted. Password change / MFA recovery codes / user CRUD deferred: user CRUD is Task 5; password change + MFA recovery codes → add to Task 5/8 integration list.
+- invitation-accept creating a scope-less RoleAssignment must route through authz assignRole with explicit scope at integration — flagged for review.
+- sensitive field categories become opt-in (explicit grant) — spec §22.2 restrict + security precedence — cost: templates need explicit field grants (Finance, HR, Owner).
+- remove Technician financial_reports.view — least privilege; §4.4 lists only own statements/own summary — cost: none.
+- assignRole must take the granting actor and enforce permissions.assign + no-escalation (cannot grant permissions/scope the granter lacks) + SoD on self — reviewer ⚠️ privilege-escalation path; engine is the right single place — cost: callers pass actor.
+- fold security minors #1 (TOTP replay race), #5 (rotate token on MFA promotion), #7 (validate roleId/employeeId at createInvitation; invitations carry explicit scopes; accept goes through authz assignRole after T4 merge — for now store scopes on invitation), #4 (bcrypt outside interactive tx) into round 1 — security precedence — cost: bigger fix diff.
+- zero-scope assignment = deny incl. target-less actions (T4 confirmed evaluate.ts:691) — invitation must carry explicit scope.
+- fold #4 (projectFields requires explicit fieldMap — fail closed) and #6 (target user must be inside granter's scope) into round 2 — security — cost: small.
+- requireSession variant returning mfaPending → add in post-T5 integration (T5 currently edits auth) — cost: extra audit row per pending page load meanwhile.
+- changeLocaleAction in src/app/_actions accepted (own data only, audited).
+- admin nav hrefs /admin/* binding for Task 8.
+- nav admin visibility via scope-aware check (resolveScope non-OWN for *.view) decided in Task 8 — cost: stopgap proxy until then.
+- confirm locked-account login shows the same generic message (reviewer ⚠️) in this round.
+- core RouteHandler overload fix accepted (next build was broken for /api/v1 routes).
+- org-tree ancestry versioning deferred to Phase 6 (reporting); employee assignment history satisfies §3.4 for Phase 1 — documented limitation.
+- invitation delivery provider absent is correct per §28.3 (no fake integrations); documented.
+- user reactivate/unlock deferred to Task 8 needs-check; translation override routes = Task 8 server actions over service.
+- fold minors #1 (seed atomic — spec ❌), #3 (project manager response), #4 (check+write same tx), #5 (terminate requires user-admin authority over linked user), #6 (hide ungated i18n exports; reviewer≠editor), #2 (backdated history needs mandatory reason; audited as correction) into round 1 — escalation/integrity — cost: larger diff.
+- single-admin tenant cannot self-approve translations — accepted (§16.6 human review, dual control) — cost: needs second reviewer.
+- round 2 also includes self-termination guard (lockout of last admin) and fixing the non-probing roles test; seed cleanup failure must be logged.
+- terminated-with-active-login users visible to tenant-wide user admins only — sessions are always revoked so no risk remains; acceptable — cost: unit admins rely on Owner.
+- nav excludes OWN and ASSIGNED parts — accepted (Technicians must not see admin).
+- small read services added in server modules accepted. Invitation revoke deferred (Phase 1 limitation).
+- Playwright smoke still required — Chromium preinstalled globally (require('playwright')); create own seed tenant with known password + MFA via TOTP helper; do in fix round.
+- fold minors: hardcoded "(copy)", unit-history parent names out of scope (redact to "outside your scope"), baseFieldScope → authz helper, test assertions pin FORBIDDEN/NotFound. Plus Playwright smoke (manager ruling).
+- fold final-review minors 5–12 into the single fix wave; skip minor 15 (renaming an applied migration is riskier than the lexical-order fragility) and 13/14 (deferred).
+- per user request ran 2 more parallel agents on non-overlapping files — E2E suite (a8c6a0da9790fdee6) and API reference (a0721e67a488c7b46); fix wave a58ef19dfdd16a8a3 continues — cost: small merge conflicts in package.json/README/DECISIONS.
+- sensitive-grant MFA rule applies to custom roles only (templates keep explicit list) — applying to templates made Technician MFA-required — cost: clone of a template may require MFA where the template doesn't; documented.
+- follow-up agent after fix-wave merge: project role history (no ipAddress; redact), align date format (code → YYYY-MM-DD for date-only fields, or doc), update API_REFERENCE for 415/413 and MFA re-check.
+- one follow-up round (load-bearing breakage) combining: 415 fix (enforce only when bytes present), role-history projection (API-REF finding), date-only format, docs consistency, clone MFA, API_REFERENCE update — then scoped re-review. Exceeds "no second fix wave" because the breakage blocks API logout — cost: one extra round.
+- Technician seeing own row on /admin/employees accepted (nav hides it; own record only). Ruling: deep import of secret-box in e2e → follow-up should export encryptSecret via auth index or a test-support entry.
+- fix in round 1 with minors: encryption key ??=, city-manager assert specific other-city employee absent, sanitize execSync error, local-host guard.
