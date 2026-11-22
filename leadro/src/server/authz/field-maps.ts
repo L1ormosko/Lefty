@@ -38,10 +38,118 @@ export const EMPLOYEE_FIELD_MAP: FieldMap = buildFieldMap(
   { financial: ["salary", "payRate", "bankAccountNumber", "bankRoutingNumber", "taxId"] },
 );
 
-/** Customer record fields; billing keys are reserved for the customers module. */
+/**
+ * Customer record fields (the stored `Customer` columns, minus `tenantId`; a test asserts that every
+ * column is classified). The billing set (`customers.billing_fields`) is opt-in.
+ */
 export const CUSTOMER_FIELD_MAP: FieldMap = buildFieldMap(
-  ["id", "name", "email", "phone", "address", "status", "createdAt", "updatedAt"],
-  { billing: ["billingAddress", "billingEmail", "paymentMethod", "taxId"] },
+  [
+    "id",
+    "number",
+    "kind",
+    "name",
+    "email",
+    "phone",
+    "phoneE164",
+    "preferredLocale",
+    "preferredContactChannel",
+    "contactPreferences",
+    "doNotContact",
+    "orgUnitId",
+    "archivedAt",
+    "createdById",
+    "createdAt",
+    "updatedAt",
+  ],
+  { billing: ["billingName", "billingEmail", "billingAddress", "taxId", "paymentTerms", "paymentMethod"] },
+);
+
+/**
+ * Lead record fields (every stored `Lead` column except `tenantId`). Leads have no sensitive set in
+ * Phase 2: the quoted amount is a sales estimate, not a billing field.
+ */
+export const LEAD_FIELD_MAP: FieldMap = buildFieldMap(
+  [
+    "id",
+    "number",
+    "status",
+    "statusChangedAt",
+    "priority",
+    "sourceId",
+    "campaign",
+    "externalId",
+    "customerId",
+    "contactName",
+    "contactPhone",
+    "contactPhoneE164",
+    "contactEmail",
+    "customerAddressId",
+    "addressLine1",
+    "addressLine2",
+    "addressCity",
+    "addressRegion",
+    "addressPostalCode",
+    "addressNormalizedKey",
+    "jobTypeId",
+    "serviceCategory",
+    "requestedWork",
+    "preferredWindowStart",
+    "preferredWindowEnd",
+    "preferredTimeNote",
+    "notes",
+    "quotedAmountMinor",
+    "currency",
+    "orgUnitId",
+    "nextFollowUpAt",
+    "duplicateOfLeadId",
+    "closedReason",
+    "archivedAt",
+    "createdById",
+    "createdAt",
+    "updatedAt",
+  ],
+  {},
+);
+
+/**
+ * Job record fields (every stored `Job` column except `tenantId`). Money (`quotedAmountMinor`,
+ * `currency`) is the `financial` set (`jobs.financial_fields`): opt-in, so Dispatchers and
+ * Technicians (plain grants) never receive it.
+ */
+export const JOB_FIELD_MAP: FieldMap = buildFieldMap(
+  [
+    "id",
+    "number",
+    "customerId",
+    "serviceAddressId",
+    "jobTypeId",
+    "orgUnitId",
+    "leadId",
+    "parentJobId",
+    "origin",
+    "status",
+    "statusChangedAt",
+    "priority",
+    "title",
+    "description",
+    "instructions",
+    "appointmentWindowStart",
+    "appointmentWindowEnd",
+    "scheduledStartAt",
+    "scheduledEndAt",
+    "timeZone",
+    "estimatedDurationMinutes",
+    "startedAt",
+    "completedAt",
+    "closedAt",
+    "cancelledAt",
+    "statusReason",
+    "archivedAt",
+    "createdById",
+    "createdAt",
+    "updatedAt",
+  ],
+  { financial: ["quotedAmountMinor", "currency"] },
 );
 
 /**

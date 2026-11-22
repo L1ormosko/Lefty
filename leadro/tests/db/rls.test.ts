@@ -2,6 +2,20 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, withTenant } from "@/server/db";
 import { createTenant } from "../helpers";
 
+/** Every table with a "tenantId" column: Phase 1 (17) + Phase 2 operational core (28). */
+const TENANT_OWNED_TABLES = [
+  // Phase 1
+  "LegalEntity", "OrgUnit", "Employee", "OrgUnitManager", "OrganizationalAssignment", "User", "Role", "RolePermission",
+  "RoleAssignment", "AccessScope", "Session", "AuthenticationEvent", "Invitation", "PasswordResetToken", "AuditEvent",
+  "IdempotencyRecord", "TranslationResource",
+  // Phase 2
+  "NumberSequence", "OperationsSettings", "Customer", "CustomerAddress", "CustomerNote", "LeadSource", "Lead",
+  "LeadAssignment", "LeadStatusHistory", "LeadInteraction", "DuplicateFlag", "Skill", "Certification",
+  "EmployeeQualification", "ServiceTerritory", "Availability", "JobType", "JobTypeSkill", "JobTypeCertification", "Job",
+  "JobRequirement", "JobAssignment", "JobStatusHistory", "JobEvent", "DispatchRecommendation", "Notification",
+  "NotificationDelivery", "NotificationPreference",
+];
+
 let A: { id: string };
 let B: { id: string };
 let bLegalEntityId: string;
@@ -54,8 +68,9 @@ describe("RLS coverage", () => {
       FROM information_schema.columns c
       JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = 'public'::regnamespace
       WHERE c.table_schema = 'public' AND c.column_name = 'tenantId'`;
-    // Sanity: the sweep actually found the tenant-owned tables.
-    expect(tables.length).toBe(17);
+    // Sanity: the sweep found exactly the tenant-owned tables. A new tenant-owned table must be added here
+    // on purpose (and the migration's RLS DO-block covers it automatically).
+    expect(tables.map((t) => t.table_name).sort()).toEqual([...TENANT_OWNED_TABLES].sort());
     for (const t of tables) {
       expect(t.rls, `${t.table_name} RLS enabled`).toBe(true);
       expect(t.forced, `${t.table_name} RLS forced`).toBe(true);

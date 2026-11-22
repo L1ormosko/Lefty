@@ -45,10 +45,17 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   ...mod("permissions", "roles and access", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "ASSIGN", "APPROVE", "MANAGE"], ["ASSIGN", "MANAGE"]),
   ...mod("audit", "audit log", ["VIEW", "EXPORT"], ["EXPORT"]),
   ...mod("localization", "translations", ["VIEW", "EDIT", "CONFIGURE"]),
-  ...mod("customers", "customers", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "EXPORT"]),
-  ...mod("leads", "leads", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "ASSIGN", "EXPORT"]),
+  // MANAGE = module settings that are not "configure": duplicate matchers (customers), lead sources (leads).
+  ...mod("customers", "customers", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "EXPORT", "MANAGE"]),
+  ...mod("leads", "leads", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "ASSIGN", "EXPORT", "MANAGE"]),
   ...mod("dispatch", "dispatch", ["VIEW", "CREATE", "EDIT", "ASSIGN", "MANAGE"]),
   ...mod("jobs", "jobs", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "ASSIGN", "APPROVE", "REJECT", "EXPORT"]),
+  // Skills, certifications, licenses, equipment qualifications, territories, availability (spec 10.1).
+  ...mod("qualifications", "employee qualifications", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "APPROVE", "MANAGE"]),
+  // Own notifications only: services always filter on the caller, so the grant's scope is irrelevant.
+  ...mod("notifications", "own notifications", ["VIEW", "EDIT"]),
+  // Job type catalog + job workflow settings (spec 7.1-7.2). CONFIGURE makes a role require MFA like every *.configure.
+  ...mod("job_types", "job types and job workflow", ["VIEW", "CONFIGURE"]),
   ...mod("compensation", "compensation", ["VIEW", "CREATE", "EDIT", "APPROVE", "REJECT", "EXPORT", "CONFIGURE"], ["VIEW", "APPROVE", "CONFIGURE"]),
   ...mod("financial_reports", "financial reports", ["VIEW", "EXPORT"], ["VIEW", "EXPORT"]),
   ...mod("performance", "performance data", ["VIEW", "EXPORT"]),

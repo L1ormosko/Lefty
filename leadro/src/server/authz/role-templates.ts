@@ -100,6 +100,9 @@ function full(module: string, conditions?: GrantConditions): TemplateGrant[] {
 
 const view = (module: string, conditions?: GrantConditions) => grantActions(module, ["VIEW"], conditions);
 
+/** A user's own notifications: read, mark read, change preferences. Every template holds it. */
+const own = (module: string) => grantActions(module, ["VIEW", "EDIT"]);
+
 function defineTemplate(template: Omit<RoleTemplate, "requiresMfa">): RoleTemplate {
   return { ...template, requiresMfa: templateRequiresMfa(template.key, template.grants) };
 }
@@ -118,6 +121,9 @@ const unitManagerGrants = (): TemplateGrant[] => [
   ...view("compensation"),
   ...view("financial_reports"),
   ...view("performance"),
+  ...grantActions("qualifications", ["VIEW", "CREATE", "EDIT"]),
+  ...view("job_types"),
+  ...own("notifications"),
 ];
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
@@ -146,6 +152,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("leads"),
       ...full("dispatch"),
       ...full("jobs"),
+      ...view("qualifications"),
+      ...full("job_types"),
+      ...own("notifications"),
       ...view("compensation"),
       ...view("financial_reports"),
       ...view("performance"),
@@ -165,6 +174,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("employees", { fields: "financial" }),
       ...view("customers", { fields: "billing" }),
       ...view("jobs", { fields: "financial" }),
+      ...own("notifications"),
       ...full("compensation"),
       ...full("financial_reports"),
     ],
@@ -203,21 +213,26 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("leads"),
       ...view("dispatch"),
       ...grantActions("jobs", ["VIEW", "EDIT"]),
+      ...view("qualifications"),
+      ...view("job_types"),
+      ...own("notifications"),
       ...view("performance"),
     ],
   }),
   defineTemplate({
     key: "LEAD_OPERATIONS_MANAGER",
     name: "Lead Operations Manager",
-    description: "Lead queues, lead employees, assignment, follow-up and recovery. No lead archiving.",
+    description: "Lead queues, lead employees, assignment, follow-up, recovery and lead sources. No lead archiving.",
     suggestedScopeTypes: ["ORG_UNIT"],
     grants: [
       ...view("localization"),
       ...grantActions("employees", ["VIEW", "ASSIGN"], { set: "lead_team" }),
       ...grantActions("customers", ["VIEW", "CREATE", "EDIT"], { set: "lead_related" }),
-      ...grantActions("leads", ["VIEW", "CREATE", "EDIT", "ASSIGN", "EXPORT"]),
+      ...grantActions("leads", ["VIEW", "CREATE", "EDIT", "ASSIGN", "EXPORT", "MANAGE"]),
       ...view("dispatch"),
       ...view("jobs", { set: "recovery_related" }),
+      ...view("job_types"),
+      ...own("notifications"),
       ...view("performance", { set: "lead_team" }),
     ],
   }),
@@ -232,7 +247,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("customers", { set: "job_related" }),
       ...view("leads", { set: "dispatch_related" }),
       ...full("dispatch"),
-      ...grantActions("jobs", ["VIEW", "CREATE", "EDIT", "ASSIGN"], { fields: "operational" }),
+      // "Operational fields" = every non-sensitive job field: the financial set is opt-in and not granted here.
+      ...grantActions("jobs", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
+      ...view("qualifications"),
+      ...view("job_types"),
+      ...own("notifications"),
     ],
   }),
   defineTemplate({
@@ -244,6 +263,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("localization"),
       ...grantActions("customers", ["VIEW", "CREATE", "EDIT"]),
       ...view("leads"),
+      // Service history (spec 5.9): only jobs of customers in their scope, requested through the customer history view.
+      ...view("jobs", { set: "customer_history" }),
+      ...view("job_types"),
+      ...own("notifications"),
     ],
   }),
   defineTemplate({
@@ -256,6 +279,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("organization"),
       // No `includeFields`: HR sees personal/employment fields but not financial ones (opt-in).
       ...full("employees"),
+      // Credentials and licenses are HR records (spec 10.1): HR verifies them (qualifications.approve).
+      ...full("qualifications"),
+      ...own("notifications"),
       ...view("performance"),
     ],
   }),
@@ -268,10 +294,18 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     grants: [
       ...view("localization"),
       ...view("employees"),
-      ...view("customers", { fields: "necessary" }),
-      ...grantActions("leads", ["VIEW", "EDIT"], { fields: "status" }),
+      // Assigned customers: contact and address; never the billing set (opt-in, not granted).
+      ...view("customers"),
+      ...view("leads"),
+      // May change only the lead's status (the leads service allows just the `status` field set).
+      ...grantActions("leads", ["EDIT"], { fields: "status" }),
       ...view("dispatch"),
-      ...grantActions("jobs", ["VIEW", "EDIT"], { fields: "execution" }),
+      ...view("jobs"),
+      // May change only execution fields of an assigned job (status progression, notes), never scheduling or money.
+      ...grantActions("jobs", ["EDIT"], { fields: "execution" }),
+      ...view("qualifications"),
+      ...view("job_types"),
+      ...own("notifications"),
       ...view("compensation"),
       // No financial_reports.view: own statements/summary are self-service, not the module permission.
       ...view("performance"),
