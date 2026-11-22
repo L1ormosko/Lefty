@@ -21,6 +21,7 @@ test("the City Manager gets the Hebrew right-to-left UI, a limited menu and a ci
   // Their own record is listed, but the tenant-wide people (the CEO is E-0001) are not.
   await expect(page.getByRole("cell", { name: fixture.cityManager.employeeNumber, exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "E-0001", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: fixture.cityManager.outOfScopeEmployeeNumber, exact: true })).toHaveCount(0);
   const bodyRows = (await page.getByRole("row").count()) - 1;
   expect(bodyRows).toBeGreaterThan(0);
   expect(bodyRows).toBeLessThan(fixture.employeeCount);

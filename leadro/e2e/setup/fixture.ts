@@ -18,10 +18,16 @@ export interface E2eFixture {
     /** Base32 TOTP seed the CEO's authenticator would hold; the test derives codes from it. */
     totpSecretBase32: string;
   };
-  cityManager: E2eUser & { employeeNumber: string };
+  cityManager: E2eUser & {
+    employeeNumber: string;
+    /** An employee placed outside the City Manager's city (the COO, placed at the business unit). */
+    outOfScopeEmployeeNumber: string;
+  };
   technician: E2eUser;
   /** Dedicated to the lockout spec so locking it does not disturb the other specs. */
   lockoutTarget: E2eUser;
+  /** An employee of the SAME tenant (the CEO), used as the positive control for the isolation spec. */
+  ownEmployee: { id: string; fullName: string };
   /** An employee of a DIFFERENT tenant, for the isolation spec. */
   foreignEmployeeId: string;
 }

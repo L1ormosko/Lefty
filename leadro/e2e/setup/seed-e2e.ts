@@ -17,7 +17,12 @@ const randomSuffix = () => randomBytes(4).toString("hex");
 
 /** Brings the test database to the current schema (forward-only, same command as `npm test`). */
 function migrateTestDatabase(): void {
-  execSync("npx prisma migrate deploy", { stdio: "pipe", env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL } });
+  try {
+    execSync("npx prisma migrate deploy", { stdio: "pipe", env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL } });
+  } catch {
+    // The raw error carries the command's stderr, which can echo the connection string (password included).
+    throw new Error("prisma migrate deploy failed against the E2E database; run `npm run db:migrate:test` to see why.");
+  }
 }
 
 /** The permission catalog is global (not per tenant); role templates refer to it. Idempotent. */
@@ -70,7 +75,11 @@ export async function seedE2e(): Promise<E2eFixture> {
   });
 
   const foreign = await withTenant(other.tenantId, (tx) => tx.employee.findFirstOrThrow({ select: { id: true } }));
-  const cityManagerIndex = main.people.findIndex((person) => person.roleTemplate === "CITY_MANAGER");
+  const own = await withTenant(main.tenantId, (tx) =>
+    tx.employee.findFirstOrThrow({ where: { email: emailOf("owner") }, select: { id: true, firstName: true, lastName: true } }),
+  );
+  const numberOf = (roleTemplate: string) =>
+    `E-${String(main.people.findIndex((person) => person.roleTemplate === roleTemplate) + 1).padStart(4, "0")}`;
 
   return {
     password,
@@ -79,10 +88,12 @@ export async function seedE2e(): Promise<E2eFixture> {
     cityManager: {
       email: emailOf("city-manager"),
       tenantSlug: main.slug,
-      employeeNumber: `E-${String(cityManagerIndex + 1).padStart(4, "0")}`,
+      employeeNumber: numberOf("CITY_MANAGER"),
+      outOfScopeEmployeeNumber: numberOf("COO"),
     },
     technician: { email: emailOf("technician"), tenantSlug: main.slug },
     lockoutTarget: { email: emailOf("dispatcher"), tenantSlug: main.slug },
+    ownEmployee: { id: own.id, fullName: `${own.firstName} ${own.lastName}` },
     foreignEmployeeId: foreign.id,
   };
 }

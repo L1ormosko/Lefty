@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { generateTotp, base32Decode } from "@/lib/totp";
+import { generateTotp, base32Decode, totpTimeStep, TOTP_STEP_SECONDS } from "@/lib/totp";
 import enUS from "@/lib/i18n/catalogs/en-US.json";
 import heIL from "@/lib/i18n/catalogs/he-IL.json";
 import type { E2eUser } from "./setup/fixture";
@@ -32,9 +32,21 @@ export async function signIn(page: Page, user: E2eUser, password: string, locale
   await expect(page).toHaveURL(/\/$/);
 }
 
-/** Completes the MFA step with the code an authenticator holding `secretBase32` would show now. */
+/** Newest TOTP step this run already submitted. The server refuses a step it has accepted (replay guard). */
+const mfaState = globalThis as { __e2eLastMfaStep?: number };
+
+/**
+ * Completes the MFA step with the code an authenticator holding `secretBase32` would show now.
+ * The server accepts each 30-second step once, so a second login within the same step waits for
+ * the next one instead of being refused.
+ */
 export async function answerMfaChallenge(page: Page, secretBase32: string): Promise<void> {
   await expect(page).toHaveURL(/\/login\/mfa$/);
+  const last = mfaState.__e2eLastMfaStep;
+  if (last !== undefined && totpTimeStep(Date.now()) <= last) {
+    await page.waitForTimeout((last + 1) * TOTP_STEP_SECONDS * 1000 - Date.now() + 500);
+  }
+  mfaState.__e2eLastMfaStep = totpTimeStep(Date.now());
   const code = generateTotp(base32Decode(secretBase32), Date.now());
   await page.getByLabel(text("en-US", "AUTH_UI.MFA_CODE_LABEL")).fill(code);
   await page.getByRole("button", { name: text("en-US", "AUTH_UI.MFA_VERIFY") }).click();

@@ -9,3 +9,9 @@ export const E2E_DATABASE_URL =
 if (!/\/[^/?]*_test(\?|$)/.test(E2E_DATABASE_URL)) {
   throw new Error("Refusing to run the E2E suite: the database name must end in _test.");
 }
+
+// The suite creates tenants and users, so it only runs against a local database unless told otherwise.
+const host = new URL(E2E_DATABASE_URL).hostname;
+if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(host) && process.env.E2E_ALLOW_REMOTE_DB !== "1") {
+  throw new Error("Refusing to run the E2E suite against a non-local database (set E2E_ALLOW_REMOTE_DB=1 to allow it).");
+}

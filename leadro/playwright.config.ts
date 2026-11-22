@@ -10,9 +10,10 @@ import { E2E_DATABASE_URL } from "./e2e/setup/test-database";
 const PORT = Number(process.env.E2E_PORT ?? 3100);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
-// Generated per run and inherited by the web server, globalSetup and workers (all are children
-// of this process). It encrypts the MFA seed the seed script stores, and is never persisted.
-process.env.LEADRO_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+// Generated per run, never persisted. Playwright re-evaluates this config in every worker, but
+// workers inherit the main process's environment, so `??=` keeps the one key the web server and
+// the seed script (which encrypts the CEO's MFA seed with it) already use.
+process.env.LEADRO_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 // The seed script and the app both read DATABASE_URL: point both at the test database.
 process.env.DATABASE_URL = E2E_DATABASE_URL;
 
