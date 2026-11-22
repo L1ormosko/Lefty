@@ -29,6 +29,15 @@ export {
 export type { ScopeColumns, ScopeOptions, ResolvedScope, ScopePart, RowScopeAttributes } from "./scope-filter";
 export { employeeScopeColumns, employeeScopeSelect, employeeRowAttributes, orgUnitScopeColumns } from "./scope-columns";
 export { projectFields } from "./project-fields";
+export {
+  LEAD_STATUS_FIELDS,
+  JOB_EXECUTION_FIELDS,
+  LEAD_WRITE_ALLOWLISTS,
+  JOB_WRITE_ALLOWLISTS,
+  writableFields,
+  assertWritableFields,
+} from "./writable-fields";
+export type { WriteAllowlists } from "./writable-fields";
 export { EMPLOYEE_FIELD_MAP, CUSTOMER_FIELD_MAP, LEAD_FIELD_MAP, JOB_FIELD_MAP, baseFieldMap } from "./field-maps";
 export type { FieldMap } from "./project-fields";
 export { explainAccess } from "./explain-access";

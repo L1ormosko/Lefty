@@ -83,6 +83,17 @@ describe("operational development seed", () => {
     });
   });
 
+  it("gives branches coordinates and technicians job-category permissions", async () => {
+    await withTenant(tenantId, async (tx) => {
+      const branches = await tx.orgUnit.findMany({ where: { type: "BRANCH" } });
+      expect(branches.length).toBeGreaterThan(0);
+      expect(branches.every((b) => b.latitude !== null && b.longitude !== null)).toBe(true);
+      const login = await tx.employee.findFirstOrThrow({ where: { email: `technician@${spec.slug}.example.test` } });
+      const categories = (await tx.employeeJobPermission.findMany({ where: { employeeId: login.id } })).map((p) => p.category).sort();
+      expect(categories).toEqual(["inspection", "installation", "repair"]);
+    });
+  });
+
   it("only verified qualifications carry a verifier, and licenses carry their number", async () => {
     await withTenant(tenantId, async (tx) => {
       const all = await tx.employeeQualification.findMany({ include: { certification: true } });

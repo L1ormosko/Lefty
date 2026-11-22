@@ -142,34 +142,36 @@ model Tenant {
   translations    TranslationResource[]
 
   // Phase 2 (operational core)
-  numberSequences         NumberSequence[]
-  operationsSettings      OperationsSettings?
-  customers               Customer[]
-  customerAddresses       CustomerAddress[]
-  customerNotes           CustomerNote[]
-  leadSources             LeadSource[]
-  leads                   Lead[]
-  leadAssignments         LeadAssignment[]
-  leadStatusHistory       LeadStatusHistory[]
-  leadInteractions        LeadInteraction[]
-  duplicateFlags          DuplicateFlag[]
-  skills                  Skill[]
-  certifications          Certification[]
-  jobTypes                JobType[]
-  jobTypeSkills           JobTypeSkill[]
-  jobTypeCertifications   JobTypeCertification[]
-  jobs                    Job[]
-  jobRequirements         JobRequirement[]
-  jobAssignments          JobAssignment[]
-  jobStatusHistory        JobStatusHistory[]
-  jobEvents               JobEvent[]
-  dispatchRecommendations DispatchRecommendation[]
-  employeeQualifications  EmployeeQualification[]
-  serviceTerritories      ServiceTerritory[]
-  availabilities          Availability[]
-  notifications           Notification[]
-  notificationDeliveries  NotificationDelivery[]
-  notificationPreferences NotificationPreference[]
+  numberSequences            NumberSequence[]
+  operationsSettings         OperationsSettings?
+  customers                  Customer[]
+  customerAddresses          CustomerAddress[]
+  customerNotes              CustomerNote[]
+  leadSources                LeadSource[]
+  leads                      Lead[]
+  leadAssignments            LeadAssignment[]
+  leadStatusHistory          LeadStatusHistory[]
+  leadInteractions           LeadInteraction[]
+  duplicateFlags             DuplicateFlag[]
+  skills                     Skill[]
+  certifications             Certification[]
+  jobTypes                   JobType[]
+  jobTypeSkills              JobTypeSkill[]
+  jobTypeCertifications      JobTypeCertification[]
+  jobs                       Job[]
+  jobRequirements            JobRequirement[]
+  jobAssignments             JobAssignment[]
+  jobStatusHistory           JobStatusHistory[]
+  jobEvents                  JobEvent[]
+  dispatchRecommendations    DispatchRecommendation[]
+  employeeQualifications     EmployeeQualification[]
+  serviceTerritories         ServiceTerritory[]
+  availabilities             Availability[]
+  notifications              Notification[]
+  notificationDeliveries     NotificationDelivery[]
+  notificationPreferences    NotificationPreference[]
+  employeeJobPermissions     EmployeeJobPermission[]
+  customerPreferredEmployees CustomerPreferredEmployee[]
 }
 
 model LegalEntity {
@@ -207,6 +209,9 @@ model OrgUnit {
   timeZone       String?
   defaultLocale  String?
   operatingHours Json?
+  /// Branch / depot coordinates: origin of straight-line distance estimates (range CHECKs in the fixes migration).
+  latitude       Decimal?    @db.Decimal(9, 6)
+  longitude      Decimal?    @db.Decimal(9, 6)
   createdAt      DateTime    @default(now()) @db.Timestamptz(3)
   updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
 
@@ -247,6 +252,9 @@ model Employee {
   status          EmployeeStatus @default(ACTIVE)
   hireDate        DateTime?      @db.Date
   terminationDate DateTime?      @db.Date
+  /// Optional start location (home/depot): origin of straight-line distance estimates.
+  startLatitude   Decimal?       @db.Decimal(9, 6)
+  startLongitude  Decimal?       @db.Decimal(9, 6)
   createdAt       DateTime       @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
 
@@ -257,6 +265,8 @@ model Employee {
   managedUnits OrgUnitManager[]
 
   // Phase 2
+  jobPermissions          EmployeeJobPermission[]
+  customerPreferences     CustomerPreferredEmployee[]
   qualifications          EmployeeQualification[]
   serviceTerritories      ServiceTerritory[]
   availabilities          Availability[]
@@ -369,6 +379,9 @@ model User {
   qualificationsVerified  EmployeeQualification[]  @relation("QualificationVerifiedBy")
   notificationsReceived   Notification[]           @relation("NotificationRecipient")
   notificationPreferences NotificationPreference[]
+
+  jobPermissionsGranted     EmployeeJobPermission[] @relation("JobPermissionGrantedBy")
+  operationsSettingsUpdated OperationsSettings[]    @relation("OperationsSettingsUpdatedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -812,6 +825,13 @@ enum QualificationKind {
   CERTIFICATION
   LICENSE
   EQUIPMENT
+  /// Completed training course (spec 10.1 "Training"); a Certification catalog row of this type.
+  TRAINING
+}
+
+enum CustomerEmployeePreference {
+  PREFERRED
+  AVOID
 }
 
 enum QualificationStatus {
@@ -909,6 +929,8 @@ model OperationsSettings {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  updatedBy User? @relation("OperationsSettingsUpdatedBy", fields: [updatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
   @@unique([id, tenantId])
   @@unique([tenantId])
 }
@@ -954,6 +976,8 @@ model Customer {
   jobs           Job[]
   flagsAsPrimary DuplicateFlag[]   @relation("DuplicateCustomer")
   flagsAsOther   DuplicateFlag[]   @relation("DuplicateOtherCustomer")
+
+  preferredEmployees CustomerPreferredEmployee[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, number])
@@ -1108,11 +1132,12 @@ model Lead {
   assignments    LeadAssignment[]
   statusHistory  LeadStatusHistory[]
   interactions   LeadInteraction[]
-  job            Job?
+  jobs           Job[]
   flagsAsPrimary DuplicateFlag[]     @relation("DuplicateLead")
   flagsAsOther   DuplicateFlag[]     @relation("DuplicateOtherLead")
 
   @@unique([id, tenantId])
+  @@unique([id, customerId, tenantId])
   @@unique([tenantId, number])
   @@unique([tenantId, sourceId, externalId])
   @@index([tenantId, status, createdAt])
@@ -1291,6 +1316,7 @@ model Certification {
   qualifications  EmployeeQualification[]
 
   @@unique([id, tenantId])
+  @@unique([id, type, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, type])
 }
@@ -1324,7 +1350,7 @@ model EmployeeQualification {
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   employee      Employee       @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
   skill         Skill?         @relation(fields: [skillId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  certification Certification? @relation(fields: [certificationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  certification Certification? @relation(fields: [certificationId, kind, tenantId], references: [id, type, tenantId], onDelete: Restrict)
   verifiedBy    User?          @relation("QualificationVerifiedBy", fields: [verifiedById, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
@@ -1418,6 +1444,8 @@ model JobType {
   jobs           Job[]
   leads          Lead[]
 
+  employeePermissions EmployeeJobPermission[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, category])
@@ -1503,7 +1531,7 @@ model Job {
   serviceAddress  CustomerAddress          @relation(fields: [serviceAddressId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
   jobType         JobType                  @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
   orgUnit         OrgUnit                  @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  lead            Lead?                    @relation(fields: [leadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lead            Lead?                    @relation(fields: [leadId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
   parentJob       Job?                     @relation("JobFollowUps", fields: [parentJobId, tenantId], references: [id, tenantId], onDelete: Restrict)
   followUps       Job[]                    @relation("JobFollowUps")
   createdBy       User?                    @relation("JobCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
@@ -1579,7 +1607,7 @@ model JobAssignment {
   employee       Employee?               @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
   teamOrgUnit    OrgUnit?                @relation(fields: [teamOrgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
   assignedBy     User?                   @relation("JobAssignmentAssignedBy", fields: [assignedById, tenantId], references: [id, tenantId], onDelete: Restrict)
-  recommendation DispatchRecommendation? @relation("RecommendationAssignments", fields: [recommendationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recommendation DispatchRecommendation? @relation("RecommendationAssignments", fields: [recommendationId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
   @@index([tenantId, employeeId, state])
@@ -1666,6 +1694,7 @@ model DispatchRecommendation {
   assignments JobAssignment[] @relation("RecommendationAssignments")
 
   @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
   @@index([tenantId, jobId, generatedAt])
   @@index([tenantId, status, generatedAt])
 }
@@ -1750,4 +1779,51 @@ model NotificationPreference {
 
   @@unique([id, tenantId])
   @@unique([tenantId, userId, eventType, channel])
+}
+
+/// Job-category permission (spec 10.1): an employee may take jobs of ONE job type or ONE category
+/// (exactly one of jobTypeId / category, CHECK). Time-bounded and granted by a user. The
+/// qualification engine requires a matching active row (it defines how "no rows at all" is treated).
+model EmployeeJobPermission {
+  id            String    @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  jobTypeId     String?
+  /// Matches JobType.category (case-sensitive, tenant-defined).
+  category      String?
+  effectiveFrom DateTime  @default(now()) @db.Timestamptz(3)
+  effectiveTo   DateTime? @db.Timestamptz(3)
+  grantedById   String?
+  reason        String?
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee  Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  jobType   JobType? @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  grantedBy User?    @relation("JobPermissionGrantedBy", fields: [grantedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, effectiveTo])
+  @@index([tenantId, jobTypeId])
+  @@index([tenantId, category])
+}
+
+/// A customer's employee preference (spec 7.3 soft factor "customer preference"): PREFERRED ranks
+/// that employee higher, AVOID lower (never an eligibility rule). Real FKs, not ids inside JSON.
+model CustomerPreferredEmployee {
+  id         String                     @id @default(cuid())
+  tenantId   String
+  customerId String
+  employeeId String
+  kind       CustomerEmployeePreference @default(PREFERRED)
+  note       String?
+  createdAt  DateTime                   @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, customerId, employeeId])
+  @@index([tenantId, employeeId])
 }

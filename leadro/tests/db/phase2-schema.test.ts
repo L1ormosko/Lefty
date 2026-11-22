@@ -100,7 +100,9 @@ async function buildGraph(label: string): Promise<Graph> {
     await tx.notificationDelivery.create({ data: { tenantId, notificationId: notification.id, channel: "IN_APP", status: "DELIVERED" } });
     await tx.notificationPreference.create({ data: { tenantId, userId: user.id, eventType: "*", channel: "EMAIL", enabled: false } });
     await tx.numberSequence.create({ data: { tenantId, name: "job", lastValue: 1 } });
-    await tx.operationsSettings.create({ data: { tenantId } });
+    await tx.operationsSettings.create({ data: { tenantId, updatedById: user.id } });
+    await tx.employeeJobPermission.create({ data: { tenantId, employeeId: employee.id, category: "installation", grantedById: user.id } });
+    await tx.customerPreferredEmployee.create({ data: { tenantId, customerId: customer.id, employeeId: employee.id } });
     return {
       tenantId, userId: user.id, employeeId: employee.id, orgUnitId: orgUnit.id, customerId: customer.id, otherCustomerId: otherCustomer.id,
       addressId: address.id, otherCustomerAddressId: otherAddress.id, sourceId: source.id, leadId: lead.id, otherLeadId: otherLead.id, skillId: skill.id,
@@ -128,7 +130,7 @@ describe("tenant isolation of every Phase 2 table", () => {
     "LeadInteraction", "DuplicateFlag", "Skill", "Certification", "EmployeeQualification", "ServiceTerritory",
     "Availability", "JobType", "JobTypeSkill", "JobTypeCertification", "Job", "JobRequirement", "JobAssignment",
     "JobStatusHistory", "JobEvent", "DispatchRecommendation", "Notification", "NotificationDelivery",
-    "NotificationPreference", "NumberSequence", "OperationsSettings",
+    "NotificationPreference", "NumberSequence", "OperationsSettings", "EmployeeJobPermission", "CustomerPreferredEmployee",
   ];
 
   it.each(TABLES)("%s: each tenant sees only its own rows, and nothing without a tenant context", async (table) => {
@@ -240,7 +242,7 @@ describe("CHECK constraints", () => {
 
   it("credentials: SKILL vs certification columns, level range, dates and verification", async () => {
     const q = (data: Partial<Prisma.EmployeeQualificationUncheckedCreateInput>) => (tx: TenantTx) =>
-      tx.employeeQualification.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, kind: "CERTIFICATION", certificationId: A.certificationId, ...data } });
+      tx.employeeQualification.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, kind: "LICENSE", certificationId: A.certificationId, ...data } });
     await rejects(A, /employee_qualification_target/, q({ kind: "SKILL" }));
     await rejects(A, /employee_qualification_target/, q({ skillId: A.skillId }));
     await rejects(A, /employee_qualification_level/, q({ level: 3 }));
@@ -405,5 +407,67 @@ describe("field maps classify every stored column", () => {
     expect(CUSTOMER_FIELD_MAP.taxId).toBe("billing");
     expect(CUSTOMER_FIELD_MAP.billingAddress).toBe("billing");
     expect(CUSTOMER_FIELD_MAP.name).toBe("base");
+  });
+});
+
+describe("fix round 1: job permissions, coordinates, preferences, stricter foreign keys", () => {
+  it("job-category permissions name exactly one job type or category, inside one tenant", async () => {
+    const perm = (data: Partial<Prisma.EmployeeJobPermissionUncheckedCreateInput>) => (tx: TenantTx) =>
+      tx.employeeJobPermission.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, ...data } });
+    await rejects(A, /employee_job_permission_target/, perm({}));
+    await rejects(A, /employee_job_permission_target/, perm({ jobTypeId: A.jobTypeId, category: "repair" }));
+    await rejects(A, /employee_job_permission_target/, perm({ category: "  " }));
+    await rejects(A, /employee_job_permission_dates/, perm({ jobTypeId: A.jobTypeId, effectiveFrom: new Date("2026-02-01"), effectiveTo: new Date("2026-01-01") }));
+    await rejects(A, /foreign key/i, perm({ jobTypeId: B.jobTypeId }));
+    await expect(withTenant(A.tenantId, perm({ jobTypeId: A.jobTypeId, grantedById: A.userId }))).resolves.toBeDefined();
+  });
+
+  it("TRAINING is a qualification kind backed by a TRAINING certification", async () => {
+    await withTenant(A.tenantId, async (tx) => {
+      const course = await tx.certification.create({ data: { tenantId: A.tenantId, code: "safety-course", name: "Safety course", type: "TRAINING" } });
+      await tx.employeeQualification.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, kind: "TRAINING", certificationId: course.id } });
+    });
+  });
+
+  it("a qualification's kind must equal its certification's type (composite FK)", async () => {
+    // A.certificationId is a LICENSE.
+    await rejects(A, /foreign key/i, (tx) => tx.employeeQualification.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, kind: "EQUIPMENT", certificationId: A.certificationId } }));
+    await rejects(A, /foreign key/i, (tx) => tx.employeeQualification.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, kind: "CERTIFICATION", certificationId: A.certificationId } }));
+  });
+
+  it("origin coordinates on org units and employees are ranged pairs", async () => {
+    await rejects(A, /org_unit_latitude_range/, (tx) => tx.orgUnit.update({ where: { id: A.orgUnitId }, data: { latitude: "91", longitude: "10" } }));
+    await rejects(A, /org_unit_longitude_range/, (tx) => tx.orgUnit.update({ where: { id: A.orgUnitId }, data: { latitude: "10", longitude: "181" } }));
+    await rejects(A, /org_unit_coordinates_pair/, (tx) => tx.orgUnit.update({ where: { id: A.orgUnitId }, data: { latitude: "10" } }));
+    await rejects(A, /employee_start_latitude_range/, (tx) => tx.employee.update({ where: { id: A.employeeId }, data: { startLatitude: "-91", startLongitude: "0" } }));
+    await rejects(A, /employee_start_coordinates_pair/, (tx) => tx.employee.update({ where: { id: A.employeeId }, data: { startLongitude: "0" } }));
+    await expect(withTenant(A.tenantId, (tx) => tx.orgUnit.update({ where: { id: A.orgUnitId }, data: { latitude: "32.7767", longitude: "-96.797" } }))).resolves.toBeDefined();
+  });
+
+  it("customer employee preferences are real tenant-safe rows, one per customer and employee", async () => {
+    await rejects(A, /unique/i, (tx) => tx.customerPreferredEmployee.create({ data: { tenantId: A.tenantId, customerId: A.customerId, employeeId: A.employeeId, kind: "AVOID" } }));
+    await rejects(A, /foreign key/i, (tx) => tx.customerPreferredEmployee.create({ data: { tenantId: A.tenantId, customerId: A.otherCustomerId, employeeId: B.employeeId } }));
+    await rejects(A, /foreign key/i, (tx) => tx.customerPreferredEmployee.create({ data: { tenantId: A.tenantId, customerId: B.customerId, employeeId: A.employeeId } }));
+  });
+
+  it("an assignment's recommendation must be for the same job", async () => {
+    const otherJob = await withTenant(A.tenantId, (tx) =>
+      tx.job.create({ data: { tenantId: A.tenantId, number: 60, title: "other", estimatedDurationMinutes: 30, customerId: A.customerId, serviceAddressId: A.addressId, jobTypeId: A.jobTypeId, orgUnitId: A.orgUnitId } }),
+    );
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.jobAssignment.create({ data: { tenantId: A.tenantId, jobId: otherJob.id, teamOrgUnitId: A.orgUnitId, role: "LEAD", method: "RECOMMENDATION_APPROVED", recommendationId: A.recommendationId } }),
+    );
+  });
+
+  it("a job's lead must belong to the job's customer", async () => {
+    const lead = await withTenant(A.tenantId, (tx) => tx.lead.create({ data: { tenantId: A.tenantId, number: 61, customerId: A.otherCustomerId } }));
+    const job = (leadId: string) => (tx: TenantTx) =>
+      tx.job.create({ data: { tenantId: A.tenantId, number: 62 + Math.floor(Math.random() * 1e6), title: "x", estimatedDurationMinutes: 30, customerId: A.customerId, serviceAddressId: A.addressId, jobTypeId: A.jobTypeId, orgUnitId: A.orgUnitId, leadId } });
+    await rejects(A, /foreign key/i, job(lead.id)); // lead of another customer
+    await rejects(A, /foreign key/i, job(A.otherLeadId)); // lead not linked to any customer yet
+  });
+
+  it("operations settings can only be updated-by a user of the same tenant", async () => {
+    await rejects(A, /foreign key/i, (tx) => tx.operationsSettings.update({ where: { tenantId: A.tenantId }, data: { updatedById: B.userId } }));
   });
 });

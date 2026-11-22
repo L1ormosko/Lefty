@@ -88,7 +88,18 @@ column is added without a tag). Customer billing columns (`billingName`, `billin
 Because every field has ONE tag and read grants reveal whole sets, **read grants are plain** (no `fields` limit) for
 Dispatcher and Technician: "operational / necessary fields" means "everything except the opt-in sensitive sets".
 `fields` conditions remain on WRITE grants that must be narrower (Technician `leads.edit` -> `status`,
-`jobs.edit` -> `execution`), enforced by the owning service's allowed-field list.
+`jobs.edit` -> `execution`). The allowed fields are exported allowlists (`LEAD_STATUS_FIELDS` = status, closedReason;
+`JOB_EXECUTION_FIELDS` = status, statusReason, startedAt, completedAt, instructions; `LEAD_WRITE_ALLOWLISTS` /
+`JOB_WRITE_ALLOWLISTS` map tag -> list). Services MUST call, before applying an update, with the decision for the
+record:
+
+```ts
+assertWritableFields(decision, Object.keys(changes), JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS); // throws ForbiddenError naming the fields
+```
+
+A named tag with an allowlist writes exactly that list; a plain grant (`base`) writes every non-sensitive field of the
+map; sensitive sets only when named; unknown tags and denied decisions write nothing. **Technician customers**: the matrix's
+"necessary fields" now means every non-billing field (plain `customers.view` grant with ASSIGNED scope; billing is opt-in).
 
 ### 3.2 Grant conditions (`RolePermission.conditions`)
 
@@ -171,7 +182,7 @@ modules that consume it (Phase 2/3) and is recorded then.
 `suggestedScopeTypes`: Owner/CEO, COO, Finance, HR -> `TENANT`; State/Regional/City Manager, Team Leader,
 Dispatcher, Lead Ops, Customer Relations -> `ORG_UNIT` (Dispatcher and Lead Ops are narrower than the
 matrix's "Full scope"; assign `TENANT` when a company wants that); Technician -> `OWN` + `ASSIGNED`.
-Technician-specific qualifiers use `fields` (`necessary`, `status`, `execution`); the COO's
+Technician-specific write qualifiers use `fields` (`status`, `execution`; reads are plain); the COO's
 `permissions.assign` carries `{ set: "non_sensitive_roles" }`, to be enforced by the permissions module.
 
 **MFA.** `Role.requiresMfa = true` for the Owner/CEO, Finance Director and HR Manager templates, for

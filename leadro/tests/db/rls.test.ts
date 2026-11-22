@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, withTenant } from "@/server/db";
 import { createTenant } from "../helpers";
 
-/** Every table with a "tenantId" column: Phase 1 (17) + Phase 2 operational core (28). */
+/** Every table with a "tenantId" column: Phase 1 (17) + Phase 2 operational core (28 + 2 fix-round tables). */
 const TENANT_OWNED_TABLES = [
   // Phase 1
   "LegalEntity", "OrgUnit", "Employee", "OrgUnitManager", "OrganizationalAssignment", "User", "Role", "RolePermission",
@@ -13,7 +13,7 @@ const TENANT_OWNED_TABLES = [
   "LeadAssignment", "LeadStatusHistory", "LeadInteraction", "DuplicateFlag", "Skill", "Certification",
   "EmployeeQualification", "ServiceTerritory", "Availability", "JobType", "JobTypeSkill", "JobTypeCertification", "Job",
   "JobRequirement", "JobAssignment", "JobStatusHistory", "JobEvent", "DispatchRecommendation", "Notification",
-  "NotificationDelivery", "NotificationPreference",
+  "NotificationDelivery", "NotificationPreference", "EmployeeJobPermission", "CustomerPreferredEmployee",
 ];
 
 let A: { id: string };

@@ -213,7 +213,7 @@ erDiagram
 
 ## Database-level rules not visible in the diagram
 
-- RLS (FORCE) policy `tenant_isolation` on all 45 tenant-owned tables (17 Phase 1 + 28 Phase 2; each RLS migration applies it to
+- RLS (FORCE) policy `tenant_isolation` on all 47 tenant-owned tables (17 Phase 1 + 30 Phase 2; each RLS migration applies it to
   every table that has a `tenantId` column; a test asserts none is missed).
 - `AuditEvent`: trigger rejects UPDATE / DELETE / TRUNCATE.
 - `OrgUnit`: CHECK `parentId <> id`; trigger rejects longer cycles.
@@ -499,3 +499,32 @@ All names are part of the contract (asserted in `tests/db/phase2-schema.test.ts`
   `employee_qualification_level` (1-5, skills only), `employee_qualification_dates`,
   `employee_qualification_verified` (VERIFIED needs verifier + time), `certification_not_skill`,
   `notification_delivery_failure_reason`, `notification_delivery_retry_time`, `*_status_history_changed`.
+
+## Phase 2 fix round 1 (migration `20261122140000_phase2_schema_fixes`)
+
+New tables (RLS, composite FKs like all others; now 47 tenant-owned tables):
+
+| Model | Purpose |
+|---|---|
+| `EmployeeJobPermission` | spec 10.1 job-category permissions: an employee may take jobs of ONE `jobTypeId` XOR one `category` (CHECK `employee_job_permission_target`), time-bounded (`effectiveFrom/To`), `grantedById`. The qualification engine treats it as a hard requirement: a matching active row must exist. |
+| `CustomerPreferredEmployee` | spec 7.3 soft factor "customer preference": `PREFERRED` / `AVOID` per (customer, employee), unique. Soft ranking only, never eligibility. |
+
+Column and constraint changes:
+- `QualificationKind` gains `TRAINING` (a `Certification` catalog row of type TRAINING; "Training" in spec 10.1).
+- `OrgUnit.latitude/longitude` (branch/depot) and `Employee.startLatitude/startLongitude` (optional home/depot start): `Decimal(9,6)`, range CHECKs (`org_unit_*`, `employee_start_*`) and both-or-neither. Origins for straight-line (haversine) distance; with `CustomerAddress` coordinates a distance is computable. Missing coordinates mean "distance unknown", never a guess.
+- `EmployeeQualification (certificationId, kind, tenantId)` is now a composite FK to `Certification (id, type, tenantId)`: the DB enforces kind = the credential's type.
+- `JobAssignment (recommendationId, jobId, tenantId)` references `DispatchRecommendation (id, jobId, tenantId)`: a recommendation can only be linked to assignments of its own job.
+- `Job (leadId, customerId, tenantId)` references `Lead (id, customerId, tenantId)`: a job's lead belongs to the job's customer. Consequence for conversion: the lead must be linked to its customer (`Lead.customerId`) BEFORE the job is created. `Lead.job` became `jobs` in the client (still at most one job per lead: unique `(leadId, tenantId)`).
+- `OperationsSettings (updatedById, tenantId)` is a composite FK to `User`.
+
+## Contracts for JSON and polymorphic references
+
+`DispatchRecommendation.candidates` / `blockingReasons`, `Notification.params` / `eventId` / `targetId`, `JobEvent.payload`, `Customer.contactPreferences`, `OperationsSettings.duplicateMatchers` are not foreign-key protected. Rules for every writer and reader:
+1. **Ids only.** Store identifiers and codes (employee ids, factor keys, numbers, enums), never names, phone numbers, addresses or other PII, and no text copied from other records.
+2. **Resolve through tenant-scoped queries and re-check authorization** (`withTenant` + the module's `enforceInTx` / `withinScope`) when displaying: an id found in JSON may point at something the viewer may not see (then show nothing or a neutral placeholder), or at nothing (deleted, other tenant: treat as missing). Never join on it blindly or trust it as proof of access.
+3. Money and customer preferences that matter to logic are columns or rows (e.g. `CustomerPreferredEmployee`), not JSON.
+
+## Documented rules not expressible in the database
+
+- **Lead intake must always set `sourceId`.** The unique index `(tenantId, sourceId, externalId)` ignores rows with a NULL source (NULLs are distinct in Postgres), so webhook de-duplication only works with a source. Services default to the tenant's `manual`/`api` source rather than leaving it NULL.
+- **Availability windows cannot cross midnight.** `WEEKLY_WINDOW` needs `endMinute > startMinute` within one local day (CHECK `availability_shape`); a night shift is two windows (e.g. 22:00-24:00 on Monday, 00:00-06:00 on Tuesday). The qualification engine (Task 3) must evaluate the window in its own `timeZone` per local date, including DST days (a 02:30 start that does not exist or occurs twice).

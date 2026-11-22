@@ -1,5 +1,6 @@
 import { withTenant, type TenantTx } from "../../src/server/db";
 import {
+  BRANCH_COORDINATES,
   CERTIFICATIONS,
   JOB_TYPES,
   LEAD_SOURCES,
@@ -171,6 +172,9 @@ export async function seedOperationalData(tenantId: string, tenantSlug: string):
       await tx.operationsSettings.create({ data: { tenantId, enabledChannels: ["IN_APP"] } });
 
       const ids = await createCatalogs(tx, tenantId);
+      for (const [name, [latitude, longitude]] of Object.entries(BRANCH_COORDINATES)) {
+        await tx.orgUnit.updateMany({ where: { type: "BRANCH", name }, data: { latitude, longitude } });
+      }
       const units = new Map((await tx.orgUnit.findMany({ select: { id: true, type: true, parentId: true, timeZone: true } })).map((unit) => [unit.id, unit]));
       const tenantRow = await tx.tenant.findUnique({ where: { id: tenantId }, select: { defaultTimeZone: true } });
       const defaultZone = tenantRow?.defaultTimeZone ?? "America/New_York";
@@ -187,6 +191,9 @@ export async function seedOperationalData(tenantId: string, tenantSlug: string):
         const region = ancestorOfType(units, placeAtUnitId, "REGION");
         const territoryUnit = profile.coversRegion ? (region ?? city) : city;
         if (territoryUnit) await tx.serviceTerritory.create({ data: { tenantId, employeeId, orgUnitId: territoryUnit.id, includeDescendants: true } });
+        for (const category of profile.jobCategories) {
+          await tx.employeeJobPermission.create({ data: { tenantId, employeeId, category, grantedById: verifier.id, reason: "Development seed" } });
+        }
         qualifications += await createQualifications(tx, tenantId, employeeId, verifier.id, profile.qualifications, ids);
         await createAvailability(tx, tenantId, employeeId, profile, timeZoneFor(units, placeAtUnitId, defaultZone));
         technicians += 1;

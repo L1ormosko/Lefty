@@ -55,6 +55,8 @@ export interface TechnicianProfile {
   key: string;
   title: string;
   qualifications: QualificationSpec[];
+  /** Job categories (JobType.category) this technician may take (spec 10.1 job-category permissions). */
+  jobCategories: string[];
   /** ISO weekdays (1 = Monday) worked, 08:00-17:00 unless `hours` is given. */
   weekdays: number[];
   /** `[startMinute, endMinute]` after local midnight. */
@@ -158,6 +160,7 @@ export const LEAD_SOURCES: LeadSourceSpec[] = [
 export const TECHNICIAN_PROFILES: TechnicianProfile[] = [
   {
     key: "senior-hvac",
+    jobCategories: ["installation", "repair", "inspection"],
     title: "Senior HVAC Technician",
     weekdays: [1, 2, 3, 4, 5],
     coversRegion: true,
@@ -172,6 +175,7 @@ export const TECHNICIAN_PROFILES: TechnicianProfile[] = [
   },
   {
     key: "electrician",
+    jobCategories: ["installation", "repair"],
     title: "Journeyman Electrician",
     weekdays: [1, 2, 3, 4, 5],
     qualifications: [
@@ -183,6 +187,7 @@ export const TECHNICIAN_PROFILES: TechnicianProfile[] = [
   },
   {
     key: "junior-generalist",
+    jobCategories: ["repair", "inspection"],
     title: "Service Technician (junior)",
     weekdays: [1, 2, 3],
     hours: [600, 1080],
@@ -195,6 +200,7 @@ export const TECHNICIAN_PROFILES: TechnicianProfile[] = [
   },
   {
     key: "plumber-expired-license",
+    jobCategories: ["repair"],
     title: "Plumbing and Electrical Technician",
     weekdays: [2, 3, 4, 5, 6],
     timeOff: { startsInDays: 7, days: 5, note: "Vacation" },
@@ -205,3 +211,16 @@ export const TECHNICIAN_PROFILES: TechnicianProfile[] = [
     ],
   },
 ];
+
+/** Branch coordinates (fictional street addresses near each city centre), the origin of straight-line distance estimates. */
+export const BRANCH_COORDINATES: Record<string, [number, number]> = {
+  "Dallas Central": [32.7791, -96.8003],
+  "Fort Worth Stockyards": [32.7896, -97.3478],
+  "Houston Downtown": [29.7604, -95.3698],
+  "Miami Brickell": [25.7617, -80.1918],
+  "Los Angeles Westside": [34.0522, -118.4437],
+  "San Diego Gaslamp": [32.7113, -117.1593],
+  "Austin Downtown": [30.2672, -97.7431],
+  "Orlando Downtown": [28.5383, -81.3792],
+  "San Jose Downtown": [37.3382, -121.8863],
+};

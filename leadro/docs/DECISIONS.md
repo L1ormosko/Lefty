@@ -527,3 +527,14 @@ technician app). Model guide, diagram and index table: `docs/ERD.md` "Phase 2". 
   EPA certificate and short hours, plumber with an EXPIRED license and upcoming time off), and the seeded `technician`
   login gets the senior HVAC profile. Territories cover the technician's city (senior: the whole region); availability is
   weekly windows in the branch time zone. No customers, leads or jobs.
+
+
+### Phase 2 Task 1, fix round 1
+Migration `20261122140000_phase2_schema_fixes` (the first migration was already applied to the shared test DB, so it is untouched). Full description in `docs/ERD.md` "Phase 2 fix round 1".
+- **Job-category permissions**: chose a separate table `EmployeeJobPermission` (job type XOR category, time-bounded, granted by a user) over a `JOB_CATEGORY` qualification kind: it is an authorization decision with its own validity and grantor, not a credential with a number/issuer/verification, and keeping it out of `EmployeeQualification` leaves that table's kind/target CHECKs simple. `TRAINING` added to `QualificationKind` (backed by a `Certification` of type TRAINING).
+- **Distance origins**: `OrgUnit.latitude/longitude` and `Employee.startLatitude/startLongitude`, validated `Decimal(9,6)`. The existing untyped `OrgUnit.address` JSON stays for display only. Straight-line estimates need origin + `CustomerAddress` coordinates; absent coordinates = "distance unknown".
+- **Customer preference** is `CustomerPreferredEmployee` (PREFERRED | AVOID, composite FKs) instead of an id inside `contactPreferences` JSON.
+- **Stricter composite FKs**: assignment recommendation must belong to the same job; a job's lead must belong to the job's customer (so conversion links the lead to its customer first); `OperationsSettings.updatedById` is an FK; qualification kind is bound to `Certification.type` by a composite FK to `Certification (id, type, tenantId)` (replaces the former service-only check).
+- **Technician write limits** are now defined: `LEAD_STATUS_FIELDS`, `JOB_EXECUTION_FIELDS`, the `*_WRITE_ALLOWLISTS` maps and `assertWritableFields` / `writableFields` in `authz/writable-fields.ts` (field maps classify reads; allowlists define the narrow write sets). Tests in `tests/authz/writable-fields.test.ts`. Tasks 5/6 must call `assertWritableFields` for every lead/job update.
+- **JSON / polymorphic reference contract** (ids only, tenant-scoped resolution plus authz re-check, never copy names/PII): in ERD. Also documented: intake must always set `sourceId`; availability windows cannot cross midnight (split night shifts, evaluate per local date incl. DST).
+- Seed: branch coordinates and per-technician job-category permissions added (`seedOperationalData`).
