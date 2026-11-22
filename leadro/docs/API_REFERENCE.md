@@ -1460,3 +1460,190 @@ nothing. A grant qualified by a record set covers only customers of the set: `jo
 - **Auth**: session. **Permission**: `customers.manage` with a TENANT scope (`403` otherwise).
 - **Request body** (strict): `phone`, `email`, `address`, `name`, all booleans, all required.
 - **Response**: `200 { data: { matchers, isDefault: false } }`. **Audit**: `customer.duplicate_matchers_update`.
+
+## Leads (`/api/v1/leads`) - Phase 2
+
+Code: `src/server/leads` (README there), routes `src/app/api/v1/leads/**`, status machine `src/lib/lead-lifecycle.ts`.
+Design decisions: `DECISIONS.md` "Phase 2 Task 5".
+
+Lead fields (all `base`; leads have no sensitive set): `id, number, status, statusChangedAt, priority (LOW | NORMAL | HIGH |
+URGENT), sourceId, campaign, externalId, customerId, contactName, contactPhone, contactPhoneE164, contactEmail,
+customerAddressId, addressLine1, addressLine2, addressCity, addressRegion, addressPostalCode, addressNormalizedKey, jobTypeId,
+serviceCategory, requestedWork, preferredWindowStart, preferredWindowEnd, preferredTimeNote, notes, quotedAmountMinor (integer
+minor units), currency, orgUnitId, nextFollowUpAt, duplicateOfLeadId, closedReason, archivedAt, createdById, createdAt,
+updatedAt`, plus `assignedEmployeeId` (the current owner: the ACTIVE assignment) and, on a single lead, `nextStatuses` (what the
+status action accepts now).
+
+Statuses (§6.3): `NEW, UNASSIGNED, ASSIGNED, CONTACT_ATTEMPTED, CONTACTED, QUALIFIED, SCHEDULED, DISPATCHED, CONVERTED, LOST,
+DUPLICATE, CANCELLED`. Default path NEW -> ASSIGNED -> CONTACT_ATTEMPTED -> CONTACTED -> QUALIFIED -> SCHEDULED -> DISPATCHED ->
+CONVERTED; LOST / DUPLICATE / CANCELLED close a lead (LOST and DUPLICATE can be reopened to UNASSIGNED, CONVERTED and CANCELLED are
+final). A tenant can switch off optional transitions (`OperationsSettings.disabledLeadTransitions`), never add any. Every change
+writes a history row (previous, new, who, when, reason).
+
+Data scope: `ORG_UNIT` / `LEGAL_ENTITY` follow `orgUnitId` (a lead without a unit is tenant-level); `ASSIGNED` means the caller is the
+lead's current owner; `OWN` matches nothing. A grant qualified by the record set `dispatch_related` (Dispatcher) covers only leads
+that reached dispatch (`QUALIFIED, SCHEDULED, DISPATCHED, CONVERTED`). Outside the scope a lead is `404`, never `403`.
+
+### GET /api/v1/leads
+
+- **Purpose**: list leads, newest first (then id).
+- **Auth**: session. **Permission**: `leads.view`, capability; scope in the query; each row projected with its grants' field sets.
+- **Request query**: `cursor`, `limit`; `q` 1-100 (contact name or email substring, partial phone digits, or `#number`); `status`;
+  `priority`; `sourceId`; `orgUnitId`; `customerId`; `assigned` `true` | `false` (has an owner); `assigneeEmployeeId` (an id or `me`);
+  `followUpDue` `true` (follow-up date passed, lead still open); `archived` `exclude` (default) | `include` | `only`.
+- **Response**: `200 { data: [lead], page }`. **Errors**: `400` bad query. **Audit**: none.
+
+### POST /api/v1/leads
+
+- **Purpose**: lead intake (manual entry, API, webhook, import). Creates a `NEW` lead and flags possible duplicates (never blocks,
+  never merges). Lead Operations of the unit are notified (`lead.needs_owner`).
+- **Auth**: session. **Permission**: `leads.create` over `orgUnitId` (no unit = tenant-level lead: a tenant-wide grant is required,
+  else `403`; a unit outside the caller's scope is `404`).
+- **Request body** (strict): `contactName`, `contactPhone`, `contactEmail` (at least one of these or `customerId`), address as
+  received (`addressLine1`, `addressLine2`, `addressCity`, `addressRegion`, `addressPostalCode`; may be incomplete), `priority`
+  (default `NORMAL`), `campaign`, `serviceCategory`, `requestedWork`, `jobTypeId`, `preferredWindowStart/End`, `preferredTimeNote`,
+  `notes`, `quotedAmountMinor`, `currency` (default `USD`), `orgUnitId`, `nextFollowUpAt`; `sourceId` or `sourceCode` (not both),
+  `externalId` (needs a source); `customerId` and `customerAddressId` for a known customer.
+- **Idempotency**: supported (`Idempotency-Key`), and `(source, externalId)` is idempotent too: a repeat answers `200` with the lead
+  that already exists (`409` when the caller may not see it).
+- **Response**: `201 { data: lead + possibleDuplicates: [{ flagId, kind: LEAD_LEAD | LEAD_CUSTOMER, otherId, matchedOn }] }`; only
+  duplicates whose other side the caller may view are listed.
+- **Errors**: `400` (unknown source or job type, address of another customer); `403`; `404`; `409 INVALID_STATE_TRANSITION` archived
+  customer or unit.
+- **Audit**: `lead.create`; `lead.duplicate_flag` per new flag.
+
+### GET /api/v1/leads/{id}
+
+- **Purpose**: one lead with its owner and `nextStatuses`. **Permission**: `leads.view` over the lead. **Response**: `200 { data: lead }`.
+  **Errors**: `404`. **Audit**: none.
+
+### PATCH /api/v1/leads/{id}
+
+- **Purpose**: partial update of the lead's content (strict, at least one key; same fields and formats as intake minus source, external
+  id, customer link and status).
+- **Permission**: `leads.edit` over the lead AND every changed field inside the grant (`assertWritableFields`): a Technician's
+  status-only grant changes none of these (`403`). Moving `orgUnitId` needs the permission over the destination too.
+- **Response**: `200 { data: lead + possibleDuplicates }` (duplicates re-checked when contact or address changed).
+  **Errors**: `400`; `403`; `404`; `409 INVALID_STATE_TRANSITION` closed or archived lead. **Audit**: `lead.update` (changed fields).
+
+### POST /api/v1/leads/{id}/status
+
+- **Purpose**: a validated status change. **Permission**: `leads.edit` over the lead; the grant must allow `status` (and `closedReason`
+  when `reason` is sent, `duplicateOfLeadId` for DUPLICATE: a Technician's grant allows `status` and `closedReason` only).
+- **Request body** (strict): `status` (required), `reason` 1-500 (required for `LOST` and `CANCELLED`), `duplicateOfLeadId` (required
+  for `DUPLICATE`, a lead the caller may view). `ASSIGNED` (use assign), `CONVERTED` (use convert) and `UNASSIGNED` while someone owns
+  the lead (use unassign) are refused with `400 field: "status"`.
+- **Response**: `200 { data: lead }`. **Errors**: `400`; `403`; `404`; `409 INVALID_STATE_TRANSITION` (not allowed from the current
+  status, or archived); `409 CONFLICT` changed concurrently. **Audit**: `lead.status_change` (+ a `LeadStatusHistory` row). Closing a
+  lead ends the owner's assignment.
+
+### GET /api/v1/leads/{id}/history
+
+- **Purpose**: the status history, oldest first. **Permission**: `leads.view`.
+- **Response**: `200 { data: [{ id, fromStatus, toStatus, actorType, actorUserId, reason, occurredAt }] }` (the first row has `fromStatus` null).
+
+### POST /api/v1/leads/{id}/assign
+
+- **Purpose**: give the lead to an employee (first assignment or reassignment). A `NEW` / `UNASSIGNED` lead becomes `ASSIGNED`; the new
+  owner is notified (`lead.assigned`).
+- **Permission**: `leads.assign` over the lead.
+- **Request body** (strict): `employeeId` (required); `reason` 1-500 (required when replacing an owner or confirming a conflict);
+  `confirmOpenContactAttempt` (default false); `confirmOutsideServiceArea` (default false).
+- **Rules (§25.1)**: the employee must be ACTIVE (not on leave / terminated) with a current placement and an active login, and must be
+  able to view the lead once assigned (else `400 field: "employeeId"`). When ANOTHER employee has an open contact attempt on the lead
+  the call is `409 CONFLICT field: "confirmOpenContactAttempt"` until repeated with `confirmOpenContactAttempt: true` and a `reason`; the
+  confirmation is stored on the assignment (`conflictConfirmed`) and the other person's open attempts are closed (their record stays).
+  An employee whose placements are not in the lead's unit, above it or below it gets `400 field: "confirmOutsideServiceArea"` until
+  confirmed with a reason.
+- **Response**: `200 { data: lead }`. **Errors**: `400`; `403`; `404`; `409` (above, already assigned to this employee, closed or archived
+  lead, concurrent change). **Audit**: `lead.assign` (previous and new owner, conflict flags, closed attempt ids, reason).
+
+### POST /api/v1/leads/{id}/unassign
+
+- **Purpose**: release the owner; the lead goes back to `UNASSIGNED`. **Permission**: `leads.assign`.
+- **Request body** (strict): `reason` 1-500 (required), `confirmOpenContactAttempt` (needed when any contact attempt is open).
+- **Response**: `200 { data: lead }`. **Errors**: `403`; `404`; `409` (no owner to release, open attempt unconfirmed). **Audit**: `lead.unassign`.
+
+### GET /api/v1/leads/{id}/interactions
+
+- **Purpose**: contact attempts, notes, customer messages and follow-ups, newest first. **Permission**: `leads.view`.
+- **Request query**: `cursor`, `limit`, `kind`. **Response**: `200 { data: [{ id, leadId, kind, direction, channel, outcome, body, occurredAt,
+  closedAt, durationSeconds, followUpAt, authorId, createdAt }], page }`.
+
+### POST /api/v1/leads/{id}/interactions
+
+- **Purpose**: record an interaction. A contact attempt without `outcome` is OPEN (in progress, §25.1) for the tenant's
+  `contactAttemptOpenMinutes` (default 30) or until closed; with an outcome it is already finished. A contact attempt moves an
+  `ASSIGNED` lead to `CONTACT_ATTEMPTED` (and to `CONTACTED` when `REACHED`).
+- **Permission**: `leads.edit` over the lead with a grant that may write the base set (a status-only grant cannot log contact: `403`).
+- **Request body** (strict): `kind` `CONTACT_ATTEMPT | NOTE | CUSTOMER_MESSAGE | FOLLOW_UP` (required); `channel` (required for an
+  attempt); `outcome` (attempts only); `body` (required for a note); `direction`; `occurredAt` (not in the future); `durationSeconds`;
+  `followUpAt` (required for FOLLOW_UP; sets `nextFollowUpAt`). A `REACHED` / `DECLINED` / `WRONG_NUMBER` outcome clears the follow-up date.
+- **Idempotency**: supported. **Response**: `201 { data: interaction }`. **Errors**: `400`; `403`; `404`; `409` archived lead, or a closed lead
+  for attempts and follow-ups. **Audit**: `lead.interaction_create` (no body text).
+
+### POST /api/v1/leads/{id}/interactions/{interactionId}/close
+
+- **Purpose**: finish an open contact attempt. **Permission**: `leads.edit` (base set).
+- **Request body** (strict): `outcome` (required), `durationSeconds`, `body`, `followUpAt`. **Response**: `200 { data: interaction }`.
+  **Errors**: `404`; `409 INVALID_STATE_TRANSITION` not an attempt or already closed. **Audit**: `lead.interaction_close`.
+
+### POST /api/v1/leads/{id}/link-customer
+
+- **Purpose**: attach the lead to an existing customer and optionally one of its addresses; an OPEN lead-customer duplicate flag of the pair
+  becomes `CONFIRMED_DUPLICATE`. **Permission**: `leads.edit` (base set) and `customers.view` over the customer.
+- **Request body** (strict): `customerId` (required), `customerAddressId`. **Response**: `200 { data: lead }`. **Errors**: `400`; `404`;
+  `409` archived customer, closed or archived lead. **Audit**: `lead.link_customer`.
+
+### POST /api/v1/leads/{id}/convert
+
+- **Purpose**: create the job and mark the lead `CONVERTED` in one transaction (the lead's owner assignment ends).
+- **Permission**: `leads.view` over the lead AND `jobs.create` over its service area (`403` without it: Lead Operations hands over; Dispatcher
+  and unit managers convert). Allowed from `QUALIFIED`, `SCHEDULED`, `DISPATCHED`.
+- **Request body** (strict, all optional; omitted values come from the lead): `customerId`, `serviceAddressId`, `jobTypeId`, `description`,
+  `priority`, `appointmentWindowStart` + `appointmentWindowEnd` (together).
+- **Idempotency**: supported; converting an already converted lead returns its job (`replayed: true`).
+- **Response**: `200 { data: { leadId, status: "CONVERTED", job: { id, number }, replayed } }`. **Errors**: `400` (customer, service address or
+  job type missing, unknown job type); `403`; `404`; `409` (archived customer, status not convertible, archived lead). **Audit**: `lead.convert`,
+  `lead.status_change`.
+
+### POST /api/v1/leads/{id}/archive
+
+- **Purpose**: soft remove (body optional `{ reason? }`); ends the owner's assignment. **Permission**: `leads.archive`. **Response**: `200`.
+  **Errors**: `404`; `409` already archived. **Audit**: `lead.archive`.
+
+### POST /api/v1/leads/{id}/restore
+
+- **Purpose**: bring an archived lead back (assign it again). **Permission**: `leads.archive`. **Response**: `200`. **Errors**: `404`; `409` not
+  archived. **Audit**: `lead.restore`.
+
+### GET /api/v1/leads/duplicates
+
+- **Purpose**: the lead duplicate review queue, newest detection first. **Permission**: `leads.view`; a flag is listed only when the caller may
+  view the lead AND its other side (the other lead, or the customer).
+- **Request query**: `cursor`, `limit`, `status` `OPEN` (default) | `NOT_DUPLICATE` | `CONFIRMED_DUPLICATE`, `leadId`.
+- **Response**: `200 { data: [{ id, kind, leadId, otherLeadId, customerId, matchedOn, reason, status, detectedAt, resolvedAt, resolvedById,
+  resolutionNote }], page }`. For `LEAD_LEAD` the two ids are in sorted order; for `LEAD_CUSTOMER` `leadId` is the lead.
+
+### POST /api/v1/leads/duplicates/{flagId}/resolve
+
+- **Purpose**: record a human decision (never merges): `NOT_DUPLICATE` keeps the pair from being flagged again, `CONFIRMED_DUPLICATE` records
+  that they are the same party (move the lead to `DUPLICATE` with the status action, or link it to the customer). A decision can be changed;
+  repeating it is `409`. **Permission**: `leads.edit` over the lead(s) and `customers.view` over the customer.
+- **Request body** (strict): `resolution` (required), `note` 1-500. **Response**: `200 { data: flag }`. **Errors**: `403`; `404`; `409`.
+  **Audit**: `lead.duplicate_resolve`.
+
+### GET /api/v1/leads/sources
+
+- **Purpose**: the lead sources (`{ id, code, name, type, active, createdAt, updatedAt }`), by name. **Permission**: `leads.view`.
+
+### POST /api/v1/leads/sources
+
+- **Purpose**: add a source. **Permission**: `leads.manage` with a TENANT scope (`403` otherwise).
+- **Request body** (strict): `code` (lower-case `[a-z0-9][a-z0-9_-]*`, unique per tenant), `name`, `type` (`MANUAL | PHONE | WEBSITE |
+  MARKETING_CAMPAIGN | EXTERNAL_CRM | API | IMPORT | INTEGRATION`). **Response**: `201`. **Errors**: `409` code in use. **Audit**: `lead_source.create`.
+
+### PATCH /api/v1/leads/sources/{sourceId}
+
+- **Purpose**: rename or switch a source on or off (sources are never deleted). **Permission**: `leads.manage` with a TENANT scope.
+- **Request body** (strict): `name`, `active`. **Response**: `200`. **Errors**: `404`. **Audit**: `lead_source.update`.
