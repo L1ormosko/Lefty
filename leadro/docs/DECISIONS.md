@@ -417,3 +417,12 @@ No new dependencies (Zod already present). No schema change and no migration: ev
 - Subscription/module status and branch service categories have no data model: the screens say so instead of showing invented data (§28.3).
 - Pickers load at most 200 entries (employees, users, units x5 pages); larger tenants need a searchable picker later.
 - Invitation resend = a new invitation (the service revokes the earlier link); there is no separate revoke service.
+
+## Task E2E: browser smoke tests
+- New devDependency `@playwright/test` pinned to exactly 1.55.1 (same version as the root VELTO app). It turns the earlier one-off manual smoke test into `npm run test:e2e`. No browser download: the suite launches the container's Chromium (`/opt/pw-browsers/chromium`) because the pinned build would look for a different revision.
+- The suite builds and starts the production server (`next build` + `next start`) rather than `next dev`, so it exercises what ships (secure cookies, server actions, headers). Cost: about one minute per run.
+- Isolation: the database name must end in `_test`; a globalSetup creates two fresh tenants with random company codes, so reruns and parallel agents never collide. Tenants are not deleted afterwards because deleting a tenant cascades into the append-only audit table, which its trigger rejects (untested assumption: deletion was not attempted); they are test-database litter only.
+- Secrets: password, TOTP seed and `LEADRO_ENCRYPTION_KEY` are generated per run and passed through environment variables only. Traces default to off because a trace can capture typed passwords.
+- The seed re-uses `prisma/seed/seed-tenant.ts` and enrols the CEO in MFA by writing the encrypted seed directly (`@/server/auth/secret-box`, a deep import because `encryptSecret` is not exported from the auth index; test tooling only). Specs derive codes with the app's own `@/lib/totp`.
+- UI text is looked up from the i18n catalogs (`e2e/helpers.ts: text`), never hard-coded; the one exception is Next's built-in "This page could not be found." for the 404 check.
+- Finding: the brief expected a Technician visiting `/admin/employees` to be refused. By design (SPEC 4.5, the navigation comment) a Technician has `employees.view` over their OWN record, so the page renders with only their own row and no "add" action. The spec asserts that behaviour; access-denied is asserted for company, users, roles and localization.
