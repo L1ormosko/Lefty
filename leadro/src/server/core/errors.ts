@@ -12,6 +12,8 @@ export const ERROR_CODES = [
   "CONFLICT",
   "INVALID_STATE_TRANSITION",
   "RATE_LIMITED",
+  "UNSUPPORTED_MEDIA_TYPE",
+  "PAYLOAD_TOO_LARGE",
   "INTERNAL",
 ] as const;
 
@@ -26,6 +28,8 @@ export const HTTP_STATUS_BY_CODE: Record<ErrorCode, number> = {
   CONFLICT: 409,
   INVALID_STATE_TRANSITION: 409,
   RATE_LIMITED: 429,
+  UNSUPPORTED_MEDIA_TYPE: 415,
+  PAYLOAD_TOO_LARGE: 413,
   INTERNAL: 500,
 };
 
@@ -115,6 +119,20 @@ export class RateLimitedError extends AppError {
   constructor(options: AppErrorOptions & { retryAfterSeconds?: number } = {}) {
     super("RATE_LIMITED", "Too many requests. Please retry later.", { retryable: true, ...options });
     this.retryAfterSeconds = options.retryAfterSeconds;
+  }
+}
+
+/** The request body is not `application/json` (the JSON-only CSRF layer). */
+export class UnsupportedMediaTypeError extends AppError {
+  constructor(options?: AppErrorOptions) {
+    super("UNSUPPORTED_MEDIA_TYPE", "The request body must be application/json.", options);
+  }
+}
+
+/** The request body is larger than the accepted maximum (see MAX_JSON_BODY_BYTES). */
+export class PayloadTooLargeError extends AppError {
+  constructor(options?: AppErrorOptions) {
+    super("PAYLOAD_TOO_LARGE", "The request body is too large.", options);
   }
 }
 

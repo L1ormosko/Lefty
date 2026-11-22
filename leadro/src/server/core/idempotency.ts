@@ -13,8 +13,10 @@ export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const IDEMPOTENCY_IN_FLIGHT_MS = 2 * 60 * 1000;
 export const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
 
-/** What identifies "the same request": method + path + body. */
+/** What identifies "the same request": who sent it + method + path + body. */
 export interface IdempotencyScope {
+  /** Keys are private to the user who sent them: another user reusing a key never sees this response. */
+  actorUserId: string;
   method: string;
   path: string;
   body: unknown;
@@ -45,7 +47,7 @@ function canonicalJson(value: unknown): string {
 
 export function hashIdempotentRequest(scope: IdempotencyScope): string {
   return createHash("sha256")
-    .update(canonicalJson({ method: scope.method.toUpperCase(), path: scope.path, body: scope.body }))
+    .update(canonicalJson({ actorUserId: scope.actorUserId, method: scope.method.toUpperCase(), path: scope.path, body: scope.body }))
     .digest("hex");
 }
 
@@ -54,7 +56,7 @@ type ClaimResult =
   | { kind: "replay"; response: IdempotentResponse };
 
 /**
- * Runs `fn` at most once per (tenant, key) within 24 h and replays its stored response to
+ * Runs `fn` at most once per (tenant, user, key) within 24 h and replays its stored response to
  * duplicates (§20.3).
  *
  * - Same key, same request, finished  -> stored status/body returned, `fn` NOT run.
@@ -79,8 +81,11 @@ export async function withIdempotency(
     });
   }
   const requestHash = hashIdempotentRequest(scope);
+  // The table is unique per (tenant, key); prefixing the user id makes it unique per (tenant, user, key)
+  // without a schema change. The prefixed value is storage-only; the client's key is never altered.
+  const storedKey = `${scope.actorUserId}:${key}`;
 
-  const claim = await claimKey(tenantId, key, scope, requestHash);
+  const claim = await claimKey(tenantId, storedKey, scope, requestHash);
   if (claim.kind === "replay") return { ...claim.response, replayed: true };
 
   let response: IdempotentResponse;

@@ -7,7 +7,7 @@ let tenantA: { id: string };
 let tenantB: { id: string };
 let counter = 0;
 const uniqueKey = () => `key-${Date.now().toString(36)}-${++counter}`;
-const scope = (body: unknown = { amount: 1 }) => ({ method: "POST", path: "/api/v1/jobs", body });
+const scope = (body: unknown = { amount: 1 }, actorUserId = "user-1") => ({ actorUserId, method: "POST", path: "/api/v1/jobs", body });
 
 beforeAll(async () => {
   tenantA = await createTenant("idem-a");
@@ -16,11 +16,11 @@ beforeAll(async () => {
 
 describe("hashIdempotentRequest", () => {
   it("ignores key order and method case but not content", () => {
-    const a = hashIdempotentRequest({ method: "post", path: "/p", body: { x: 1, y: { b: 2, a: 1 } } });
-    const b = hashIdempotentRequest({ method: "POST", path: "/p", body: { y: { a: 1, b: 2 }, x: 1 } });
+    const a = hashIdempotentRequest({ actorUserId: "u", method: "post", path: "/p", body: { x: 1, y: { b: 2, a: 1 } } });
+    const b = hashIdempotentRequest({ actorUserId: "u", method: "POST", path: "/p", body: { y: { a: 1, b: 2 }, x: 1 } });
     expect(a).toBe(b);
-    expect(hashIdempotentRequest({ method: "POST", path: "/p", body: { x: 2 } })).not.toBe(a);
-    expect(hashIdempotentRequest({ method: "POST", path: "/other", body: { x: 1 } })).not.toBe(a);
+    expect(hashIdempotentRequest({ actorUserId: "u", method: "POST", path: "/p", body: { x: 2 } })).not.toBe(a);
+    expect(hashIdempotentRequest({ actorUserId: "u", method: "POST", path: "/other", body: { x: 1 } })).not.toBe(a);
   });
 });
 
@@ -97,13 +97,26 @@ describe("withIdempotency", () => {
     expect(b.replayed).toBe(false);
   });
 
+  it("keeps keys separate per user: a second user with the same key and body gets their own run", async () => {
+    const key = uniqueKey();
+    let runs = 0;
+    const fn = async () => ({ status: 200, body: { run: ++runs } });
+    const first = await withIdempotency(tenantA.id, key, scope({ amount: 1 }, "user-1"), fn);
+    const other = await withIdempotency(tenantA.id, key, scope({ amount: 1 }, "user-2"), fn);
+    const again = await withIdempotency(tenantA.id, key, scope({ amount: 1 }, "user-1"), fn);
+    expect(other.replayed).toBe(false);
+    expect(other.body).toEqual({ run: 2 });
+    expect(again.replayed).toBe(true);
+    expect(again.body).toEqual(first.body);
+  });
+
   it("allows a key to be reused after its record expired", async () => {
     const key = uniqueKey();
     let runs = 0;
     const fn = async () => ({ status: 200, body: { run: ++runs } });
     await withIdempotency(tenantA.id, key, scope(), fn);
     await withTenant(tenantA.id, (tx) =>
-      tx.idempotencyRecord.updateMany({ where: { key }, data: { expiresAt: new Date(Date.now() - 1000) } }),
+      tx.idempotencyRecord.updateMany({ where: { key: { endsWith: key } }, data: { expiresAt: new Date(Date.now() - 1000) } }),
     );
     const again = await withIdempotency(tenantA.id, key, scope(), fn);
     expect(again).toMatchObject({ body: { run: 2 }, replayed: false });
@@ -135,7 +148,7 @@ describe("withIdempotency", () => {
   it("does not fail a successful request whose claim was taken over meanwhile", async () => {
     const key = uniqueKey();
     const outcome = await withIdempotency(tenantA.id, key, scope(), async () => {
-      await withTenant(tenantA.id, (tx) => tx.idempotencyRecord.deleteMany({ where: { key } }));
+      await withTenant(tenantA.id, (tx) => tx.idempotencyRecord.deleteMany({ where: { key: { endsWith: key } } }));
       return { status: 200, body: { ok: true } };
     });
     expect(outcome).toEqual({ status: 200, body: { ok: true }, replayed: false });

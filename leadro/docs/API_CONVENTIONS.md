@@ -63,6 +63,8 @@ the code, so a new code must be added in both places.
 | 404 | `NOT_FOUND` | false | missing **or out of scope** (existence not leaked) |
 | 409 | `CONFLICT` | false | uniqueness conflict, concurrent change, same `Idempotency-Key` with a different request, or an in-flight duplicate (retryable) |
 | 409 | `INVALID_STATE_TRANSITION` | false | the resource's current status does not allow this change (archived unit, terminated employee, ...) |
+| 413 | `PAYLOAD_TOO_LARGE` | false | request body over 1 MB (`MAX_JSON_BODY_BYTES`) |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | false | a mutating request with a body that is not `application/json` |
 | 429 | `RATE_LIMITED` | true | honour `Retry-After` |
 | 500 | `INTERNAL` | true | generic; details only in logs |
 
@@ -77,8 +79,8 @@ wrong password and a locked account, to avoid account enumeration.
 ## Idempotency (spec 20.3)
 
 Mutations that may be retried (job creation, financial transactions, invitations, imports) accept
-`Idempotency-Key: <opaque, <=128 chars>`. Stored per tenant in `IdempotencyRecord` with a hash of
-method + path + body. Same key + same hash replays the stored response (status and body, header
+`Idempotency-Key: <opaque, <=128 chars>`. Stored per tenant and user (another user's identical key never sees your response) in
+`IdempotencyRecord` with a hash of user + method + path + body. Same key + same hash replays the stored response (status and body, header
 `Idempotent-Replayed: true`); same key + different hash -> `409 CONFLICT`; an
 in-flight duplicate -> `409 CONFLICT` retryable. Records expire after 24 h.
 
@@ -95,7 +97,8 @@ serialisation.
 
 Opaque session token in the `leadro_session` `HttpOnly; Secure; SameSite=Lax` cookie (the only
 transport implemented; a bearer header for non-browser clients is not built yet). Tokens are
-`<tenantId>.<random>`; only the SHA-256 is stored. CSRF defence: SameSite=Lax plus JSON-only bodies.
+`<tenantId>.<random>`; only the SHA-256 is stored. CSRF defence: SameSite=Lax plus JSON-only bodies: a mutating request with a body must be
+`application/json` (else `415`), and bodies are capped at 1 MB (else `413`).
 Login body: `{ tenantSlug, email, password }` (`tenantSlug` is the company code).
 
 ## Localization

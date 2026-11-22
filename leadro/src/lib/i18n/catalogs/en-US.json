@@ -47,6 +47,8 @@
     "ERROR.CONFLICT": "This item was changed by someone else. Reload and try again.",
     "ERROR.INVALID_STATE_TRANSITION": "This action is not allowed in the current status.",
     "ERROR.RATE_LIMITED": "Too many requests. Please wait a moment and try again.",
+    "ERROR.UNSUPPORTED_MEDIA_TYPE": "The request format is not supported.",
+    "ERROR.PAYLOAD_TOO_LARGE": "The request is too large.",
     "ERROR.INTERNAL": "Something went wrong on our side. Please try again.",
     "VALIDATION.REQUIRED_FIELD": "{field} is required.",
     "JOB_STATUS.COMPLETED": "Completed",

@@ -5,6 +5,7 @@ import { CORRELATION_HEADER, resolveCorrelationId } from "./correlation";
 import { toErrorResponse, zodIssuesToFieldIssues } from "./error-mapping";
 import { InternalError, UnauthenticatedError, ValidationError } from "./errors";
 import { withIdempotency } from "./idempotency";
+import { assertJsonContentType, readJsonBody } from "./request-body";
 
 export const IDEMPOTENCY_HEADER = "idempotency-key";
 export const CLIENT_APP_HEADER = "x-leadro-client";
@@ -105,17 +106,6 @@ function buildResponse(result: RouteResult, correlationId: string, extraHeaders?
   return Response.json(result.body, { status: result.status, headers });
 }
 
-async function readJsonBody(req: Request): Promise<unknown> {
-  if (req.method === "GET" || req.method === "HEAD") return undefined;
-  const text = await req.text();
-  if (text.trim() === "") return undefined;
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new ValidationError({ message: "The request body is not valid JSON.", field: "body" });
-  }
-}
-
 function parseWith(schema: ZodTypeAny | undefined, value: unknown, source: string): unknown {
   if (!schema) return undefined;
   const result = schema.safeParse(value);
@@ -146,7 +136,7 @@ async function parseInput<S extends RouteSchemas>(
 /**
  * Builds a Next.js route handler for `/api/v1`. The fixed pipeline (§20.1) is:
  *
- *   correlation id -> authenticate hook -> Zod parse -> authorize hook -> handler -> error mapping
+ *   correlation id -> authenticate hook -> JSON content type -> Zod parse -> authorize hook -> handler -> error mapping
  *
  * Authentication runs before parsing so unauthenticated callers learn nothing about the input
  * contract. Every response, success or error, carries `x-correlation-id`. Any thrown value is
@@ -175,6 +165,8 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
       if (definition.authenticate && !actor) throw new UnauthenticatedError();
       if (actor) log = log.child({ tenantId: actor.tenantId, userId: actor.userId });
 
+      // After authentication, so anonymous callers learn nothing about the contract; before parsing.
+      assertJsonContentType(req);
       const input = await parseInput(definition.schemas, req, routeContext);
       const ctx: RequestContext = { correlationId, actor, sourceApp };
       if (actor && definition.authorize) await definition.authorize(actor, input, ctx);
@@ -189,7 +181,7 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
         const outcome = await withIdempotency(
           actor.tenantId,
           idempotencyKey,
-          { method: req.method, path: new URL(req.url).pathname, body: input.body },
+          { actorUserId: actor.userId, method: req.method, path: new URL(req.url).pathname, body: input.body },
           run,
         );
         response = buildResponse(outcome, correlationId, outcome.replayed ? { "Idempotent-Replayed": "true" } : undefined);
