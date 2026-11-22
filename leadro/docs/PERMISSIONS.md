@@ -291,3 +291,20 @@ Code: `src/server/customers/customer-access.ts` and `assignment-access.ts`.
 - **Denials** on a customer are 404 (never 403) once a record is involved; creating without a tenant-wide grant and no unit is 403.
 - **Duplicates**: flags are created from the whole tenant but shown/resolved only when the caller may view/edit BOTH customers;
   `customers.manage` (tenant-wide) configures the matchers.
+
+## 9. Jobs: how scopes, sets and fields apply (Phase 2 Task 6)
+
+Code: `src/server/jobs/job-access.ts`, `assignment.ts`, `status.ts`; decisions in `DECISIONS.md` "Phase 2 Task 6".
+
+- **ORG_UNIT / LEGAL_ENTITY**: the job's service-area unit `Job.orgUnitId`. **ASSIGNED**: an ACTIVE `JobAssignment` to the caller, or to a team
+  the caller currently belongs to (team expansion); assignments end at CLOSED / CANCELLED / unassign. **OWN** matches nothing. Record-set
+  grants (`recovery_related`, `customer_history`) do not apply to the jobs endpoints; `customer_history` is passed only by the customer
+  history view. Denials on a job are 404.
+- **Fields**: money (`quotedAmountMinor`, `currency`) is the opt-in `financial` set. Writes check every field SENT with
+  `assertWritableFields` and `JOB_WRITE_ALLOWLISTS`: the Technician's `jobs.edit {fields:"execution"}` covers `status`, `statusReason`,
+  `instructions` only (and, in Phase 2, only a move to EN_ROUTE). Trails (history, events, assignments) need the base field set.
+- **Operations**: create `jobs.create` (unit-level; tenant-wide for a customer with no unit); edit / transition / reschedule `jobs.edit`;
+  assign, reassign, unassign `jobs.assign`; closing a job that was AWAITING_REVIEW `jobs.approve`, reopening it `jobs.reject`;
+  workflow switches `job_types.configure` (tenant-wide).
+- **Assignment override** (assigning an employee who fails hard eligibility): `jobs.approve` over the job plus a reason. Default holders: Owner/CEO
+  and COO. The Dispatcher template does not hold it on purpose; a tenant may grant it to a custom role. Employment failures cannot be overridden.

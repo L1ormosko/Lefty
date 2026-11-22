@@ -14,6 +14,7 @@ export const NOTIFICATION_EVENTS = {
   "lead.needs_owner": { templateKey: "NOTIFICATION.LEAD_NEEDS_OWNER", critical: false, targetType: "lead", params: ["leadNumber"] },
   "lead.follow_up_due": { templateKey: "NOTIFICATION.LEAD_FOLLOW_UP_DUE", critical: false, targetType: "lead", params: ["leadNumber"] },
   "job.assigned": { templateKey: "NOTIFICATION.JOB_ASSIGNED", critical: false, targetType: "job", params: ["jobNumber"] },
+  "job.reassigned": { templateKey: "NOTIFICATION.JOB_REASSIGNED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.rescheduled": { templateKey: "NOTIFICATION.JOB_RESCHEDULED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.cancelled": { templateKey: "NOTIFICATION.JOB_CANCELLED", critical: true, targetType: "job", params: ["jobNumber"] },
   "qualification.expiring": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRING", critical: false, targetType: "employee_qualification", params: ["daysRemaining"] },
