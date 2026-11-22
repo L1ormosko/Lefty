@@ -10,7 +10,8 @@ Public API (`index.ts`):
 - `resolveCorrelationId(headers)`, `CORRELATION_HEADER`.
 - `defineRoute({ schemas, authenticate?, authorize?, idempotent?, handler })` — builds a Next.js
   route handler; `ok / created / noContent / respond` build results.
-- `withIdempotency(tenantId, key, scope, fn)` — run-once-per-key with response replay.
+- `withIdempotency(tenantId, key, scope, fn)` — run-once-per-(tenant, user, key) with response replay; `scope.actorUserId` is required.
+- `assertJsonContentType` / `readJsonBody` (request-body.ts) — mutating bodies must be `application/json` (415), max 1 MB (413).
 - `actorOf(ctx)` — the typed caller inside a handler (no `!`).
 - `pageQuerySchema`, `pageArgs`, `toPage` — cursor pagination for every collection endpoint
   (`?cursor=&limit=`, default 50, max 200; the cursor is the last row's id, validated before it reaches the database).

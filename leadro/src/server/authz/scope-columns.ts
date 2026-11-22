@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { activePlacementWhere } from "./resolve-resource";
+import { activePlacementWhere } from "./time-windows";
 import type { RowScopeAttributes, ScopeColumns } from "./scope-filter";
 
 /**

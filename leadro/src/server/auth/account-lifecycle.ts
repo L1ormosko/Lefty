@@ -10,11 +10,12 @@ import { revokeAllSessionsForUser } from "./session-service";
  * there is no moment where a deactivated user still holds a working session. (Sessions are also
  * re-checked against `User.status` on every request as a second line of defence.)
  *
- * The caller (user administration) must have checked the actor's permission first.
+ * "Unchecked": no permission check happens here. The caller (user administration) must have
+ * checked the actor's permission first; application code uses `users.deactivateUser`.
  *
  * @throws NotFoundError if the user does not exist in the tenant.
  */
-export async function deactivateUserAccount(
+export async function deactivateUserAccountUnchecked(
   tenantId: string,
   userId: string,
   actorUserId: string | null,
@@ -25,7 +26,7 @@ export async function deactivateUserAccount(
 }
 
 /**
- * `deactivateUserAccount` inside a transaction the caller owns, so the caller's permission check
+ * `deactivateUserAccountUnchecked` inside a transaction the caller owns, so the caller's permission check
  * and this write are ONE transaction (no window between "may I?" and "do it").
  */
 export async function deactivateUserAccountInTx(

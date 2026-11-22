@@ -47,6 +47,8 @@
     "ERROR.CONFLICT": "Otra persona modificó este elemento. Vuelve a cargar e inténtalo de nuevo.",
     "ERROR.INVALID_STATE_TRANSITION": "Esta acción no está permitida en el estado actual.",
     "ERROR.RATE_LIMITED": "Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.",
+    "ERROR.UNSUPPORTED_MEDIA_TYPE": "El formato de la solicitud no es compatible.",
+    "ERROR.PAYLOAD_TOO_LARGE": "La solicitud es demasiado grande.",
     "ERROR.INTERNAL": "Algo salió mal de nuestro lado. Inténtalo de nuevo.",
     "VALIDATION.REQUIRED_FIELD": "{field} es obligatorio.",
     "JOB_STATUS.COMPLETED": "Completado",

@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { changedFields } from "@/lib/changed-fields";
 import { auditContextFields, recordAudit } from "@/server/audit";
-import { enforceInTx, projectFields } from "@/server/authz";
+import { enforceInTx, openEndedWhere, projectFields } from "@/server/authz";
 import {
   conflictOnUniqueViolation,
   InvalidStateTransitionError,
@@ -212,7 +212,7 @@ export async function archiveOrgUnit(
           tenantId: actor.tenantId,
           orgUnitId: unit.id,
           // Includes scheduled (future-dated) placements: they would otherwise outlive the archive.
-          OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+          ...openEndedWhere(now),
         },
       }),
     ]);
@@ -227,7 +227,7 @@ export async function archiveOrgUnit(
     // History stays: open manager rows are closed, never deleted. effectiveTo must be after
     // effectiveFrom (DB CHECK), hence the max().
     const openManagers = await tx.orgUnitManager.findMany({
-      where: { tenantId: actor.tenantId, orgUnitId: unit.id, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+      where: { tenantId: actor.tenantId, orgUnitId: unit.id, ...openEndedWhere(now) },
       select: { id: true, effectiveFrom: true },
     });
     for (const manager of openManagers) {

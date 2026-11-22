@@ -3,9 +3,10 @@ import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 import type { MessageKey, TranslateFn } from "@/lib/i18n";
 import type { ClientInfo } from "@/server/auth";
-import { AppError, ConflictError, ValidationError, type Actor, type RequestContext } from "@/server/core";
-import { logger } from "@/server/logging";
+import { recordAuthzDenial } from "@/server/authz";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import type { FormState } from "../../../_lib/form-state";
+import { messageForError } from "../../../_lib/action-errors";
 import { requireFullSession, type PageContext } from "../../../_lib/page-context";
 import { getClientInfo } from "../../../_lib/request-client";
 
@@ -43,30 +44,11 @@ const FIELD_ERROR_KEYS: Record<string, MessageKey> = {
 };
 
 /**
- * Translated, non-revealing text for a failed action. Only the error CODE (and the field a
- * ValidationError/ConflictError points at) selects the text; service messages are English and are
- * never shown, so wording stays translated and internals stay hidden.
+ * Translated, non-revealing text for a failed action: the shared `messageForError` with this
+ * module's field texts and the shared per-code defaults.
  */
 export function adminErrorMessage(error: unknown, t: TranslateFn): string {
-  if (error instanceof AppError) {
-    if ((error.code === "VALIDATION_FAILED" || error.code === "CONFLICT") && error.field) {
-      const key = FIELD_ERROR_KEYS[error.field];
-      if (key) return t(key);
-    }
-    const byCode: Partial<Record<AppError["code"], MessageKey>> = {
-      FORBIDDEN: "ERROR.FORBIDDEN",
-      NOT_FOUND: "ERROR.NOT_FOUND",
-      VALIDATION_FAILED: "ERROR.VALIDATION_FAILED",
-      CONFLICT: "ERROR.CONFLICT",
-      INVALID_STATE_TRANSITION: "ERROR.INVALID_STATE_TRANSITION",
-      RATE_LIMITED: "ERROR.RATE_LIMITED",
-    };
-    const key = byCode[error.code];
-    if (key) return t(key);
-  } else {
-    logger.error("unexpected error in admin action", { error });
-  }
-  return t("ERROR.INTERNAL");
+  return messageForError(error, t, {}, { byField: FIELD_ERROR_KEYS, useDefaults: true });
 }
 
 /** Form values as a plain object; blank inputs become `undefined` so optional schema fields stay optional. */
@@ -112,6 +94,8 @@ export async function runAdminAction(formData: FormData, options: AdminActionOpt
     for (const path of options.revalidate) revalidatePath(path);
     return { success };
   } catch (error) {
+    // The enforcement helpers inside services stay silent, so refusals of web actions are audited here.
+    if (error instanceof ForbiddenError || error instanceof NotFoundError) await recordAuthzDenial(page.actor, null, context.ctx);
     return { error: adminErrorMessage(error, page.t) };
   }
 }

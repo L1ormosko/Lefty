@@ -3,6 +3,7 @@ import {
   activeAssignmentWhere,
   assignRole,
   buildScopeWhere,
+  activePlacementWhere,
   enforceInTx,
   projectRows,
   resolveScope,
@@ -42,11 +43,6 @@ const ASSIGNMENT_FIELD_MAP = baseFieldMap([
   "createdAt",
 ]);
 
-const placementActive = (now: Date): Prisma.OrganizationalAssignmentWhereInput => ({
-  effectiveFrom: { lte: now },
-  OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-});
-
 const assignmentSelect = (now: Date) =>
   ({
     id: true,
@@ -64,7 +60,7 @@ const assignmentSelect = (now: Date) =>
     user: {
       select: {
         employee: {
-          select: { id: true, legalEntityId: true, assignments: { where: placementActive(now), select: { orgUnitId: true } } },
+          select: { id: true, legalEntityId: true, assignments: { where: activePlacementWhere(now), select: { orgUnitId: true } } },
         },
       },
     },

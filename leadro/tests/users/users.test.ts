@@ -3,6 +3,7 @@ import { GET as listUsers } from "@/app/api/v1/users/route";
 import { GET as getUser, PATCH as patchUser } from "@/app/api/v1/users/[id]/route";
 import { POST as deactivate } from "@/app/api/v1/users/[id]/deactivate/route";
 import { withTenant } from "@/server/db";
+import { getOwnAccountSummary, updateOwnLocale } from "@/server/users";
 import { buildWorld, createPerson, disconnect, grantTemplate, makeRole, type Person, type World } from "../authz/fixtures";
 import { auditEvents, call, sessionCookie } from "../org/org-helpers";
 
@@ -124,6 +125,18 @@ describe("deactivating a user", () => {
   });
 });
 
+describe("deactivating a privileged user", () => {
+  it("is refused for a tenant-wide users.archive holder who could not also revoke the privileged role", async () => {
+    const roleId = await makeRole(w.tenantId, "Tenant user admin", [{ permission: "users.view" }, { permission: "users.archive" }]);
+    const admin = await createPerson(w.tenantId, "tenant-user-admin", { orgUnitId: w.units.cityA });
+    await grantTemplate(w.tenantId, admin, roleId, [{ type: "TENANT" }]);
+    const cookie = await sessionCookie(admin, w.tenantId);
+    const result = await call(deactivate, "POST", "/x", { cookie, params: { id: w.ceo.userId }, body: { reason: "lockout attempt" } });
+    expect(result.status).toBe(403);
+    expect(await auditEvents(w.tenantId, "user.deactivate", w.ceo.userId)).toHaveLength(0);
+  });
+});
+
 describe("logins pending deactivation (terminated employee, login still ACTIVE)", () => {
   it("are flagged and filterable, visible to tenant-wide user administrators, and can then be deactivated", async () => {
     const { POST: terminate } = await import("@/app/api/v1/employees/[id]/terminate/route");
@@ -147,5 +160,22 @@ describe("logins pending deactivation (terminated employee, login still ACTIVE)"
     expect((await call(deactivate, "POST", "/x", { cookie: ceo, params: { id: worker.userId }, body: { reason: "Employment ended" } })).status).toBe(200);
     const after = await call(listUsers, "GET", "/x", { cookie: ceo, query: { pendingDeactivation: "true", limit: "200" } });
     expect(after.json.data.some((user: { id: string }) => user.id === worker.userId)).toBe(false);
+  });
+});
+
+describe("own account (self-service)", () => {
+  it("summarises the caller, and changes only their own locale with an audit row (no-op writes nothing)", async () => {
+    const summary = await getOwnAccountSummary(w.techA1.actor);
+    expect(summary).toMatchObject({ mfaEnabled: false });
+    expect(summary.displayName).toContain("tech-a1");
+
+    const client = { sourceApp: "WEB" as const, ipAddress: "10.9.9.9" };
+    expect(await updateOwnLocale(w.techA1.actor, client, "es-US")).toBe(true);
+    expect(await updateOwnLocale(w.techA1.actor, client, "es-US")).toBe(false);
+    const events = await auditEvents(w.tenantId, "user.locale_change", w.techA1.userId);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorUserId: w.techA1.userId, ipAddress: "10.9.9.9" });
+    const other = await withTenant(w.tenantId, (tx) => tx.user.findUniqueOrThrow({ where: { id: w.techB.userId } }));
+    expect(other.locale).not.toBe("es-US");
   });
 });

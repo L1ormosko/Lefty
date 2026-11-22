@@ -3,8 +3,10 @@
 Enterprise multi-tenant field-operations platform (see `docs/SPEC.md`, the binding product spec).
 This is a self-contained application: it shares nothing with the VELTO app at the repository root.
 
-Status: Phase 0 (architecture) + Phase 1 (platform foundation) in progress. Not production-ready;
-no security or legal-compliance claims are made (spec 28.7). See `docs/PROJECT_STATE.md`.
+Status: Milestone 1 (Phase 0 architecture + Phase 1 platform foundation) is implemented and tested;
+see `docs/MILESTONE-1.md` for what exists, what does not, and the known limitations, and
+`docs/PROJECT_STATE.md` for the short status. Not production-ready; no security or legal-compliance
+claims are made (spec 28.7).
 
 ## Stack
 
@@ -48,6 +50,7 @@ there only so `prisma migrate dev` can create its shadow database.
 | `npm run db:migrate` | `prisma migrate dev` (create/apply migrations in development) |
 | `npm run db:deploy` | `prisma migrate deploy` on the dev database |
 | `npm run db:migrate:test` | `prisma migrate deploy` on `leadro_test` (also done automatically by `npm test`) |
+| `npm run i18n:check` | Verifies every translation catalog has the same keys and placeholders |
 | `npm run seed` | Dev seed: permission catalog + two demo tenants; needs `SEED_PASSWORD` (>= 16 chars, never printed), refuses in production |
 
 ## Development seed
@@ -56,7 +59,8 @@ there only so `prisma migrate dev` can create its shadow database.
 `globex-home`, each with two legal entities, Texas/Florida/California, regions, cities, branches, teams and one ACTIVE
 user per role template (`owner@acme-field.example.test`, `city-manager@...`, `technician@...`, ...). Every user signs in
 with the company code, the email and `SEED_PASSWORD` (there is no default password; the value is hashed and never
-printed). Owner, Finance and HR roles require MFA, so set `LEADRO_ENCRYPTION_KEY` and enroll an authenticator on first
+printed). The Owner/CEO, COO, Finance Director and HR Manager roles require MFA (as does any role that can manage
+permissions or configure a module), so set `LEADRO_ENCRYPTION_KEY` and enroll an authenticator on first
 login. Log in to one tenant and confirm you never see the other: that is the isolation check by hand.
 
 ## Tests
@@ -81,7 +85,11 @@ npm run db:migrate:test
 prisma/            schema, migrations (init + hand-written RLS/constraints), seed
 src/server/<module>/   server modules; other modules import only through index.ts
 src/server/db/     `prisma` client and `withTenant(tenantId, fn)`
-src/app/           Next.js UI (placeholder until later tasks)
-tests/             Vitest (integration tests hit the real database)
-docs/              SPEC.md + Phase 0 docs (ARCHITECTURE, ERD, PERMISSIONS, API_CONVENTIONS, DECISIONS, PROJECT_STATE)
+src/server/       modules: auth, authz, organization, employees, users, roles, audit, i18n, core, logging, db
+src/app/           Next.js UI (login/MFA/account screens, administration screens) and /api/v1 route handlers
+src/components/ui  shared UI components;  src/lib: pure shared code (i18n catalogs, TOTP, redaction)
+scripts/           setup-db.sh, i18n-check.ts
+tests/             Vitest (service, route and UI-action tests hit the real database)
+docs/              SPEC.md, ARCHITECTURE, ERD, PERMISSIONS, API_CONVENTIONS, CODING_STANDARDS, AUTH, AUTHZ,
+                   DECISIONS, PROJECT_STATE, MILESTONE-1
 ```

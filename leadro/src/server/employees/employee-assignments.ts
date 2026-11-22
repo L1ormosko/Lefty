@@ -21,7 +21,7 @@ import type { AssignEmployeeInput, EndAssignmentInput } from "./schemas";
 /**
  * Organizational placement over time (§3.4). A placement row is NEVER overwritten: a transfer
  * closes the current PRIMARY row (`effectiveTo`) and inserts a new one, so "where was this person
- * on 3 March?" is always answerable (`orgUnitAt`). The database additionally forbids two PRIMARY
+ * on 3 March?" is always answerable (`orgUnitAtUnchecked`). The database additionally forbids two PRIMARY
  * placements of one employee overlapping in time (exclusion constraint).
  *
  *  - PRIMARY: the operational team; exactly one at any instant.

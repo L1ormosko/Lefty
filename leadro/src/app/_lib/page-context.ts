@@ -2,8 +2,8 @@ import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createTranslator, directionOf, type Locale, type TextDirection, type TranslateFn } from "@/lib/i18n";
-import { SESSION_COOKIE_NAME, authenticateMfaRequest, requireSession } from "@/server/auth";
-import { UnauthenticatedError, type Actor } from "@/server/core";
+import { readSession } from "@/server/auth";
+import type { Actor } from "@/server/core";
 import { getTranslatorForRequest } from "@/server/i18n";
 import { LOCALE_COOKIE_NAME, resolveAnonymousLocale } from "./locale-negotiation";
 
@@ -14,27 +14,12 @@ export interface SessionState {
 }
 
 /**
- * Who is calling, if anyone. `requireSession` only answers for fully signed-in sessions, so a
- * session still waiting for MFA is detected with the MFA-tolerant authenticator, fed the same
- * cookie. Returns null for "no usable session".
+ * Who is calling, if anyone, and whether the session is still waiting for MFA. One lookup, no
+ * audit noise: an MFA-pending session is a normal state here, not a refusal. Returns null for
+ * "no usable session".
  */
 export async function readSessionState(): Promise<SessionState | null> {
-  try {
-    return { actor: await requireSession(), mfaPending: false };
-  } catch (error) {
-    if (!(error instanceof UnauthenticatedError)) throw error;
-  }
-  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return null;
-  try {
-    const request = new Request("http://localhost/", {
-      headers: { cookie: `${SESSION_COOKIE_NAME}=${token}` },
-    });
-    return { actor: await authenticateMfaRequest(request), mfaPending: true };
-  } catch (error) {
-    if (error instanceof UnauthenticatedError) return null;
-    throw error;
-  }
+  return readSession();
 }
 
 export interface PageContext {

@@ -6,8 +6,10 @@ export {
   InternalError,
   InvalidStateTransitionError,
   NotFoundError,
+  PayloadTooLargeError,
   RateLimitedError,
   UnauthenticatedError,
+  UnsupportedMediaTypeError,
   ValidationError,
   ERROR_CODES,
   HTTP_STATUS_BY_CODE,
@@ -30,6 +32,7 @@ export type {
 } from "./define-route";
 export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, pageQuerySchema, pageArgs, toPage } from "./pagination";
 export type { Page, PageQuery } from "./pagination";
+export { MAX_JSON_BODY_BYTES } from "./request-body";
 export { conflictOnUniqueViolation, isUniqueViolation } from "./unique-violation";
 export { withIdempotency, hashIdempotentRequest, IDEMPOTENCY_RETENTION_MS, IDEMPOTENCY_IN_FLIGHT_MS } from "./idempotency";
 export type { IdempotencyScope, IdempotentResponse, IdempotentOutcome } from "./idempotency";

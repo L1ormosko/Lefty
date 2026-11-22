@@ -6,6 +6,7 @@ import {
   assertNotHoldingRole,
   enforceInTx,
   projectFields,
+  customRoleRequiresMfa,
   templateRequiresMfa,
 } from "@/server/authz";
 import {
@@ -43,10 +44,14 @@ import type {
 const DUPLICATE_NAME = "A role with this name already exists.";
 const sameConditions = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-/** MFA is mandatory for roles that can change who may do what (and for the always-MFA templates). */
+/**
+ * MFA is mandatory for roles that can change who may do what, for the always-MFA templates, and for
+ * custom roles holding any sensitive permission or sensitive field set. Template-derived roles
+ * (clones/edits of a shipped template) follow the template rule so e.g. a cloned Technician stays MFA-free.
+ */
 function mfaIsMandatory(templateKey: string | null, grants: GrantInput[]): boolean {
-  // templateRequiresMfa covers both the always-MFA templates and any MFA-triggering permission.
-  return templateRequiresMfa(templateKey ?? "", grants.map((grant) => ({ permission: grant.permission })));
+  const asTemplateGrants = grants.map((grant) => ({ permission: grant.permission, conditions: grant.conditions ?? undefined }));
+  return templateKey === null ? customRoleRequiresMfa(asTemplateGrants) : templateRequiresMfa(templateKey, asTemplateGrants);
 }
 
 async function loadRole(tx: TenantTx, tenantId: string, roleId: string): Promise<RoleRow> {

@@ -8,7 +8,9 @@ import {
   canInTx,
   employeeRowAttributes,
   employeeScopeColumns,
+  activePlacementWhere,
   enforceInTx,
+  openEndedWhere,
   projectFields,
   projectRows,
   resolveScope,
@@ -29,7 +31,7 @@ import {
 } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { assertLegalEntityUsable } from "@/server/organization";
-import { effectiveAt, endInstant } from "./active-window";
+import { endInstant } from "./active-window";
 import { EMPLOYEE_API_FIELD_MAP, employeeSelect, withDerivedFields, type EmployeeRow } from "./fields";
 import type {
   CreateEmployeeInput,
@@ -227,14 +229,14 @@ export async function terminateEmployee(
 
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`employee-assignment:${employee.id}`}))`;
     const openPlacements = await tx.organizationalAssignment.findMany({
-      where: { tenantId: actor.tenantId, employeeId: employee.id, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+      where: { tenantId: actor.tenantId, employeeId: employee.id, ...openEndedWhere(now) },
       select: { id: true, effectiveFrom: true },
     });
     for (const placement of openPlacements) {
       await tx.organizationalAssignment.update({ where: { id: placement.id }, data: { effectiveTo: endInstant(placement.effectiveFrom, now) } });
     }
     const openManagers = await tx.orgUnitManager.findMany({
-      where: { tenantId: actor.tenantId, employeeId: employee.id, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+      where: { tenantId: actor.tenantId, employeeId: employee.id, ...openEndedWhere(now) },
       select: { id: true, effectiveFrom: true },
     });
     for (const manager of openManagers) {
@@ -251,6 +253,15 @@ export async function terminateEmployee(
     // Sessions end ALWAYS: losing the employment record is what ends access, whoever recorded it, so no
     // live session of a terminated employee may linger (this needs no user-administration authority).
     if (employee.userId) revokedSessions = await revokeAllSessionsForUser(tx, actor.tenantId, employee.userId);
+
+    // An invitation sent for this employee must not still be usable after the employment ended
+    // (accepting it would create a working login for someone who has left).
+    const revokedInvitations = (
+      await tx.invitation.updateMany({
+        where: { tenantId: actor.tenantId, employeeId: employee.id, acceptedAt: null, revokedAt: null },
+        data: { revokedAt: now },
+      })
+    ).count;
 
     const terminated = await tx.employee.update({
       where: { id: employee.id },
@@ -271,6 +282,7 @@ export async function terminateEmployee(
         deactivatedUserId: mayDeactivateLogin ? employee.userId : null,
         loginLeftActiveForUserAdministrator: Boolean(employee.userId) && !mayDeactivateLogin,
         revokedSessions,
+        revokedInvitations,
       },
       reason: input.reason,
     });
@@ -304,7 +316,7 @@ export async function listEmployees(actor: Actor, query: ListEmployeesQuery): Pr
       tenantId: actor.tenantId,
       ...(query.status ? { status: query.status } : {}),
       ...(query.legalEntityId ? { legalEntityId: query.legalEntityId } : {}),
-      ...(query.orgUnitId ? { assignments: { some: { orgUnitId: query.orgUnitId, ...effectiveAt(now) } } } : {}),
+      ...(query.orgUnitId ? { assignments: { some: { orgUnitId: query.orgUnitId, ...activePlacementWhere(now) } } } : {}),
       ...(query.search
         ? {
             OR: [

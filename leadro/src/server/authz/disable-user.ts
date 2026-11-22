@@ -1,4 +1,4 @@
-import { ForbiddenError } from "@/server/core";
+import { ForbiddenError, NotFoundError } from "@/server/core";
 import type { TenantTx } from "@/server/db";
 import { activeAssignmentWhere } from "./active-assignments";
 import { assertMayAdminister } from "./role-grant-check";
@@ -40,7 +40,9 @@ export async function assertMayDisableUser(tx: TenantTx, actor: AccessSubject, u
         })),
         now,
       );
-    } catch {
+    } catch (error) {
+      // Only an authorization refusal means "not allowed"; a database failure must not read as a 403.
+      if (!(error instanceof ForbiddenError || error instanceof NotFoundError)) throw error;
       throw new ForbiddenError({ message: "This person holds a privileged role you are not allowed to administer." });
     }
   }

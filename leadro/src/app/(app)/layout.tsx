@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { TopNav } from "@/components/ui";
 import { LocaleSwitcherForPage } from "../_components/LocaleSwitcherForPage";
-import { loadShellIdentity } from "../_lib/account-queries";
+import { loadAccountSummary } from "../_lib/account-queries";
 import { requireFullSession } from "../_lib/page-context";
 import { AppSidebar } from "./_components/AppSidebar";
 import { NotificationBell } from "./_components/NotificationBell";
@@ -17,7 +17,7 @@ import { getNavigation } from "./navigation";
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { actor, t } = await requireFullSession();
 
-  const [identity, navigation] = await Promise.all([loadShellIdentity(actor), getNavigation(actor)]);
+  const [identity, navigation] = await Promise.all([loadAccountSummary(actor), getNavigation(actor)]);
   const items = navigation.map((item) => ({ id: item.id, label: t(item.labelKey), href: item.href }));
   const sidebar = (
     <AppSidebar label={t("SHELL.MAIN_NAVIGATION")} productName={t("SHELL.PRODUCT_NAME")} tenantName={identity.tenantName} items={items} />

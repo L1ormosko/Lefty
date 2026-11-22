@@ -3,7 +3,7 @@ export { assignEmployeeToUnit, endEmployeeAssignment, listEmployeeAssignments } 
 export type { AssignmentView } from "./employee-assignments";
 export { listPlacementHistory } from "./placement-history";
 export type { PlacementHistoryEntry } from "./placement-history";
-export { orgUnitAt, orgUnitAtInTx, getOrgUnitAtAsActor } from "./org-unit-at";
+export { orgUnitAtUnchecked, orgUnitAtInTx, getOrgUnitAtAsActor } from "./org-unit-at";
 export type { OrgUnitAtResult } from "./org-unit-at";
 export { inviteEmployee } from "./employee-invitations";
 export {

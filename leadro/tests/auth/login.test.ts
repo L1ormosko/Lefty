@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UnauthenticatedError, RateLimitedError } from "@/server/core";
-import { deactivateUserAccount, login } from "@/server/auth";
+import { deactivateUserAccountUnchecked, login } from "@/server/auth";
 import { hashToken } from "@/server/auth/tokens";
 import { prisma, withTenant } from "@/server/db";
 import { createTenant } from "../helpers";
@@ -190,7 +190,7 @@ describe("deactivation", () => {
     await loginAs(user);
     await loginAs(user);
 
-    const outcome = await deactivateUserAccount(user.tenantId, user.userId, null, testClient(), "left the company");
+    const outcome = await deactivateUserAccountUnchecked(user.tenantId, user.userId, null, testClient(), "left the company");
     expect(outcome.revokedSessions).toBe(2);
 
     const live = await withTenant(user.tenantId, (tx) => tx.session.count({ where: { userId: user.userId, revokedAt: null } }));

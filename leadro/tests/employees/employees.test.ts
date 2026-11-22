@@ -165,6 +165,26 @@ describe("terminating an employee", () => {
     expect((await call(terminate, "POST", "/x", { cookie: ceo, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-02", reason: "again" } })).status).toBe(409);
   });
 
+  it("revokes the employee's open invitations in the same transaction, leaving accepted ones alone", async () => {
+    const worker = await createPerson(w.tenantId, "invitee-leaver", { orgUnitId: w.units.cityA });
+    const invitation = (tokenHash: string, extra: object = {}) =>
+      withTenant(w.tenantId, (tx) =>
+        tx.invitation.create({
+          data: { tenantId: w.tenantId, email: `${tokenHash}@example.test`, tokenHash, employeeId: worker.employeeId!, expiresAt: new Date(Date.now() + 86_400_000), ...extra },
+        }),
+      );
+    const open = await invitation(`open-${Date.now()}-${Math.random()}`);
+    const accepted = await invitation(`accepted-${Date.now()}-${Math.random()}`, { acceptedAt: new Date() });
+
+    expect((await call(terminate, "POST", "/x", { cookie: ceo, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-01", reason: "left" } })).status).toBe(200);
+
+    const rows = await withTenant(w.tenantId, (tx) => tx.invitation.findMany({ where: { id: { in: [open.id, accepted.id] } } }));
+    expect(rows.find((row) => row.id === open.id)?.revokedAt).not.toBeNull();
+    expect(rows.find((row) => row.id === accepted.id)?.revokedAt).toBeNull();
+    const [event] = await auditEvents(w.tenantId, "employee.terminate", worker.employeeId!);
+    expect(event.newValue).toMatchObject({ revokedInvitations: 1 });
+  });
+
   it("rejects a future termination date, requires a reason, and respects scope and permission", async () => {
     const worker = await createPerson(w.tenantId, "stayer", { orgUnitId: w.units.cityA });
     const future = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);

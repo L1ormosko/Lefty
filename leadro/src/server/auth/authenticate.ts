@@ -53,3 +53,18 @@ export async function requireSession(): Promise<Actor> {
   if (!resolved) throw new UnauthenticatedError();
   return resolved.actor;
 }
+
+/**
+ * For the page layer: reads the session from the cookie WITHOUT treating "still waiting for MFA" as
+ * a refusal. Returns the actor plus `mfaPending`, or null when there is no usable session.
+ *
+ * Exists so a page can tell the three states (signed out, MFA pending, signed in) with one lookup.
+ * Probing with `requireSession()` first would audit a false `auth.access_denied` row on every render
+ * of an MFA-pending page. Callers must still refuse `mfaPending` sessions for anything but the MFA
+ * step (see `requireFullSession` in the app layer).
+ */
+export async function readSession(): Promise<{ actor: Actor; mfaPending: boolean } | null> {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  if (!token) return null;
+  return resolveSession(token, { allowMfaPending: true, client: { sourceApp: "WEB" } });
+}

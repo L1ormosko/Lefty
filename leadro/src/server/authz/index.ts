@@ -14,6 +14,8 @@ export { can, canInTx, canViewFields } from "./can";
 export { enforceInTx, enforceOnUser } from "./enforce";
 export { requirePermission, requireTenantLevelPermission } from "./require-permission";
 export type { ResourceResolver } from "./require-permission";
+export { recordAuthzDenial } from "./denial-audit";
+export type { DenialContext } from "./denial-audit";
 export {
   scopeFilter,
   scopeFilterInTx,
@@ -34,7 +36,7 @@ export type { AccessExplanation, AssignmentExplanation, ScopeExplanation } from 
 export { assertNotSelfApproval, assertNotHoldingRole } from "./separation-of-duties";
 export { listAuditEventsAsActor } from "./audit-access";
 
-export { ROLE_TEMPLATES, templateRequiresMfa, isMfaTriggeringPermission } from "./role-templates";
+export { ROLE_TEMPLATES, templateRequiresMfa, customRoleRequiresMfa, isMfaTriggeringPermission } from "./role-templates";
 export type { RoleTemplate, TemplateGrant } from "./role-templates";
 export { provisionRoleTemplates, syncPermissionCatalog } from "./provision-role-templates";
 export { bootstrapRoleAssignment } from "./assign-role";
@@ -45,5 +47,6 @@ export type { RevokeRoleAssignmentInput } from "./revoke-role-assignment";
 export { assertMayDisableUser } from "./disable-user";
 export { assertMayDefineGrants, assertMayGrantToExistingHolders } from "./define-grants";
 export type { RoleGrantDefinition } from "./define-grants";
+export { activePlacementWhere, openEndedWhere, liveOrFutureAssignmentWhere } from "./time-windows";
 export { activeAssignmentWhere, holdsMfaRequiringRole } from "./active-assignments";
 export type { AssignRoleInput, ScopeInput } from "./assign-role";

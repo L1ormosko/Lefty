@@ -44,7 +44,7 @@ describe("catalogs", () => {
     }
     for (const code of [
       "UNAUTHENTICATED", "FORBIDDEN", "NOT_FOUND", "VALIDATION_FAILED",
-      "CONFLICT", "INVALID_STATE_TRANSITION", "RATE_LIMITED", "INTERNAL",
+      "CONFLICT", "INVALID_STATE_TRANSITION", "RATE_LIMITED", "UNSUPPORTED_MEDIA_TYPE", "PAYLOAD_TOO_LARGE", "INTERNAL",
     ]) {
       expect(CATALOGS["en-US"].messages).toHaveProperty(`ERROR.${code}`);
     }

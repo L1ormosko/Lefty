@@ -1,3 +1,4 @@
+import { activePlacementWhere } from "./time-windows";
 import type { TenantTx } from "@/server/db";
 import type { ResourceRef } from "./types";
 
@@ -15,12 +16,6 @@ export interface ResolvedResource {
 const unique = (values: Array<string | null | undefined>): string[] => [
   ...new Set(values.filter((value): value is string => typeof value === "string")),
 ];
-
-/** Active placements as of `now`: started, and not yet ended. */
-export const activePlacementWhere = (now: Date) => ({
-  effectiveFrom: { lte: now },
-  OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-});
 
 /**
  * Turns a `ResourceRef` into the concrete org units / legal entities / owner it stands for.

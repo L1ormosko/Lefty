@@ -47,6 +47,8 @@
     "ERROR.CONFLICT": "הפריט שונה על ידי אחר. יש לטעון מחדש ולנסות שוב.",
     "ERROR.INVALID_STATE_TRANSITION": "פעולה זו אינה מותרת בסטטוס הנוכחי.",
     "ERROR.RATE_LIMITED": "יותר מדי בקשות. יש להמתין רגע ולנסות שוב.",
+    "ERROR.UNSUPPORTED_MEDIA_TYPE": "פורמט הבקשה אינו נתמך.",
+    "ERROR.PAYLOAD_TOO_LARGE": "הבקשה גדולה מדי.",
     "ERROR.INTERNAL": "משהו השתבש בצד שלנו. יש לנסות שוב.",
     "VALIDATION.REQUIRED_FIELD": "יש למלא את השדה {field}.",
     "JOB_STATUS.COMPLETED": "הושלמה",

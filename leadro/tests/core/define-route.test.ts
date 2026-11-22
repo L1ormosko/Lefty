@@ -11,6 +11,7 @@ import {
   resolveCorrelationId,
   type Actor,
   type ErrorBody,
+  MAX_JSON_BODY_BYTES,
 } from "@/server/core";
 import { createTenant } from "../helpers";
 
@@ -144,6 +145,44 @@ describe("defineRoute pipeline", () => {
   });
 });
 
+describe("defineRoute request body rules", () => {
+  const route = defineRoute({ schemas: { body: z.object({ name: z.string() }) }, handler: async () => ok(null) });
+  const codeOf = async (response: Response) => ((await response.json()) as ErrorBody).error.code;
+
+  it("refuses a mutating request whose body is not application/json (415)", async () => {
+    for (const contentType of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
+      const response = await route(new Request("http://localhost/x", { method: "POST", headers: { "content-type": contentType }, body: "name=x" }));
+      expect(response.status).toBe(415);
+      expect(await codeOf(response)).toBe("UNSUPPORTED_MEDIA_TYPE");
+    }
+    const noType = await route(new Request("http://localhost/x", { method: "POST", body: '{"name":"x"}' }));
+    expect(noType.status).toBe(415);
+  });
+
+  it("accepts application/json with a charset parameter", async () => {
+    const response = await route(jsonRequest({ name: "x" }, { "content-type": "application/json; charset=utf-8" }));
+    expect(response.status).toBe(200);
+  });
+
+  it("refuses a body over 1 MB (413), by declared length and by actual bytes", async () => {
+    const huge = JSON.stringify({ name: "x".repeat(MAX_JSON_BODY_BYTES + 1) });
+    const declared = await route(jsonRequest(huge));
+    expect(declared.status).toBe(413);
+    expect(await codeOf(declared)).toBe("PAYLOAD_TOO_LARGE");
+
+    // No content-length (streamed): the bytes are counted as they arrive.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(huge));
+        controller.close();
+      },
+    });
+    const streamed = await route(new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half" } as RequestInit));
+    expect(streamed.status).toBe(413);
+  });
+});
+
 describe("defineRoute idempotency", () => {
   let actor: Actor;
   beforeAll(async () => {
@@ -182,5 +221,26 @@ describe("defineRoute idempotency", () => {
     const response = await route(jsonRequest({ name: "y" }, key));
     expect(response.status).toBe(409);
     expect(((await response.json()) as ErrorBody).error.code).toBe("CONFLICT");
+  });
+});
+
+describe("defineRoute idempotency scope", () => {
+  it("does not serve one user's stored response to another user with the same key and body", async () => {
+    const tenant = await createTenant("route-idem-users");
+    let current = "u1";
+    let runs = 0;
+    const route = defineRoute({
+      schemas: { body: z.object({ name: z.string() }) },
+      authenticate: async () => ({ tenantId: tenant.id, userId: current, employeeId: null, sessionId: "s", locale: null }),
+      idempotent: true,
+      handler: async () => created({ runNumber: ++runs }),
+    });
+    const key = { "idempotency-key": `k-${Date.now()}-users` };
+    const first = await route(jsonRequest({ name: "x" }, key));
+    current = "u2";
+    const second = await route(jsonRequest({ name: "x" }, key));
+    expect(await first.json()).toEqual({ data: { runNumber: 1 } });
+    expect(await second.json()).toEqual({ data: { runNumber: 2 } });
+    expect(second.headers.get("idempotent-replayed")).toBeNull();
   });
 });

@@ -1,11 +1,10 @@
 import { recordAudit, auditContextFields } from "@/server/audit";
-import { assertNotSelfApproval, canInTx } from "@/server/authz";
+import { assertNotSelfApproval, enforceInTx } from "@/server/authz";
 import {
   pageArgs,
   toPage,
   type Page,
   ConflictError,
-  ForbiddenError,
   NotFoundError,
   ValidationError,
   type Actor,
@@ -47,11 +46,6 @@ export function toAppError(error: TranslationOverrideError): AppError {
   }
 }
 
-async function assertMay(tx: TenantTx, actor: Actor, permission: string): Promise<void> {
-  // `{}` = a tenant-level record: only a TENANT-scoped grant matches.
-  if (!(await canInTx(tx, actor, permission, {})).allowed) throw new ForbiddenError();
-}
-
 /** Runs a translation write, converting `TranslationOverrideError` to an `AppError`. */
 async function run<T>(actor: Actor, work: (tx: TenantTx) => Promise<T>): Promise<T> {
   try {
@@ -72,7 +66,7 @@ export async function saveOverrideAsActor(
   input: { locale: string; key: string; value: string },
 ): Promise<{ id: string }> {
   return run(actor, async (tx) => {
-    await assertMay(tx, actor, EDIT_PERMISSION);
+    await enforceInTx(tx, actor, EDIT_PERMISSION, {}); // {} = tenant-level record: needs a TENANT-scoped grant
     const before = await tx.translationResource.findFirst({
       where: { tenantId: actor.tenantId, locale: input.locale, key: input.key },
       select: { value: true, reviewed: true },
@@ -100,7 +94,7 @@ export async function reviewOverrideAsActor(
   input: { locale: string; key: string; reviewedValue: string },
 ): Promise<void> {
   await run(actor, async (tx) => {
-    await assertMay(tx, actor, REVIEW_PERMISSION);
+    await enforceInTx(tx, actor, REVIEW_PERMISSION, {}); // {} = tenant-level record: needs a TENANT-scoped grant
     // Separation of duties (§21.3, §16.6): the last editor of a text cannot be the one who approves it.
     const stored = await tx.translationResource.findFirst({
       where: { tenantId: actor.tenantId, locale: input.locale, key: input.key },
@@ -128,7 +122,7 @@ export async function deleteOverrideAsActor(
   input: { locale: string; key: string },
 ): Promise<void> {
   await run(actor, async (tx) => {
-    await assertMay(tx, actor, REVIEW_PERMISSION);
+    await enforceInTx(tx, actor, REVIEW_PERMISSION, {}); // {} = tenant-level record: needs a TENANT-scoped grant
     const removed = await deleteOverrideInTx(tx, actor.tenantId, input);
     if (removed === 0) throw new NotFoundError({ message: "No such translation override" });
     await recordAudit(tx, {
@@ -164,7 +158,7 @@ export async function listOverridesAsActor(
   query: { cursor?: string; limit: number; locale?: string; reviewed?: boolean },
 ): Promise<Page<OverrideView>> {
   return withTenant(actor.tenantId, async (tx) => {
-    await assertMay(tx, actor, "localization.view");
+    await enforceInTx(tx, actor, "localization.view", {}); // {} = tenant-level record: needs a TENANT-scoped grant
     const rows = await tx.translationResource.findMany({
       where: {
         tenantId: actor.tenantId,
