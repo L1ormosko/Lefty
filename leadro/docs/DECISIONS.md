@@ -555,3 +555,40 @@ No schema change and no new dependency. Rules are pure (`src/lib/eligibility`, `
 - **Private fields**: credential `number` is masked (last four) for everyone except the holder and `qualifications.approve` holders; the audit log stores it masked (call-site masking, so `number` elsewhere is not over-redacted). Availability `note` follows the same visibility. `reveal.ts` computes visibility once per page.
 - **Jobs boundary**: `requirementsForJob` removed; `requirementsFromInputs(tx, tenantId, EligibilityInputs)` replaces it. `requirementsForJobType` still reads `JobType` tables (job configuration; ownership moves to the jobs module when it exists).
 - **Archived territory units** do not cover (treated as ended). **Status gate**: TERMINATED always blocks; ON_LEAVE blocks only work starting at or before the decision time, future leave is an EXCEPTION_UNAVAILABLE row. "Already expired" at verification uses the company calendar date. `UNAVAILABLE_TIME_OFF` has no params. A pending, still-valid renewal turns EXPIRED into `QUALIFICATION_RENEWAL_PENDING`; the EXPIRED message no longer says "expires ... before the work is done" for past dates.
+### Phase 2 Task 4: notifications engine (§14)
+Code: `src/server/notifications/`, `src/lib/notification-rules.ts`, `/api/v1/notifications/**`, catalog keys `NOTIFICATION.*`.
+- **Write in the business transaction, deliver after commit.** `notifyInTx(tx, event)` only inserts `Notification` + attempt-1
+  `NotificationDelivery` rows; `deliverAfterCommit` / `deliverPending` send afterwards and never throw into the caller. A rolled
+  back business change therefore leaves no notification, and a broken provider can never undo a committed one. Unsent rows stay
+  PENDING for the worker (`deliverPendingForAllTenants`); no scheduler is wired in yet (no worker infrastructure exists), the
+  function is ready to be called from one.
+- **Typed event catalog** (`NOTIFICATION_EVENTS`): event type -> template key, critical flag, link target type. Callers pass only the
+  event type, so a template key can never disagree with the event; new events are one row plus six catalog keys. `job.cancelled`,
+  `qualification.expired` and `account.security_alert` are critical (mandatory operational/security notices, §14.1).
+- **Params contract enforced in code**: names are camelCase, values are numbers, booleans or identifier-like strings
+  (`[A-Za-z0-9_.:-]{1,64}`, so no spaces, `@`, `+`): names, emails and phone numbers cannot be stored. Text is rendered at read time
+  (`renderNotification` / `renderNotificationForRecipient`) in the RECIPIENT's locale chain with reviewed tenant overrides. The API returns key + params, not text.
+- **Idempotency**: unique `(tenant, recipient, idempotencyKey)`, default key `<eventType>:<eventId>`; inserted with
+  `createMany(skipDuplicates)` (ON CONFLICT DO NOTHING) so a race cannot abort a business transaction. Only recipients that were
+  actually inserted get delivery rows.
+- **Channels**: IN_APP always (the row is the inbox), plus the tenant's `OperationsSettings.enabledChannels`. In-app cannot be opted
+  out of (it is the record of the event). Non-critical opt-outs create a SKIPPED row (truthful record); critical events ignore
+  opt-outs. PUSH/EMAIL/SMS default to `notConfiguredChannel` -> status NOT_CONFIGURED, `provider` null, never SENT (§28.3). A provider is
+  installed with `setNotificationChannel`.
+- **Retries**: one row per attempt. A retryable FAILED attempt gets `retryStatus = SCHEDULED` + `nextRetryAt` (1 min, then 5 min, 3 attempts);
+  the sweep claims it (SCHEDULED -> NONE) and inserts attempt n+1. After the last attempt the row is EXHAUSTED; a non-retryable failure is NONE.
+  Workers claim PENDING rows by stamping `attemptedAt` (claims older than 5 min are reclaimed after a crash), so concurrent workers never double-send,
+  and channel I/O runs outside any transaction. A thrown channel error is stored as `CHANNEL_ERROR` (provider text may contain addresses; it goes only to the log).
+- **Recipient resolution** (`resolveRecipientsByPermission`, `resolveLeadOperationsRecipients`): SQL pre-selects ACTIVE users with an active assignment of an
+  active role carrying the permission, then every candidate is confirmed with authz `canInTx(... { orgUnitId })`, so scope rules have one implementation. Lead
+  Operations = `leads.assign` over the unit (descendants included); only if nobody holds it, widen to `leads.view` so a lead is never unannounced. Grants qualified
+  by a record set do not match a plain unit reference and are not recipients.
+- **Not audited**: mark-read and preference changes are per-user conveniences, not business changes; events are audited by the business write that raised them.
+- **Preference rows**: absent = enabled; a specific event row beats the `*` row. PUT refuses critical events and IN_APP instead of storing rows that would be ignored.
+- Not built (later tasks): the TopNav bell UI, a scheduler for the worker sweep, real providers.
+
+#### Task 4 fix round 1
+- **Access is checked twice.** Write time: `notifyInTx` takes `target { targetType, targetId, permission, resource }` and drops (counts, logs) recipients failing `canInTx(permission, resource)`; `resolveRecipientsByPermission` still only checks the org unit, so the target check is what applies record-level conditions. Read time: `registerNotificationTargetResolver(targetType, permission, resolve)` (the permission is part of the registration because the notification row does not store one); list and delivery redact (generic `NOTIFICATION.ITEM_UNAVAILABLE`, no params, no target) when access is lost, the record is gone or the type is unregistered (fail closed). Leads/jobs tasks must register "lead"/"job".
+- Event params are now exactly the declared list (undeclared or missing keys throw); `target.targetId` must be identifier-like and `targetType` must match the event.
+- `recordOutcome` only updates a row the worker still holds (PENDING with its own `attemptedAt` stamp). Delivery is at-least-once; providers dedupe on `notificationId` + `attempt`.
+- Retry scheduling uses `createMany(skipDuplicates)` after claiming the parent: a sweep found leftover rows whose next attempt already existed, and the unique violation would have aborted every retry of that tenant. `deliverPendingForAllTenants` takes optional `tenantIds` (used by tests; each tenant costs two transactions per sweep).

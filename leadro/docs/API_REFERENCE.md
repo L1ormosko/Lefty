@@ -1198,4 +1198,68 @@ only `VERIFIED`, unexpired rows count for eligibility.
   translate with the key `QUALIFICATION.FAILURE.<code>` and the params (a `kind` param via
   `QUALIFICATION.KIND.<kind>`). No prose is returned.
 - **Errors**: `404`; `400` unknown job type, skill, certification or unit (`field` names it).
+## Notifications (`/api/v1/notifications`, Phase 2)
+
+Own-notification API (§14). Every endpoint is pinned to the caller (`recipientId = session user`): the
+`notifications.view` / `notifications.edit` permissions are capability checks and the assignment's scope never widens
+them. Responses carry `templateKey` + `params` (ids and numbers), never display text: render the title and body with
+`<templateKey>.TITLE` / `.BODY` in the user's language (`renderNotification` on the server, `t()` in the UI).
+
+### GET /api/v1/notifications
+
+- **Purpose**: the caller's own notifications, newest first (`createdAt desc, id desc`).
+- **Auth**: session.
+- **Permission**: `notifications.view` (capability; rows are always the caller's own).
+- **Request query**: `cursor`, `limit` (collection rules); `unread` `true | false` (default `false`: all).
+- **Response**: `200 { data: [{ id, eventType, templateKey, params, targetType, targetId, critical, readAt, createdAt, redacted }], page }`.
+  `targetType`/`targetId` are a deep link only. The viewer's current access to the target is re-checked on every read: when lost
+  (or the record is gone), the row has `redacted: true`, `templateKey` `NOTIFICATION.ITEM_UNAVAILABLE`, empty `params` and no target.
+- **Errors**: `403` no `notifications.view` grant; `400` bad query.
+- **Audit**: none.
+
+### GET /api/v1/notifications/unread-count
+
+- **Purpose**: the number of unread notifications (the bell badge).
+- **Auth**: session.
+- **Permission**: `notifications.view`.
+- **Response**: `200 { data: { unread } }`.
+- **Audit**: none.
+
+### POST /api/v1/notifications/read-all
+
+- **Purpose**: mark every unread notification of the caller read.
+- **Auth**: session.
+- **Permission**: `notifications.edit`.
+- **Idempotency**: not needed (repeating it changes nothing).
+- **Response**: `200 { data: { updated } }`.
+- **Audit**: none (a per-user read marker, not a business change).
+
+### POST /api/v1/notifications/{id}/read
+
+- **Purpose**: mark one of the caller's notifications read. An already-read notification keeps its first `readAt`.
+- **Auth**: session.
+- **Permission**: `notifications.edit`.
+- **Request**: path `id`.
+- **Response**: `200 { data: { id, readAt } }`.
+- **Errors**: `404` the notification does not exist, belongs to another user or tenant (indistinguishable).
+- **Audit**: none.
+
+### GET /api/v1/notifications/preferences
+
+- **Purpose**: the caller's stored channel opt-ins and opt-outs. An absent row means "enabled".
+- **Auth**: session.
+- **Permission**: `notifications.view`.
+- **Response**: `200 { data: [{ eventType, channel, enabled }] }`; `eventType` is an event key or `*`.
+- **Audit**: none.
+
+### PUT /api/v1/notifications/preferences
+
+- **Purpose**: opt in or out of one channel for one event type, or for every non-critical event (`*`).
+- **Auth**: session.
+- **Permission**: `notifications.edit`.
+- **Request body** (strict): `eventType` a known event key (`NOTIFICATION_EVENTS`) or `*`; `channel` `PUSH | EMAIL | SMS`
+  (in-app cannot be switched off); `enabled` boolean.
+- **Response**: `200 { data: { eventType, channel, enabled } }`.
+- **Errors**: `400` unknown event, `IN_APP`, or a critical event (`field: "eventType"`): critical notifications ignore
+  opt-outs (§14.1), so a preference for them is refused instead of stored and ignored.
 - **Audit**: none.

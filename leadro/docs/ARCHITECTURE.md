@@ -25,6 +25,7 @@ in `src/`); tests may import internals when they need to.
 | Employees | `employees` | employee records, placements over time, termination, invitations of employees |
 | Users | `users` | user accounts (list, preferences, deactivate), own-account reads/writes |
 | Roles | `roles` | tenant roles (create, clone, edit, archive), role assignments, effective-access diagnostic |
+| Notifications | `notifications` | events -> inbox rows in the business transaction, after-commit delivery through channel interfaces, retries, recipient resolution, own-notification API |
 | Audit | `audit` | append-only `AuditEvent` writer and readers |
 | i18n | `i18n` | per-request locale chain and tenant translation overrides (server side; catalogs live in `src/lib/i18n`) |
 | Core | `core` | request pipeline (`defineRoute`), `Actor`, error hierarchy, pagination, idempotency |
