@@ -234,10 +234,10 @@ export function transitionProblem(
 
 // ───────────────────────── Appointment checks (§25.2) ─────────────────────────
 
-export type JobWarningCode = "DURATION_EXCEEDS_WINDOW" | "SLOT_SHORTER_THAN_DURATION";
+export type JobWarningCode = "DURATION_EXCEEDS_WINDOW" | "SLOT_SHORTER_THAN_DURATION" | "ASSIGNEE_ELIGIBILITY_CONFLICT";
 export interface JobWarning {
   code: JobWarningCode;
-  params: Record<string, number>;
+  params: Record<string, number | string>;
 }
 
 const minutesBetween = (start: Date, end: Date): number => Math.round((end.getTime() - start.getTime()) / 60_000);
