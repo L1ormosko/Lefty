@@ -1,5 +1,6 @@
 export { createRole, cloneRole, updateRole, replaceRolePermissions, saveRoleDefinition, archiveRole } from "./roles";
-export { listRoles, getRole, getRoleHistory } from "./role-queries";
+export { listRoles, getRole } from "./role-queries";
+export { getRoleHistory, type RoleHistoryEntry, type RoleChangeSummary } from "./role-history";
 export { grantRoleToUser, revokeAssignment, listRoleAssignments, getRoleAssignment } from "./role-assignments";
 export type { AssignmentState } from "./role-assignments";
 export { getEffectiveAccess } from "./effective-access";

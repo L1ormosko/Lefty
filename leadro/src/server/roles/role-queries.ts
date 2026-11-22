@@ -1,5 +1,4 @@
 import type { Prisma } from "@prisma/client";
-import { listAuditEvents, type AuditPage } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, projectFields, projectRows, resolveScope, withinScope } from "@/server/authz";
 import { NotFoundError, pageArgs, toPage, type Actor, type Page } from "@/server/core";
 import { withTenant } from "@/server/db";
@@ -48,18 +47,4 @@ export async function getRole(actor: Actor, roleId: string): Promise<Projected> 
     if (!role) throw new NotFoundError();
     return projectFields(toRoleView(role, { withPermissions: true }), decision, ROLE_FIELD_MAP);
   });
-}
-
-/**
- * Permission history of a role: every audit event that targeted it (create, clone, edit, permission
- * changes with what was added/removed, archive), newest first, with who and why. Needs a tenant-wide
- * `permissions.view`; it reads the audit trail, which is append-only, so history cannot be rewritten.
- */
-export async function getRoleHistory(actor: Actor, roleId: string, query: { cursor?: string; limit: number }): Promise<AuditPage> {
-  await withTenant(actor.tenantId, async (tx) => {
-    await enforceInTx(tx, actor, "permissions.view", {});
-    const exists = await tx.role.findFirst({ where: { id: roleId, tenantId: actor.tenantId }, select: { id: true } });
-    if (!exists) throw new NotFoundError();
-  });
-  return listAuditEvents(actor.tenantId, { filter: { targetType: "Role", targetId: roleId }, cursor: query.cursor, limit: query.limit });
 }

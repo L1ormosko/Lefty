@@ -5,7 +5,7 @@ this module is the permission-checked administration around it.
 
 Public API (`index.ts`):
 - Roles: `createRole`, `cloneRole`, `updateRole`, `replaceRolePermissions`, `archiveRole`, `listRoles`, `getRole`,
-  `getRoleHistory` (permission history from the audit trail).
+  `getRoleHistory` (permission history from the audit trail, projected to `RoleHistoryEntry` in role-history.ts: no IP/user agent/raw values).
 - Assignments: `grantRoleToUser` (-> authz `assignRole`), `revokeAssignment` (-> authz `revokeRoleAssignment`),
   `listRoleAssignments`, `getRoleAssignment`.
 - `getEffectiveAccess(actor, { userId, permission?, employeeId?, orgUnitId? })` (+ authz `explainAccess` for "why").
