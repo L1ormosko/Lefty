@@ -124,6 +124,18 @@ describe("deactivating a user", () => {
   });
 });
 
+describe("deactivating a privileged user", () => {
+  it("is refused for a tenant-wide users.archive holder who could not also revoke the privileged role", async () => {
+    const roleId = await makeRole(w.tenantId, "Tenant user admin", [{ permission: "users.view" }, { permission: "users.archive" }]);
+    const admin = await createPerson(w.tenantId, "tenant-user-admin", { orgUnitId: w.units.cityA });
+    await grantTemplate(w.tenantId, admin, roleId, [{ type: "TENANT" }]);
+    const cookie = await sessionCookie(admin, w.tenantId);
+    const result = await call(deactivate, "POST", "/x", { cookie, params: { id: w.ceo.userId }, body: { reason: "lockout attempt" } });
+    expect(result.status).toBe(403);
+    expect(await auditEvents(w.tenantId, "user.deactivate", w.ceo.userId)).toHaveLength(0);
+  });
+});
+
 describe("logins pending deactivation (terminated employee, login still ACTIVE)", () => {
   it("are flagged and filterable, visible to tenant-wide user administrators, and can then be deactivated", async () => {
     const { POST: terminate } = await import("@/app/api/v1/employees/[id]/terminate/route");
