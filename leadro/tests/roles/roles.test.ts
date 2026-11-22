@@ -120,6 +120,20 @@ describe("cloning", () => {
   });
 });
 
+describe("cloning and MFA", () => {
+  it("judges a clone by the custom-role rule at clone time (consistent with later edits); templates keep the template rule", async () => {
+    // Technician is MFA-free as a template, but its sensitive field grants make a custom copy MFA-mandatory.
+    const original = await call(getRole, "GET", "/x", { cookie: ceo, params: { id: w.roles.TECHNICIAN } });
+    expect(original.json.data.requiresMfa).toBe(false);
+    const clone = await call(cloneRole, "POST", "/x", { cookie: ceo, params: { id: w.roles.TECHNICIAN }, body: { name: unique("Tech copy") } });
+    expect(clone.status).toBe(201);
+    expect(clone.json.data.requiresMfa).toBe(true);
+    // ...and the next edit does not flip it: the flag cannot be lowered while mandatory.
+    const lowered = await call(patchRole, "PATCH", "/x", { cookie: ceo, params: { id: clone.json.data.id }, body: { requiresMfa: false } });
+    expect(lowered.status).toBe(400);
+  });
+});
+
 describe("editing permissions", () => {
   it("replaces the permission set, records what was added/removed/changed, and serves it as history", async () => {
     const role = (await create(ceo, { name: unique("Evolving"), permissions: [{ permission: "jobs.view" }, { permission: "leads.view" }] })).json.data;

@@ -162,8 +162,8 @@ Technician-specific qualifiers use `fields` (`necessary`, `status`, `execution`)
 **MFA.** `Role.requiresMfa = true` for the Owner/CEO, Finance Director and HR Manager templates, for
 any role holding `permissions.manage`, `permissions.assign` or a `*.configure` permission (this makes the
 COO template MFA-required too), and for CUSTOM roles (no `templateKey`, clones included) holding any
-sensitive permission or sensitive field set. Template-derived roles (edits of a shipped template) keep the
-template rule, so a Technician stays MFA-free. Authentication enforces it per request, not only at login
+sensitive permission or sensitive field set. Roles still carrying a template key (edits of a shipped template) keep the
+template rule, so the Technician template stays MFA-free (a clone has no template key, so it is judged as custom). Authentication enforces it per request, not only at login
 (a session that never passed MFA is sent back to the MFA step); the authz engine exposes the flag as
 `via.requiresMfa`.
 
