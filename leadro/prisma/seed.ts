@@ -1,6 +1,7 @@
 import { assertPasswordMeetsPolicy, hashPassword } from "../src/server/auth";
 import { PERMISSION_CATALOG, permissionKey } from "../src/server/authz";
 import { prisma } from "../src/server/db";
+import { seedOperationalData } from "./seed/seed-operations";
 import { seedTenant } from "./seed/seed-tenant";
 import { TENANT_SPECS } from "./seed/tenant-specs";
 
@@ -41,7 +42,8 @@ async function seedPermissionCatalog(): Promise<void> {
 
 /**
  * Development seed: the permission catalog plus two fictional tenants (so isolation can be tried
- * by hand), each with legal entities, a US org tree and one user per role template.
+ * by hand), each with legal entities, a US org tree, one user per role template, and the operational
+ * catalogs (job types, skills, certifications, lead sources) with qualified technicians.
  *
  * DEVELOPMENT ONLY: refuses to run with NODE_ENV=production. Safe to re-run: existing tenants are
  * skipped. Logging in as the Owner / Finance / HR users needs MFA (their roles require it), so set
@@ -57,10 +59,17 @@ async function main(): Promise<void> {
     const result = await seedTenant(spec, passwordHash);
     if (!result.created) {
       console.log(`tenant ${result.slug}: already exists, left unchanged`);
-      continue;
+    } else {
+      console.log(`tenant ${result.slug} (company code "${result.slug}"):`);
+      for (const person of result.people) console.log(`  ${person.email}  [${person.roleTemplate}, ${person.unit}]`);
     }
-    console.log(`tenant ${result.slug} (company code "${result.slug}"):`);
-    for (const person of result.people) console.log(`  ${person.email}  [${person.roleTemplate}, ${person.unit}]`);
+    // Operational catalogs + technicians: also fills tenants seeded before Phase 2 (idempotent).
+    const operations = await seedOperationalData(result.tenantId, result.slug);
+    console.log(
+      operations.created
+        ? `  operations: ${operations.jobTypes} job types, ${operations.skills} skills, ${operations.certifications} certifications, ${operations.leadSources} lead sources, ${operations.technicians} technicians with ${operations.qualifications} qualifications`
+        : "  operations: already seeded, left unchanged",
+    );
   }
   // Both tenants share the password from SEED_PASSWORD; it is intentionally not echoed.
   console.log("seeded users sign in with the SEED_PASSWORD you provided.");

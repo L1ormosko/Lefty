@@ -1,4 +1,4 @@
-# Entity-Relationship Diagram (Phase 1 schema, Milestone 1)
+# Entity-Relationship Diagram (Phase 1 foundation + Phase 2 operational core)
 
 Source of truth: `prisma/schema.prisma`. Every box except `Tenant` and `Permission` carries a
 `tenantId` (FK to `Tenant`, FORCE-RLS protected, not drawn on each edge for readability). All
@@ -213,7 +213,7 @@ erDiagram
 
 ## Database-level rules not visible in the diagram
 
-- RLS (FORCE) policy `tenant_isolation` on all 17 tenant-owned tables (the migration applies it to
+- RLS (FORCE) policy `tenant_isolation` on all 45 tenant-owned tables (17 Phase 1 + 28 Phase 2; each RLS migration applies it to
   every table that has a `tenantId` column; a test asserts none is missed).
 - `AuditEvent`: trigger rejects UPDATE / DELETE / TRUNCATE.
 - `OrgUnit`: CHECK `parentId <> id`; trigger rejects longer cycles.
@@ -221,3 +221,281 @@ erDiagram
   any instant; `effectiveTo > effectiveFrom`.
 - `AccessScope`: CHECK that LEGAL_ENTITY/ORG_UNIT scopes carry their target and the others do not.
 - `User.email` / `Invitation.email` lower-case CHECK; locale columns CHECK in (`en-US`,`es-US`,`he-IL`).
+
+---
+
+# Phase 2: operational core
+
+Migration `20261122121345_phase2_operational_core` (one migration: tables, enums, indexes, composite FKs, RLS,
+CHECKs, partial unique indexes, append-only triggers). Same conventions as above: every table carries `tenantId`
+(FORCE RLS), every reference between tenant-owned tables is a composite `(id, tenantId)` FK, every table has
+`@@unique([id, tenantId])`. Enum values are language-neutral identifiers; the statuses are the spec's (6.3, 7.2).
+
+## Diagram
+
+```mermaid
+erDiagram
+  Customer ||--o{ CustomerAddress : "service addresses"
+  Customer ||--o{ CustomerNote : notes
+  OrgUnit |o--o{ Customer : "service area"
+  OrgUnit |o--o{ CustomerAddress : "service area"
+
+  LeadSource |o--o{ Lead : source
+  Customer |o--o{ Lead : "linked customer"
+  CustomerAddress |o--o{ Lead : "address (must be the customer's)"
+  JobType |o--o{ Lead : "requested type"
+  OrgUnit |o--o{ Lead : routing
+  Lead |o--o{ Lead : "duplicateOf"
+  Lead ||--o{ LeadAssignment : "owner history (1 ACTIVE)"
+  Employee ||--o{ LeadAssignment : owns
+  Lead ||--o{ LeadStatusHistory : "append-only"
+  Lead ||--o{ LeadInteraction : "attempts, notes"
+  Lead |o--o{ DuplicateFlag : "lead / otherLead"
+  Customer |o--o{ DuplicateFlag : "customer / otherCustomer"
+
+  JobType ||--o{ JobTypeSkill : requires
+  JobType ||--o{ JobTypeCertification : requires
+  Skill ||--o{ JobTypeSkill : ""
+  Certification ||--o{ JobTypeCertification : ""
+  JobType ||--o{ Job : "type of"
+  Customer ||--o{ Job : "for"
+  CustomerAddress ||--o{ Job : "service address (must be the customer's)"
+  OrgUnit ||--o{ Job : "service area"
+  Lead |o--o| Job : "converted into (at most one)"
+  Job |o--o{ Job : "return visit / follow-up"
+  Job ||--o{ JobRequirement : "needs (copied from type + manual)"
+  Job ||--o{ JobAssignment : "crew history"
+  Employee |o--o{ JobAssignment : does
+  OrgUnit |o--o{ JobAssignment : "team assignment"
+  Job ||--o{ JobStatusHistory : "append-only"
+  Job ||--o{ JobEvent : "append-only log"
+  Job ||--o{ DispatchRecommendation : "ranked candidates"
+  DispatchRecommendation |o--o{ JobAssignment : "came from"
+
+  Employee ||--o{ EmployeeQualification : holds
+  Skill |o--o{ EmployeeQualification : ""
+  Certification |o--o{ EmployeeQualification : ""
+  Employee ||--o{ ServiceTerritory : "may serve"
+  OrgUnit ||--o{ ServiceTerritory : ""
+  Employee ||--o{ Availability : "weekly windows + exceptions"
+
+  User ||--o{ Notification : receives
+  Notification ||--o{ NotificationDelivery : "one row per channel attempt"
+  User ||--o{ NotificationPreference : "opt-in / out"
+
+  Tenant ||--o| OperationsSettings : "one row"
+  Tenant ||--o{ NumberSequence : "customer / lead / job numbers"
+
+  Customer {
+    string id PK
+    int number "unique per tenant (NumberSequence)"
+    enum kind "INDIVIDUAL BUSINESS"
+    string name "trigram index"
+    string email "lower-case CHECK"
+    string phoneE164 "normalized match key"
+    string preferredLocale "en-US es-US he-IL"
+    string orgUnitId FK "service area, nullable"
+    string billingFields "billing set: opt-in field category"
+    datetime archivedAt "soft remove"
+  }
+  CustomerAddress {
+    string id PK
+    string customerId FK
+    decimal latitude "optional, -90..90"
+    decimal longitude "optional, -180..180, pair with latitude"
+    string normalizedKey "duplicate-address match key"
+    string orgUnitId FK "service area"
+  }
+  Lead {
+    string id PK
+    int number
+    enum status "12 spec 6.3 statuses"
+    enum priority
+    string sourceId FK
+    string externalId "unique per source (webhook idempotency)"
+    string customerId FK "nullable until linked"
+    string contactPhoneE164 "normalized"
+    int quotedAmountMinor "cents, >= 0"
+    string currency "ISO 4217"
+    datetime nextFollowUpAt
+  }
+  LeadAssignment {
+    string id PK
+    enum state "ACTIVE ENDED: one ACTIVE per lead"
+    boolean conflictConfirmed "spec 25.1"
+  }
+  LeadInteraction {
+    string id PK
+    enum kind "CONTACT_ATTEMPT NOTE CUSTOMER_MESSAGE FOLLOW_UP"
+    enum channel
+    enum outcome
+    datetime closedAt "null = open attempt"
+  }
+  DuplicateFlag {
+    string id PK
+    enum kind "LEAD_LEAD CUSTOMER_CUSTOMER LEAD_CUSTOMER"
+    string pairKey "unique per tenant, sorted ids"
+    enum status "OPEN NOT_DUPLICATE CONFIRMED_DUPLICATE"
+  }
+  JobType {
+    string id PK
+    string code "unique per tenant"
+    string category
+    int defaultDurationMinutes "1..10080"
+    boolean requiresReview
+    json completionFormSchema "Phase 3 placeholder"
+  }
+  Job {
+    string id PK
+    int number
+    enum status "16 spec 7.2 statuses"
+    string customerId FK
+    string serviceAddressId FK "belongs to the same customer"
+    string orgUnitId FK "service area, drives ORG_UNIT scope"
+    datetime appointmentWindowStart "both or neither, end > start"
+    datetime scheduledStartAt "both or neither, end > start"
+    int estimatedDurationMinutes "1..10080"
+    int quotedAmountMinor "financial field set"
+  }
+  JobAssignment {
+    string id PK
+    string employeeId FK "xor teamOrgUnitId"
+    enum role "LEAD CREW"
+    enum state "ACTIVE ENDED"
+    enum method "MANUAL RECOMMENDATION_* OVERRIDE"
+    string overrideReason "required for OVERRIDE"
+  }
+  JobEvent {
+    string id PK
+    string type "dotted key: job.assigned"
+    string clientEventId "unique per job: double-submit guard"
+    json payload
+  }
+  DispatchRecommendation {
+    string id PK
+    enum mode "MANUAL AI_ASSISTED (others refused)"
+    enum status "PENDING APPROVED MODIFIED REJECTED SUPERSEDED"
+    json candidates "ranked, every factor explained"
+    json blockingReasons "why nobody is eligible"
+  }
+  EmployeeQualification {
+    string id PK
+    enum kind "SKILL CERTIFICATION LICENSE EQUIPMENT"
+    string skillId FK "xor certificationId"
+    int level "1..5, skills only"
+    date expiresAt "null = no expiry"
+    enum status "PENDING_VERIFICATION VERIFIED REJECTED REVOKED"
+    string verifiedById FK "required when VERIFIED"
+  }
+  Availability {
+    string id PK
+    enum kind "WEEKLY_WINDOW EXCEPTION_AVAILABLE EXCEPTION_UNAVAILABLE"
+    string timeZone "IANA"
+    int isoDayOfWeek "1=Mon..7=Sun"
+    int startMinute "after LOCAL midnight"
+  }
+  Notification {
+    string id PK
+    string recipientId FK "User"
+    string eventType "dotted key: lead.assigned"
+    string idempotencyKey "unique per recipient"
+    string templateKey "rendered at read time in the recipient's language"
+    boolean critical "ignores opt-outs"
+    datetime readAt
+  }
+  NotificationDelivery {
+    string id PK
+    enum channel "IN_APP PUSH EMAIL SMS"
+    int attempt "unique per notification+channel"
+    enum status "PENDING SENT DELIVERED FAILED NOT_CONFIGURED SKIPPED"
+    json providerResponse
+    string failureReason "required when FAILED"
+    enum retryStatus "NONE SCHEDULED EXHAUSTED"
+    datetime nextRetryAt
+  }
+  OperationsSettings {
+    string id PK
+    enum dispatchMode "AI_ASSISTED default"
+    string disabledJobTransitions "narrowing only"
+    json duplicateMatchers
+    enum enabledChannels "IN_APP default"
+  }
+```
+
+## Model guide (what each table is for, who uses it)
+
+| Model | Purpose | Main consumers |
+|---|---|---|
+| `NumberSequence` | per-tenant counters for human numbers; names `customer`, `lead`, `job` | customers, leads, jobs |
+| `OperationsSettings` | one row per tenant: dispatch mode, disabled (narrowed) lifecycle transitions, duplicate matchers, channels, contact-attempt window, expiry warning days; absent row = defaults | leads, jobs, dispatch, notifications, customers |
+| `Customer` / `CustomerAddress` / `CustomerNote` | spec 6.1. Phone stored as typed + E.164; email lower-case; billing columns are the opt-in `billing` field set; archive via `archivedAt` | customers |
+| `LeadSource` | tenant-configured sources (`code` unique), typed per spec 6.2 | leads |
+| `Lead` | intake record; contact fields as received (a lead may precede its customer); address as received or linked; `externalId`+`sourceId` unique (webhook idempotency, spec 25.1) | leads |
+| `LeadAssignment` | owner history; exactly one `ACTIVE` row per lead is the owner | leads (ASSIGNED scope) |
+| `LeadStatusHistory`, `JobStatusHistory` | append-only status trail (from, to, actor type/user, reason, time) | leads, jobs |
+| `LeadInteraction` | contact attempts (open while `closedAt` is null), notes, customer messages, follow-ups | leads |
+| `DuplicateFlag` | flagged pair + matched fields + resolution; never auto-merged | customers, leads |
+| `Skill`, `Certification` | catalogs; `Certification.type` is CERTIFICATION, LICENSE or EQUIPMENT | qualifications |
+| `EmployeeQualification` | an employee's skill (level 1-5) or credential (number, issued/expires dates, verification); renewal = new row | qualifications, dispatch |
+| `ServiceTerritory` | org units an employee may be dispatched into (with descendants) | qualifications, dispatch |
+| `Availability` | weekly windows + dated exceptions in an IANA time zone | qualifications, dispatch, technician |
+| `JobType` + `JobTypeSkill` + `JobTypeCertification` | catalog of job types with default duration/priority and required skills / credentials / equipment qualifications | jobs, leads, dispatch |
+| `Job` | spec 7.1 record; appointment window (customer-facing) vs scheduled slot (dispatcher's); money in minor units | jobs, dispatch, technician |
+| `JobRequirement` | THIS job's requirements (copied from the type at creation + manual additions); the only table eligibility reads | qualifications, dispatch |
+| `JobAssignment` | crew history: employee or team, `LEAD`/`CREW`, how it was decided (manual / recommendation / override + reason) | jobs, dispatch, technician (ASSIGNED scope) |
+| `JobEvent` | append-only event log; `type` is a dotted key; `clientEventId` makes technician re-submits idempotent | jobs, dispatch, technician (Phase 3 arrival/start/complete) |
+| `DispatchRecommendation` | one generated recommendation: ranked candidates with factors, or blocking reasons; decision (approve / modify / reject) | dispatch |
+| `Notification` / `NotificationDelivery` / `NotificationPreference` | spec 14.3: inbox row per recipient + one delivery row per channel attempt; opt-outs for non-critical only | notifications |
+
+## Who is "assigned" (ASSIGNED scope)
+
+There is NO denormalized `assignedTo` column on `Lead` or `Job`. The current assignee is the `ACTIVE` row of
+`LeadAssignment` / `JobAssignment` (partial unique indexes guarantee one ACTIVE lead owner per lead, one ACTIVE
+`LEAD` per job, and no employee/team twice among a job's ACTIVE rows). Queries use the
+`(tenantId, employeeId, state)` indexes; a technician's jobs are
+`jobAssignment where employeeId = me and state = ACTIVE` joined to `Job` (index `Job (tenantId, status, scheduledStartAt)`
+and `Job (tenantId, orgUnitId, status, scheduledStartAt)` serve the board and the day schedule).
+
+## Indexes for the list and search queries
+
+| Query | Index |
+|---|---|
+| customers by phone / email / number | `Customer (tenantId, phoneE164)`, `(tenantId, email)`, unique `(tenantId, number)` |
+| customer name search (`ILIKE '%x%'`, similarity) | GIN trigram `Customer_name_trgm_idx` (extension `pg_trgm`) |
+| customer address duplicates | `CustomerAddress (tenantId, normalizedKey)`, `(tenantId, postalCode)` |
+| leads by status / age / follow-up / area / priority | `Lead (tenantId, status, createdAt)`, `(tenantId, status, nextFollowUpAt)`, `(tenantId, orgUnitId, status)`, `(tenantId, priority, status)` |
+| lead duplicate matching | `Lead (tenantId, contactPhoneE164)`, `(tenantId, contactEmail)`, `(tenantId, addressNormalizedKey)`, unique `(tenantId, sourceId, externalId)`; name: GIN trigram `Lead_contactName_trgm_idx` |
+| "my leads" / owner queues | `LeadAssignment (tenantId, employeeId, state)`, `(tenantId, leadId, state)` |
+| dispatch board / day schedule | `Job (tenantId, status, scheduledStartAt)`, `(tenantId, orgUnitId, status, scheduledStartAt)`, `(tenantId, appointmentWindowStart)` |
+| customer history | `Job (tenantId, customerId, createdAt)`, `Lead (tenantId, customerId)` |
+| "my jobs" | `JobAssignment (tenantId, employeeId, state)`, `(tenantId, teamOrgUnitId, state)` |
+| certifications expiring | `EmployeeQualification (tenantId, expiresAt)` |
+| availability lookup | `Availability (tenantId, employeeId, kind, isoDayOfWeek)`, `(tenantId, employeeId, startsAt, endsAt)` |
+| notification inbox / unread | `Notification (tenantId, recipientId, readAt, createdAt)` |
+| delivery retry worker | partial `NotificationDelivery_due_retry_idx` where `retryStatus = SCHEDULED` |
+
+## Database-level rules (Phase 2)
+
+All names are part of the contract (asserted in `tests/db/phase2-schema.test.ts`).
+
+- **RLS**: the migration re-runs the Phase 1 DO-block over every table with a `tenantId` column.
+- **Composite FKs**: `Job (serviceAddressId, customerId, tenantId)` and `Lead (customerAddressId, customerId, tenantId)`
+  reference `CustomerAddress (id, customerId, tenantId)`: an address can never belong to another customer or tenant.
+  `lead_address_needs_customer` closes the MATCH SIMPLE gap for a lead with an address but no customer.
+- **Append-only** (trigger, UPDATE/DELETE/TRUNCATE rejected): `LeadStatusHistory`, `JobStatusHistory`, `JobEvent`.
+- **Partial unique indexes**: `LeadAssignment_one_active_per_lead`, `JobAssignment_one_active_lead_per_job`,
+  `JobAssignment_one_active_per_job_employee`, `JobAssignment_one_active_per_job_team`.
+  (Prisma does not model partial indexes; `prisma migrate dev` leaves them alone, verified.)
+- **Money**: `lead_amount_non_negative`, `job_amount_non_negative`, `*_currency_format` (`^[A-Z]{3}$`).
+- **Geo**: `customer_address_latitude_range`, `customer_address_longitude_range`, `customer_address_coordinates_pair`.
+- **Time windows**: `job_appointment_window`, `job_scheduled_slot` (both or neither, end after start),
+  `lead_preferred_window_order`, `job_duration_range` / `job_type_duration_range` (1..10080 minutes),
+  `service_territory_dates`, `availability_shape` (weekly vs exception columns, minute ranges), `availability_valid_dates`.
+- **Formats**: lower-case emails, E.164 phones (`+15551234567`), supported locales, `*_code_format`
+  (`^[a-z0-9][a-z0-9_-]{0,62}$`), dotted event types (`job_event_type_format`, `notification_event_type_format`).
+- **State consistency**: `*_assignment_state_ended` (ENDED iff `endedAt`), `job_assignment_target` (employee xor team),
+  `job_assignment_override_reason`, `job_assignment_recommendation_link`, `dispatch_recommendation_decision`,
+  `duplicate_flag_shape` / `duplicate_flag_resolution`, `employee_qualification_target` (skill xor credential),
+  `employee_qualification_level` (1-5, skills only), `employee_qualification_dates`,
+  `employee_qualification_verified` (VERIFIED needs verifier + time), `certification_not_skill`,
+  `notification_delivery_failure_reason`, `notification_delivery_retry_time`, `*_status_history_changed`.
