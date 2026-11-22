@@ -407,3 +407,13 @@ No new dependencies (Zod already present). No schema change and no migration: ev
   and can deactivate them; unit-scoped administrators do not (keeping them reachable through their last unit would need history-based scopes in authz).
 - Seed cleanup failures are logged (the original error is still rethrown).
 
+
+
+## Task 8: Administration screens
+- No new dependencies. Pages are server-rendered with URL-driven filters and cursor paging; the shared `DataTable`/`Pagination`/`Field` are client components that need callbacks or render functions, so `AdminTable`, `CursorPager` and `AdminField` (server-friendly equivalents) live under `(app)/admin/_components`. `Dialog`, `ConfirmDialog` are used through `ActionDialog` / `ConfirmActionButton`.
+- Navigation: admin items are visible with `<module>.view` over a TENANT, LEGAL_ENTITY or ORG_UNIT scope, or the module admin permission (`canSeeAdminModule`). OWN and ASSIGNED parts do not count (a Technician holds both on everything), which deviates from the brief's literal "non-OWN" so the Technician case is hidden as required.
+- Small read services were added where no service existed: `getCompanyOverview` (organization), `listUnitChanges` (organization; audit trail filtered by unit scope, so managers need not hold tenant-wide `audit.view`), `listPlacementHistory` (employees; requires the base field set), `listInvitations` (users; scoped via the invited employee, token never selected), `listOverridesAsActor` (i18n). Each has tests.
+- "User responsible" in history screens shows the actor's employee name, else login email, to anyone who may see that unit/employee history.
+- Subscription/module status and branch service categories have no data model: the screens say so instead of showing invented data (§28.3).
+- Pickers load at most 200 entries (employees, users, units x5 pages); larger tenants need a searchable picker later.
+- Invitation resend = a new invitation (the service revokes the earlier link); there is no separate revoke service.

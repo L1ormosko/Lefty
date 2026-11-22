@@ -1,6 +1,9 @@
 import { recordAudit, auditContextFields } from "@/server/audit";
 import { assertNotSelfApproval, canInTx } from "@/server/authz";
 import {
+  pageArgs,
+  toPage,
+  type Page,
   ConflictError,
   ForbiddenError,
   NotFoundError,
@@ -10,6 +13,7 @@ import {
   type RequestContext,
 } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
+import { CATALOGS, isSupportedLocale } from "@/lib/i18n";
 import {
   deleteOverrideInTx,
   markOverrideReviewedInTx,
@@ -134,5 +138,55 @@ export async function deleteOverrideAsActor(
       targetId: `${input.locale}:${input.key}`,
       previousValue: input,
     });
+  });
+}
+
+/** One override as the admin screen shows it, next to the built-in text it replaces. */
+export interface OverrideView {
+  id: string;
+  locale: string;
+  key: string;
+  value: string;
+  /** The built-in catalog text for the same locale and key (null if the key no longer exists). */
+  builtIn: string | null;
+  reviewed: boolean;
+  /** Who last edited it; a reviewer cannot be this person (separation of duties). */
+  updatedById: string | null;
+  updatedAt: Date;
+}
+
+/**
+ * Overrides of the tenant (needs `localization.view`, tenant-level), newest edit first, optionally
+ * filtered by locale and review state. Reads through `withTenant`, so RLS keeps tenants apart.
+ */
+export async function listOverridesAsActor(
+  actor: Actor,
+  query: { cursor?: string; limit: number; locale?: string; reviewed?: boolean },
+): Promise<Page<OverrideView>> {
+  return withTenant(actor.tenantId, async (tx) => {
+    await assertMay(tx, actor, "localization.view");
+    const rows = await tx.translationResource.findMany({
+      where: {
+        tenantId: actor.tenantId,
+        ...(query.locale ? { locale: query.locale } : {}),
+        ...(query.reviewed === undefined ? {} : { reviewed: query.reviewed }),
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      ...pageArgs(query),
+    });
+    const page = toPage(rows, query.limit);
+    return {
+      data: page.data.map((row) => ({
+        id: row.id,
+        locale: row.locale,
+        key: row.key,
+        value: row.value,
+        builtIn: isSupportedLocale(row.locale) ? (CATALOGS[row.locale].messages[row.key] ?? null) : null,
+        reviewed: row.reviewed,
+        updatedById: row.updatedById,
+        updatedAt: row.updatedAt,
+      })),
+      page: page.page,
+    };
   });
 }

@@ -20,7 +20,7 @@ overrides. Implements spec §16.2, §16.5, §16.6. Pure logic is in `src/lib/i18
 - DB CHECK `translation_review_consistent`: reviewed rows carry `reviewedAt`; unreviewed rows carry none.
 
 ## Permission-checked administration (Task 5)
-`saveOverrideAsActor`, `reviewOverrideAsActor`, `deleteOverrideAsActor` (actor + request context) are the entry points
+`listOverridesAsActor` (`localization.view`, tenant-level; for the admin screen), `saveOverrideAsActor`, `reviewOverrideAsActor`, `deleteOverrideAsActor` (actor + request context) are the entry points
 for API routes/server actions:
 - `localization.edit` saves an override (it lands unreviewed); `localization.configure` reviews or deletes one. Two
   permissions keep the §16.6 review meaningful (translators edit, a reviewer approves). Translations are tenant-level,
