@@ -46,7 +46,7 @@ invitation, account security and sessions. Plus a `/dev/ui` component gallery.
 | `src/app/api/v1` | 41 route files (section 5) |
 | `src/app/(app)`, `(auth)` | screens and server actions |
 | `src/components/ui`, `src/lib` | design-system primitives, catalogs, TOTP, redaction |
-| `tests/` | 56 test files plus 4 component test files |
+| `tests/` | 57 test files plus 4 component test files |
 | `docs/` | ARCHITECTURE, ERD, PERMISSIONS, API_CONVENTIONS, CODING_STANDARDS, AUTH, AUTHZ, DECISIONS, PROJECT_STATE, this report |
 
 ## 3. Database changes (migrations, in order)
@@ -65,7 +65,7 @@ Final run, in `leadro/`:
 
 | Check | Result |
 |---|---|
-| `npm test` (Vitest, real Postgres 16) | **60 files, 624 tests: 624 passed, 0 failed, 0 skipped** (~172 s) |
+| `npm test` (Vitest, real Postgres 16) | **61 files, 687 tests: 687 passed, 0 failed, 0 skipped** |
 | `npm run typecheck` | passed, 0 errors |
 | `npm run lint` | passed, 0 problems (includes the index-only import rule) |
 | `npm run i18n:check` | passed |
