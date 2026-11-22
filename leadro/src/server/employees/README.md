@@ -6,6 +6,7 @@ invitations (`auth`).
 Public API (`index.ts`):
 - Records: `createEmployee`, `updateEmployee`, `terminateEmployee`, `getEmployee`, `listEmployees`.
 - Placement: `assignEmployeeToUnit`, `endEmployeeAssignment`, `listEmployeeAssignments`.
+- Org-wide placement history: `listPlacementHistory(actor, { cursor, limit, orgUnitId? })` (`employees.view` with the `base` field set, scoped in the query).
 - History: `orgUnitAt(tenantId, employeeId, date)` / `orgUnitAtInTx` (reporting primitive),
   `getOrgUnitAtAsActor` (the permission-checked API variant).
 - `inviteEmployee(actor, employeeId, { email?, roleId?, scope? }, client)`.

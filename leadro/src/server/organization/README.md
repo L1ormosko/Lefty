@@ -4,6 +4,8 @@ Company profile, legal entities and the org tree (§3.1-3.3). Employees and thei
 `employees`; who may do what lives in `authz`.
 
 Public API (`index.ts`):
+- Company overview counts: `getCompanyOverview` (`company_settings.view`, tenant-level aggregates for the Company Overview screen).
+- History: `listUnitChanges` (`organization.view`; structural changes of the units in scope from the audit trail, with who/why/previous+new parent).
 - Tenant profile: `getTenantProfile`, `updateTenantProfile` (`company_settings.view|edit`, tenant-level).
 - Legal entities: `createLegalEntity`, `updateLegalEntity`, `archiveLegalEntity`, `listLegalEntities`, `getLegalEntity`.
 - Org units: `createOrgUnit`, `updateOrgUnit`, `moveOrgUnit`, `archiveOrgUnit`, `listOrgUnits`, `getOrgUnit`.

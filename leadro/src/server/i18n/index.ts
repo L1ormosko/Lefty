@@ -8,4 +8,6 @@ export {
 // outside this module must use the permission-checked `*AsActor` functions.
 export type { OverrideInput } from "./overrides";
 export { getTranslatorForRequest } from "./translator-for-request";
+export { listOverridesAsActor } from "./override-admin";
+export type { OverrideView } from "./override-admin";
 export { saveOverrideAsActor, reviewOverrideAsActor, deleteOverrideAsActor, toAppError } from "./override-admin";

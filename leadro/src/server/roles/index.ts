@@ -1,4 +1,4 @@
-export { createRole, cloneRole, updateRole, replaceRolePermissions, archiveRole } from "./roles";
+export { createRole, cloneRole, updateRole, replaceRolePermissions, saveRoleDefinition, archiveRole } from "./roles";
 export { listRoles, getRole, getRoleHistory } from "./role-queries";
 export { grantRoleToUser, revokeAssignment, listRoleAssignments, getRoleAssignment } from "./role-assignments";
 export type { AssignmentState } from "./role-assignments";

@@ -9,6 +9,9 @@
  */
 export type OrgUnitTypeName = "BUSINESS_UNIT" | "STATE" | "REGION" | "CITY" | "BRANCH" | "DEPARTMENT" | "TEAM";
 
+/** Every unit type, top-down; used by pickers so the list is never retyped. */
+export const ORG_UNIT_TYPES: readonly OrgUnitTypeName[] = ["BUSINESS_UNIT", "STATE", "REGION", "CITY", "BRANCH", "DEPARTMENT", "TEAM"];
+
 export interface ParentRule {
   /** May a unit of this type sit at the top of the tree (no parent)? */
   allowRoot: boolean;

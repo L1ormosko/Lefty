@@ -151,38 +151,38 @@ export async function cloneRole(actor: Actor, ctx: RequestContext, sourceRoleId:
  * role's permissions (or its template) make it mandatory.
  */
 export async function updateRole(actor: Actor, ctx: RequestContext, roleId: string, input: UpdateRoleInput) {
-  return conflictOnUniqueViolation(DUPLICATE_NAME, () =>
-    withTenant(actor.tenantId, async (tx) => {
-      const decision = await enforceInTx(tx, actor, "permissions.edit", {});
-      await assertNotHoldingRole(tx, actor, roleId);
-      const role = await loadRole(tx, actor.tenantId, roleId);
-      if (!role.active) throw new InvalidStateTransitionError({ message: "An archived role cannot be edited." });
-      if (input.requiresMfa === false && mfaIsMandatory(role.templateKey, grantsOf(role))) {
-        throw new ValidationError({ message: "MFA is mandatory for this role's permissions.", field: "requiresMfa" });
-      }
+  return conflictOnUniqueViolation(DUPLICATE_NAME, () => withTenant(actor.tenantId, (tx) => updateRoleInTx(tx, actor, ctx, roleId, input)));
+}
 
-      const previous: Record<string, unknown> = {};
-      const next: Record<string, unknown> = {};
-      for (const key of ["name", "description", "requiresMfa"] as const) {
-        if (input[key] !== undefined && input[key] !== role[key]) {
-          previous[key] = role[key];
-          next[key] = input[key];
-        }
-      }
-      if (Object.keys(next).length === 0) return projectFields(toRoleView(role, { withPermissions: true }), decision, ROLE_FIELD_MAP);
+async function updateRoleInTx(tx: TenantTx, actor: Actor, ctx: RequestContext, roleId: string, input: UpdateRoleInput) {
+  const decision = await enforceInTx(tx, actor, "permissions.edit", {});
+  await assertNotHoldingRole(tx, actor, roleId);
+  const role = await loadRole(tx, actor.tenantId, roleId);
+  if (!role.active) throw new InvalidStateTransitionError({ message: "An archived role cannot be edited." });
+  if (input.requiresMfa === false && mfaIsMandatory(role.templateKey, grantsOf(role))) {
+    throw new ValidationError({ message: "MFA is mandatory for this role's permissions.", field: "requiresMfa" });
+  }
 
-      await tx.role.update({ where: { id: roleId }, data: input });
-      await recordAudit(tx, {
-        ...auditContextFields(ctx),
-        action: "role.update",
-        targetType: "Role",
-        targetId: roleId,
-        previousValue: previous,
-        newValue: next,
-      });
-      return projectFields(toRoleView(await loadRole(tx, actor.tenantId, roleId), { withPermissions: true }), decision, ROLE_FIELD_MAP);
-    }),
-  );
+  const previous: Record<string, unknown> = {};
+  const next: Record<string, unknown> = {};
+  for (const key of ["name", "description", "requiresMfa"] as const) {
+    if (input[key] !== undefined && input[key] !== role[key]) {
+      previous[key] = role[key];
+      next[key] = input[key];
+    }
+  }
+  if (Object.keys(next).length === 0) return projectFields(toRoleView(role, { withPermissions: true }), decision, ROLE_FIELD_MAP);
+
+  await tx.role.update({ where: { id: roleId }, data: input });
+  await recordAudit(tx, {
+    ...auditContextFields(ctx),
+    action: "role.update",
+    targetType: "Role",
+    targetId: roleId,
+    previousValue: previous,
+    newValue: next,
+  });
+  return projectFields(toRoleView(await loadRole(tx, actor.tenantId, roleId), { withPermissions: true }), decision, ROLE_FIELD_MAP);
 }
 
 /**
@@ -192,41 +192,72 @@ export async function updateRole(actor: Actor, ctx: RequestContext, roleId: stri
  * changed: it is the role's permission history. The MFA flag is raised when new permissions demand it.
  */
 export async function replaceRolePermissions(actor: Actor, ctx: RequestContext, roleId: string, input: ReplacePermissionsInput) {
-  return withTenant(actor.tenantId, async (tx) => {
-    const decision = await enforceInTx(tx, actor, "permissions.edit", {});
-    await assertNotHoldingRole(tx, actor, roleId);
-    const role = await loadRole(tx, actor.tenantId, roleId);
-    if (!role.active) throw new InvalidStateTransitionError({ message: "An archived role cannot be edited." });
+  return withTenant(actor.tenantId, (tx) => replacePermissionsInTx(tx, actor, ctx, roleId, input));
+}
 
-    const before = new Map(grantsOf(role).map((grant) => [grant.permission, grant.conditions ?? null]));
-    const after = new Map(input.permissions.map((grant) => [grant.permission, grant.conditions ?? null]));
-    const added = [...after.keys()].filter((key) => !before.has(key));
-    const removed = [...before.keys()].filter((key) => !after.has(key));
-    const changed = [...after.keys()].filter((key) => before.has(key) && !sameConditions(before.get(key), after.get(key)));
-    if (added.length + removed.length + changed.length === 0) {
-      return projectFields(toRoleView(role, { withPermissions: true }), decision, ROLE_FIELD_MAP);
-    }
+async function replacePermissionsInTx(tx: TenantTx, actor: Actor, ctx: RequestContext, roleId: string, input: ReplacePermissionsInput) {
+  const decision = await enforceInTx(tx, actor, "permissions.edit", {});
+  await assertNotHoldingRole(tx, actor, roleId);
+  const role = await loadRole(tx, actor.tenantId, roleId);
+  if (!role.active) throw new InvalidStateTransitionError({ message: "An archived role cannot be edited." });
 
-    const toAdd = input.permissions.filter((grant) => added.includes(grant.permission) || changed.includes(grant.permission));
-    await assertMayDefineGrants(tx, actor, toAdd);
-    // The role may already be assigned: every live holder's scope must be one the editor could grant it in.
-    await assertMayGrantToExistingHolders(tx, actor, roleId, toAdd);
-    await tx.rolePermission.deleteMany({ where: { tenantId: actor.tenantId, roleId } });
-    await storeGrants(tx, actor.tenantId, roleId, input.permissions);
-    if (!role.requiresMfa && mfaIsMandatory(role.templateKey, input.permissions)) {
-      await tx.role.update({ where: { id: roleId }, data: { requiresMfa: true } });
-    }
-    await recordAudit(tx, {
-      ...auditContextFields(ctx),
-      action: "role.permissions_change",
-      targetType: "Role",
-      targetId: roleId,
-      previousValue: { removed, changed: changed.map((key) => ({ permission: key, conditions: before.get(key) })) },
-      newValue: { added: added.map((key) => ({ permission: key, conditions: after.get(key) })), changed: changed.map((key) => ({ permission: key, conditions: after.get(key) })) },
-      reason: input.reason,
-    });
-    return projectFields(toRoleView(await loadRole(tx, actor.tenantId, roleId), { withPermissions: true }), decision, ROLE_FIELD_MAP);
+  const before = new Map(grantsOf(role).map((grant) => [grant.permission, grant.conditions ?? null]));
+  const after = new Map(input.permissions.map((grant) => [grant.permission, grant.conditions ?? null]));
+  const added = [...after.keys()].filter((key) => !before.has(key));
+  const removed = [...before.keys()].filter((key) => !after.has(key));
+  const changed = [...after.keys()].filter((key) => before.has(key) && !sameConditions(before.get(key), after.get(key)));
+  if (added.length + removed.length + changed.length === 0) {
+    return projectFields(toRoleView(role, { withPermissions: true }), decision, ROLE_FIELD_MAP);
+  }
+
+  const toAdd = input.permissions.filter((grant) => added.includes(grant.permission) || changed.includes(grant.permission));
+  await assertMayDefineGrants(tx, actor, toAdd);
+  // The role may already be assigned: every live holder's scope must be one the editor could grant it in.
+  await assertMayGrantToExistingHolders(tx, actor, roleId, toAdd);
+  await tx.rolePermission.deleteMany({ where: { tenantId: actor.tenantId, roleId } });
+  await storeGrants(tx, actor.tenantId, roleId, input.permissions);
+  if (!role.requiresMfa && mfaIsMandatory(role.templateKey, input.permissions)) {
+    await tx.role.update({ where: { id: roleId }, data: { requiresMfa: true } });
+  }
+  await recordAudit(tx, {
+    ...auditContextFields(ctx),
+    action: "role.permissions_change",
+    targetType: "Role",
+    targetId: roleId,
+    previousValue: { removed, changed: changed.map((key) => ({ permission: key, conditions: before.get(key) })) },
+    newValue: { added: added.map((key) => ({ permission: key, conditions: after.get(key) })), changed: changed.map((key) => ({ permission: key, conditions: after.get(key) })) },
+    reason: input.reason,
   });
+  return projectFields(toRoleView(await loadRole(tx, actor.tenantId, roleId), { withPermissions: true }), decision, ROLE_FIELD_MAP);
+}
+
+/**
+ * Saves a role definition from an editor that only toggles permissions: name/description/MFA and the
+ * set of permission KEYS, in ONE transaction (a failing permission change leaves the name untouched
+ * and no audit event behind). Grants that stay selected keep their stored conditions (record sets,
+ * field sets), read inside the same transaction, so concurrent edits cannot be lost and the
+ * editor can never silently widen or drop a restriction. Every rule of `updateRole` and
+ * `replaceRolePermissions` applies unchanged.
+ */
+export async function saveRoleDefinition(
+  actor: Actor,
+  ctx: RequestContext,
+  roleId: string,
+  input: { update: UpdateRoleInput; permissionKeys: string[]; reason?: string },
+) {
+  return conflictOnUniqueViolation(DUPLICATE_NAME, () =>
+    withTenant(actor.tenantId, async (tx) => {
+      await enforceInTx(tx, actor, "permissions.edit", {}); // before any lookup: no 404-vs-403 oracle
+      const current = await loadRole(tx, actor.tenantId, roleId);
+      const keep = new Map(grantsOf(current).map((grant) => [grant.permission, grant.conditions]));
+      const permissions = [...new Set(input.permissionKeys)].map((permission) => {
+        const conditions = keep.get(permission);
+        return conditions ? { permission, conditions } : { permission };
+      });
+      await updateRoleInTx(tx, actor, ctx, roleId, input.update);
+      return replacePermissionsInTx(tx, actor, ctx, roleId, { permissions, reason: input.reason });
+    }),
+  );
 }
 
 /**
