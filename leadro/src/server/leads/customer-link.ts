@@ -12,13 +12,21 @@ import type { LinkCustomerInput } from "./schemas";
 /**
  * The customer a lead belongs to must exist, be active, be visible to the caller and own the address (§6.1, customers
  * README: archived customers take no new work). A customer the caller may not view is a 404, like any hidden record.
- * The lead being linked will make the customer "lead_related", so visibility is judged as if it already were.
+ * The work about to be attached makes the customer a member of the record sets in `assumeSets` (a linked lead makes it
+ * "lead_related"; a conversion also makes it "job_related"), so visibility is judged as if it already were: a
+ * set-qualified grant (Dispatcher: `job_related`) must not hide the very customer the caller is about to create a job for.
  */
-export async function assertCustomerUsableForLead(tx: TenantTx, actor: Actor, customerId: string, customerAddressId?: string): Promise<void> {
+export async function assertCustomerUsableForLead(
+  tx: TenantTx,
+  actor: Actor,
+  customerId: string,
+  customerAddressId?: string,
+  assumeSets: readonly string[] = ["lead_related"],
+): Promise<void> {
   await assertCustomerActive(tx, actor.tenantId, customerId);
   const ref = await customerResourceRef(tx, actor.tenantId, customerId);
   if (!ref) throw new NotFoundError();
-  const decision = await canInTx(tx, actor, "customers.view", { ...ref, sets: [...(ref.sets ?? []), "lead_related"] });
+  const decision = await canInTx(tx, actor, "customers.view", { ...ref, sets: [...new Set([...(ref.sets ?? []), ...assumeSets])] });
   if (!decision.allowed) throw new NotFoundError();
   if (customerAddressId) {
     const address = await tx.customerAddress.findFirst({

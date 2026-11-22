@@ -83,7 +83,7 @@ export async function convertLead(actor: Actor, ctx: RequestContext, leadId: str
     const jobTypeId = input.jobTypeId ?? lead.jobTypeId;
     if (!jobTypeId) throw new ValidationError({ message: "Choose the job type before converting the lead.", field: "jobTypeId" });
 
-    await assertCustomerUsableForLead(tx, actor, customerId, serviceAddressId);
+    await assertCustomerUsableForLead(tx, actor, customerId, serviceAddressId, ["lead_related", "job_related"]);
     const jobType = await tx.jobType.findFirst({ where: { id: jobTypeId, tenantId: actor.tenantId }, select: { id: true } });
     if (!jobType) throw new ValidationError({ message: "Unknown job type.", field: "jobTypeId" });
 
