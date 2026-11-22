@@ -11,15 +11,18 @@ function isJsonContentType(contentType: string | null): boolean {
 }
 
 /**
- * JSON-only CSRF layer (docs/API_CONVENTIONS.md): a mutating request that carries a body must say
- * it is JSON. A cross-site HTML form or `fetch` without a CORS preflight can only send
- * form/text content types, so they are refused before any parsing. Requests with no body are not
- * affected (and SameSite=Lax cookies are not sent on cross-site POSTs anyway).
+ * JSON-only CSRF layer (docs/API_CONVENTIONS.md): a mutating request that carries body bytes must
+ * say it is JSON. A cross-site HTML form or `fetch` without a CORS preflight can only send
+ * form/text content types, so they are refused before any parsing. A request with zero body
+ * bytes is exempt: Next.js hands every non-GET/HEAD request a (possibly empty) body stream, so
+ * "has a body object" cannot tell a bodyless `POST /auth/logout` from a form post — only the
+ * bytes can. (SameSite=Lax cookies are not sent on cross-site POSTs anyway.)
  *
+ * @param bodyText the already-read raw body (see `readRequestText`)
  * @throws UnsupportedMediaTypeError
  */
-export function assertJsonContentType(req: Request): void {
-  if (!MUTATING_METHODS.has(req.method) || req.body === null) return;
+export function assertJsonContentType(req: Request, bodyText: string): void {
+  if (!MUTATING_METHODS.has(req.method) || bodyText === "") return;
   if (!isJsonContentType(req.headers.get("content-type"))) {
     throw new UnsupportedMediaTypeError();
   }
@@ -49,13 +52,19 @@ async function readTextWithLimit(req: Request): Promise<string> {
 }
 
 /**
- * Parses the request body as JSON. GET/HEAD have none; an empty body is `undefined`.
- * @throws UnsupportedMediaTypeError, PayloadTooLargeError, ValidationError (not valid JSON)
+ * Reads the raw body text (1 MB cap). GET/HEAD have no body and yield "".
+ * @throws PayloadTooLargeError
  */
-export async function readJsonBody(req: Request): Promise<unknown> {
-  if (req.method === "GET" || req.method === "HEAD") return undefined;
-  assertJsonContentType(req);
-  const text = await readTextWithLimit(req);
+export async function readRequestText(req: Request): Promise<string> {
+  if (req.method === "GET" || req.method === "HEAD") return "";
+  return readTextWithLimit(req);
+}
+
+/**
+ * Parses already-read body text as JSON; an empty body is `undefined`.
+ * @throws ValidationError (not valid JSON)
+ */
+export function parseJsonText(text: string): unknown {
   if (text.trim() === "") return undefined;
   try {
     return JSON.parse(text);

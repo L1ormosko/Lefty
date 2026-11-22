@@ -159,6 +159,31 @@ describe("defineRoute request body rules", () => {
     expect(noType.status).toBe(415);
   });
 
+  // Next.js 15 gives every non-GET/HEAD request a body stream, even with zero bytes and no Content-Type.
+  const emptyStreamRequest = (method: string, headers: Record<string, string> = {}) =>
+    new Request("http://localhost/x", {
+      method,
+      headers,
+      body: new ReadableStream<Uint8Array>({ start: (controller) => controller.close() }),
+      duplex: "half",
+    } as RequestInit);
+
+  it("accepts a bodyless POST/DELETE that has an empty body stream and no Content-Type", async () => {
+    const bodyless = defineRoute({ handler: async () => ok({ fine: true }) });
+    expect((await bodyless(emptyStreamRequest("POST"))).status).toBe(200);
+    expect((await bodyless(emptyStreamRequest("DELETE"))).status).toBe(200);
+  });
+
+  it("still refuses text/plain with bytes on a route that has no body schema", async () => {
+    const bodyless = defineRoute({ handler: async () => ok(null) });
+    const response = await bodyless(new Request("http://localhost/x", { method: "POST", headers: { "content-type": "text/plain" }, body: "hi" }));
+    expect(response.status).toBe(415);
+  });
+
+  it("treats an empty stream on a body-schema route as a validation error, not 415", async () => {
+    expect((await route(emptyStreamRequest("POST"))).status).toBe(400);
+  });
+
   it("accepts application/json with a charset parameter", async () => {
     const response = await route(jsonRequest({ name: "x" }, { "content-type": "application/json; charset=utf-8" }));
     expect(response.status).toBe(200);
