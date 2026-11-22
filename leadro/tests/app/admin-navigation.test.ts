@@ -24,6 +24,15 @@ describe("administration navigation is scope-aware", () => {
     expect(shown).not.toContain("users");
     expect(shown).not.toContain("roles");
     expect(shown).not.toContain("company");
+    expect(shown).not.toContain("localization");
+  });
+
+  it("does not show Company or Localization to a unit-scoped City Manager (their services need a tenant-wide grant)", async () => {
+    const world = await buildWorld("admin-nav-city");
+    const shown = ids(await getNavigation(world.cityManagerA.actor));
+    expect(shown).toContain("employees");
+    expect(shown).not.toContain("company");
+    expect(shown).not.toContain("localization");
   });
 
   it("shows the CEO every available administration screen", async () => {

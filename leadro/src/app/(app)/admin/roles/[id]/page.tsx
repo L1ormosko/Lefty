@@ -11,7 +11,7 @@ import { AdminTable } from "../../_components/AdminTable";
 import { CursorPager } from "../../_components/CursorPager";
 import { ScopeFields } from "../../_components/ScopeFields";
 import { fullNameOf, showDateTime, toneOfStatus, type SearchParams } from "../../_lib/format";
-import { loadActiveUnits, loadLegalEntityOptions, unitOptions } from "../../_lib/options";
+import { loadActiveUnits, loadLegalEntityOptions, unitOptions, forbiddenAsNull } from "../../_lib/options";
 import { loadForPage, queryParam } from "../../_lib/page-guard";
 import { PermissionGrid } from "../_components/PermissionGrid";
 import { archiveRoleAction, grantRoleAction, revokeAssignmentAction, saveRoleAction } from "../actions";
@@ -32,7 +32,7 @@ export default async function RoleDetailPage({ params, searchParams }: { params:
   const { role, assignments, history } = loaded.data;
 
   const [users, units, entities, mayEdit, mayArchive, mayAssign] = await Promise.all([
-    listUsers(actor, { limit: 200 }).catch(() => null),
+    forbiddenAsNull(listUsers(actor, { limit: 200 })),
     loadActiveUnits(actor),
     loadLegalEntityOptions(actor),
     can(actor, "permissions.edit"),

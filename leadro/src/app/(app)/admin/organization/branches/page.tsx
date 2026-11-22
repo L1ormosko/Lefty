@@ -11,7 +11,7 @@ import { CursorPager } from "../../_components/CursorPager";
 import { SearchForm } from "../../_components/SearchForm";
 import { WEEKDAYS } from "../../_lib/branch-form";
 import { fullNameOf, type SearchParams } from "../../_lib/format";
-import { loadActiveUnits, loadLegalEntityOptions, unitOptions, type UnitSummary } from "../../_lib/options";
+import { loadActiveUnits, loadLegalEntityOptions, unitOptions, type UnitSummary, forbiddenAsNull } from "../../_lib/options";
 import { organizationTabs } from "../../_lib/org-tabs";
 import { loadForPage, queryParam } from "../../_lib/page-guard";
 import { ancestorsOf } from "../../_lib/unit-tree";
@@ -59,8 +59,8 @@ export default async function BranchesPage({ searchParams }: { searchParams: Sea
     await Promise.all(
       branches.map(async (branch) => {
         const [managers, people] = await Promise.all([
-          listUnitManagers(actor, branch.id, { limit: 5 }).catch(() => null),
-          listEmployees(actor, { limit: 50, orgUnitId: branch.id }).catch(() => null),
+          forbiddenAsNull(listUnitManagers(actor, branch.id, { limit: 5 })),
+          forbiddenAsNull(listEmployees(actor, { limit: 50, orgUnitId: branch.id })),
         ]);
         const primary = managers?.data.find((manager) => manager.isPrimary) ?? managers?.data[0];
         return [branch.id, { manager: primary ? fullNameOf(primary.employee ?? {}) : "", people: people ? `${people.data.length}${people.page.nextCursor ? "+" : ""}` : "—" }] as const;

@@ -5,6 +5,7 @@ import { can } from "@/server/authz";
 import type { Actor } from "@/server/core";
 import { listEmployees } from "@/server/employees";
 import { getOrgUnit, listUnitManagers } from "@/server/organization";
+import { forbiddenAsNull } from "../../_lib/options";
 import { ActionDialog } from "../../_components/ActionDialog";
 import { AdminField } from "../../_components/AdminField";
 import { Panel } from "../../_components/AdminPage";
@@ -44,7 +45,7 @@ export async function UnitDetail({ actor, t, viewer, unitId, units, employeeOpti
   const loaded = await loadForPage(async () => ({
     unit: (await getOrgUnit(actor, unitId)) as unknown as UnitSummary,
     managers: await listUnitManagers(actor, unitId, { limit: 50, includeEnded: true }),
-    people: await listEmployees(actor, { limit: 25, orgUnitId: unitId, cursor }).catch(() => null),
+    people: await forbiddenAsNull(listEmployees(actor, { limit: 25, orgUnitId: unitId, cursor })),
   }));
   if (loaded.denied) return null;
   const { unit, managers, people } = loaded.data;

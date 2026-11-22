@@ -17,7 +17,7 @@ export interface NavigationItem {
    * Scope-aware rule for administration screens (instead of `permission`): visible with a
    * non-OWN `<module>.view` scope or the module's administrative permission.
    */
-  adminModule?: { module: string; adminPermission: string };
+  adminModule?: { module: string; adminPermission: string; /** The screen shows tenant-level records, so only a TENANT-scoped grant is useful. */ tenantLevel?: boolean };
   /**
    * False while the destination page does not exist yet. Such items are defined here so their
    * permission rule is settled and tested, but they are never shown: a link to a 404 is worse
@@ -31,13 +31,13 @@ export const NAVIGATION_ITEMS: readonly NavigationItem[] = [
   // Administration screens (Task 8). Their visibility is scope-aware (see `canSeeAdminModule`): a
   // Technician holds employees.view / localization.view over their OWN record only, which must not
   // surface the employee directory or the translation editor.
-  { id: "company", labelKey: "NAV.COMPANY_OVERVIEW", href: "/admin/company", adminModule: { module: "company_settings", adminPermission: "company_settings.configure" }, isAvailable: true },
+  { id: "company", labelKey: "NAV.COMPANY_OVERVIEW", href: "/admin/company", adminModule: { module: "company_settings", adminPermission: "company_settings.configure", tenantLevel: true }, isAvailable: true },
   { id: "organization", labelKey: "NAV.ORGANIZATION", href: "/admin/organization", adminModule: { module: "organization", adminPermission: "organization.manage" }, isAvailable: true },
   { id: "employees", labelKey: "NAV.EMPLOYEES", href: "/admin/employees", adminModule: { module: "employees", adminPermission: "employees.edit" }, isAvailable: true },
   { id: "users", labelKey: "NAV.USERS", href: "/admin/users", adminModule: { module: "users", adminPermission: "users.manage" }, isAvailable: true },
   { id: "roles", labelKey: "NAV.ROLES_AND_ACCESS", href: "/admin/roles", adminModule: { module: "permissions", adminPermission: "permissions.manage" }, isAvailable: true },
   { id: "audit", labelKey: "NAV.AUDIT_LOG", href: "/admin/audit", permission: "audit.view", isAvailable: false },
-  { id: "localization", labelKey: "NAV.LOCALIZATION", href: "/admin/localization", adminModule: { module: "localization", adminPermission: "localization.configure" }, isAvailable: true },
+  { id: "localization", labelKey: "NAV.LOCALIZATION", href: "/admin/localization", adminModule: { module: "localization", adminPermission: "localization.configure", tenantLevel: true }, isAvailable: true },
 ];
 
 /**
@@ -46,7 +46,10 @@ export const NAVIGATION_ITEMS: readonly NavigationItem[] = [
  * ignore data scope, so a Technician (view of their own record) would wrongly qualify.
  * Decided from granted permissions only (never role names, §4.2) and re-read on every call (§25.5).
  */
-export async function canSeeAdminModule(actor: Actor, module: string, adminPermission: string): Promise<boolean> {
+export async function canSeeAdminModule(actor: Actor, module: string, adminPermission: string, tenantLevel = false): Promise<boolean> {
+  // Tenant-level screens (company profile, translations) reject unit-scoped grants in their
+  // services, so a unit-scoped `view` must not surface the link (it would lead to access denied).
+  if (tenantLevel) return (await can(actor, `${module}.view`, {})).allowed;
   const scope = await withTenant(actor.tenantId, (tx) => resolveScope(tx, actor, `${module}.view`));
   // OWN is the person's own record; ASSIGNED is "records assigned to me" (jobs, leads) and means
   // nothing for administration data. Neither makes a directory or an editor worth showing.
@@ -55,7 +58,7 @@ export async function canSeeAdminModule(actor: Actor, module: string, adminPermi
 }
 
 async function isVisible(actor: Actor, item: NavigationItem): Promise<boolean> {
-  if (item.adminModule) return canSeeAdminModule(actor, item.adminModule.module, item.adminModule.adminPermission);
+  if (item.adminModule) return canSeeAdminModule(actor, item.adminModule.module, item.adminModule.adminPermission, item.adminModule.tenantLevel);
   return !item.permission || (await can(actor, item.permission)).allowed;
 }
 

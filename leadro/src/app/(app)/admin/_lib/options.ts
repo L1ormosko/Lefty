@@ -30,6 +30,19 @@ export interface UnitSummary {
   operatingHours: unknown;
 }
 
+/**
+ * Awaits a service call and turns ONLY a 403 into `null` (the caller lacks that permission, so the
+ * section is simply not shown). Every other error, including database or programming errors, propagates.
+ */
+export async function forbiddenAsNull<T>(call: Promise<T>): Promise<T | null> {
+  try {
+    return await call;
+  } catch (error) {
+    if (error instanceof ForbiddenError) return null;
+    throw error;
+  }
+}
+
 async function orEmpty<T>(load: () => Promise<T[]>): Promise<T[]> {
   try {
     return await load();

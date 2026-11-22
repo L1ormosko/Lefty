@@ -3,6 +3,7 @@ import { PERMISSION_CATALOG, permissionKey, can } from "@/server/authz";
 import { getEffectiveAccess, listRoles } from "@/server/roles";
 import { listUsers } from "@/server/users";
 import { requireFullSession } from "../../../_lib/page-context";
+import { forbiddenAsNull } from "../_lib/options";
 import { ActionDialog } from "../_components/ActionDialog";
 import { AdminField } from "../_components/AdminField";
 import { AccessDenied, AdminPage, Panel } from "../_components/AdminPage";
@@ -33,7 +34,7 @@ export default async function RolesPage({ searchParams }: { searchParams: Search
 
   const loaded = await loadForPage(() => listRoles(actor, { limit: 25, cursor, search, active: "all" }));
   if (loaded.denied) return <AccessDenied t={t} />;
-  const [mayCreate, users] = await Promise.all([can(actor, "permissions.create"), listUsers(actor, { limit: 200 }).catch(() => null)]);
+  const [mayCreate, users] = await Promise.all([can(actor, "permissions.create"), forbiddenAsNull(listUsers(actor, { limit: 200 }))]);
   const userOptions = (users?.data ?? []).map((user) => ({ value: String(user.id), label: `${fullNameOf(user) || "—"} (${String(user.email)})` }));
   const diagnostic = diagUser
     ? await loadForPage(() => getEffectiveAccess(actor, { userId: diagUser, permission: diagPermission, employeeId: diagEmployee, orgUnitId: diagUnit }))

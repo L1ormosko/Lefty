@@ -11,7 +11,7 @@ import { ConfirmActionButton } from "../../_components/ConfirmActionButton";
 import { CursorPager } from "../../_components/CursorPager";
 import { InviteDialog } from "../../_components/InviteDialog";
 import { fullNameOf, showDate, showDateTime, toneOfStatus, type SearchParams } from "../../_lib/format";
-import { loadActiveUnits, loadLegalEntityOptions, loadRoleOptions, unitOptions } from "../../_lib/options";
+import { loadActiveUnits, loadLegalEntityOptions, loadRoleOptions, unitOptions, forbiddenAsNull } from "../../_lib/options";
 import { loadForPage, queryParam } from "../../_lib/page-guard";
 import { assignEmployeeAction } from "../../organization/actions";
 import { endAssignmentAction, terminateEmployeeAction, updateEmployeeAction } from "../actions";
@@ -32,7 +32,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: { pa
 
   const loaded = await loadForPage(async () => ({
     employee: await getEmployee(actor, id),
-    history: await listEmployeeAssignments(actor, id, { limit: 25, cursor }).catch(() => null),
+    history: await forbiddenAsNull(listEmployeeAssignments(actor, id, { limit: 25, cursor })),
   }));
   if (loaded.denied) return <AccessDenied t={t} />;
   const { employee, history } = loaded.data;
