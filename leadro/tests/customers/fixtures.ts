@@ -133,6 +133,7 @@ export async function assignJob(
         employeeId: "employeeId" in target ? target.employeeId : null,
         teamOrgUnitId: "teamOrgUnitId" in target ? target.teamOrgUnitId : null,
         state,
+        assignedAt: new Date(Date.now() - 3_600_000),
         endedAt: state === "ENDED" ? new Date() : null,
       },
     });
@@ -148,7 +149,7 @@ export async function assignLead(
 ): Promise<string> {
   return withTenant(tenantId, async (tx) => {
     const row = await tx.leadAssignment.create({
-      data: { tenantId, leadId, employeeId, state, endedAt: state === "ENDED" ? new Date() : null },
+      data: { tenantId, leadId, employeeId, state, assignedAt: new Date(Date.now() - 3_600_000), endedAt: state === "ENDED" ? new Date() : null },
     });
     return row.id;
   });

@@ -273,3 +273,21 @@ Rules (all enforced in code, all tested):
 Every module ships: permission tests (each role template x allowed/denied action), scope tests
 (in-scope, out-of-scope, descendant, temporary assignment, expired/revoked), and tenant-isolation
 tests for any tenant data it touches.
+
+## 8. Customers: how scopes, sets and fields apply (Phase 2 Task 2)
+
+Code: `src/server/customers/customer-access.ts` and `assignment-access.ts`.
+
+- **ORG_UNIT / LEGAL_ENTITY**: the customer's service-area unit `Customer.orgUnitId` (and that unit's legal entity). A
+  customer without a unit is tenant-level: only TENANT scopes reach it.
+- **ASSIGNED**: a non-archived lead or job of the customer has an ACTIVE assignment to the caller; a job assigned to a team
+  (`JobAssignment.teamOrgUnitId`) reaches every employee with an active placement in that team. Leads and jobs reuse the same
+  where-fragments (`leadAssignedToWhere`, `jobAssignedToWhere`) for their own ASSIGNED scope. **OWN** matches nothing.
+- **Record sets**: `job_related` (the customer has a non-archived job; Dispatcher), `lead_related` (has a non-archived lead; Lead
+  Operations). Unknown sets match nothing. `customer_history` is a JOB set passed only by the customer history view.
+- **Fields**: billing columns are the opt-in `billing` set (written only by grants naming it, never in audit values). A grant
+  limited to `billing` (Finance) sees only billing columns and cannot search or filter by base columns. Technician (plain
+  ASSIGNED grant) gets every non-billing field and cannot write.
+- **Denials** on a customer are 404 (never 403) once a record is involved; creating without a tenant-wide grant and no unit is 403.
+- **Duplicates**: flags are created from the whole tenant but shown/resolved only when the caller may view/edit BOTH customers;
+  `customers.manage` (tenant-wide) configures the matchers.
