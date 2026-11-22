@@ -7,12 +7,12 @@ Public API (`index.ts`):
 - `authenticateRequest(req)` — the `defineRoute` `authenticate` hook; session cookie -> `Actor`.
   `authenticateMfaRequest(req)` is the same but also accepts a session still waiting for MFA
   (MFA endpoints and logout ONLY). `requireSession()` is the server component/action equivalent.
-- `login`, `logout`, `listOwnSessions`, `revokeOwnSession`, `deactivateUserAccount`.
+- `login`, `logout`, `listOwnSessions`, `revokeOwnSession`, `deactivateUserAccountUnchecked`.
 - `startMfaEnrollment`, `confirmMfaEnrollment`, `verifyMfaChallenge`, `userRequiresMfa` (delegates to authz
   `holdsMfaRequiringRole`: ONE definition of an active assignment).
 - `changeOwnPassword(actor, { currentPassword, newPassword }, client)` — needs the current password, policy-checked,
   rate limited per account (5 / 15 min), revokes every OTHER session, audited (`auth.password_change`).
-- `createInvitation`, `acceptInvitation`, `requestPasswordReset`, `completePasswordReset`.
+- `createInvitationUnchecked`, `acceptInvitation`, `requestPasswordReset`, `completePasswordReset`.
 - `setAuthNotifier` — plug in email/SMS delivery for reset and invitation tokens (default only logs, no token).
 - `withSessionCookie` / `queueSessionCookie` — lets thin routes set the cookie (core's `RouteResult` has no headers).
 

@@ -33,12 +33,12 @@ export async function orgUnitAtInTx(
 }
 
 /** `orgUnitAtInTx` in its own tenant transaction. */
-export function orgUnitAt(tenantId: string, employeeId: string, at: Date): Promise<OrgUnitAtResult | null> {
+export function orgUnitAtUnchecked(tenantId: string, employeeId: string, at: Date): Promise<OrgUnitAtResult | null> {
   return withTenant(tenantId, (tx) => orgUnitAtInTx(tx, tenantId, employeeId, at));
 }
 
 /**
- * `orgUnitAt` for an API caller: needs `employees.view` over the employee (404 outside the
+ * `orgUnitAtUnchecked` for an API caller: needs `employees.view` over the employee (404 outside the
  * caller's scope) with the `base` field set, because the answer reveals where they worked.
  */
 export function getOrgUnitAtAsActor(actor: Actor, employeeId: string, at: Date): Promise<OrgUnitAtResult | null> {

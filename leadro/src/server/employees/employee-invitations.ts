@@ -1,4 +1,4 @@
-import { createInvitation, type ClientInfo } from "@/server/auth";
+import { createInvitationUnchecked, type ClientInfo } from "@/server/auth";
 import { enforceInTx } from "@/server/authz";
 import { ConflictError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant } from "@/server/db";
@@ -54,7 +54,7 @@ export async function inviteEmployee(
     return address;
   });
 
-  const invitation = await createInvitation(
+  const invitation = await createInvitationUnchecked(
     actor.tenantId,
     { email, invitedById: actor.userId, employeeId, roleId: input.roleId, scope: input.scope },
     client,

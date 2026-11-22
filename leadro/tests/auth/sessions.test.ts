@@ -3,7 +3,7 @@ import { NotFoundError, UnauthenticatedError } from "@/server/core";
 import {
   authenticateMfaRequest,
   authenticateRequest,
-  deactivateUserAccount,
+  deactivateUserAccountUnchecked,
   listOwnSessions,
   logout,
   requireSession,
@@ -97,7 +97,7 @@ describe("session authentication", () => {
     const user = await createTenantWithUser();
     const { token } = await loginAs(user);
     await authenticateRequest(requestWithToken(token));
-    await deactivateUserAccount(user.tenantId, user.userId, null, testClient());
+    await deactivateUserAccountUnchecked(user.tenantId, user.userId, null, testClient());
     await expect(authenticateRequest(requestWithToken(token))).rejects.toBeInstanceOf(UnauthenticatedError);
   });
 

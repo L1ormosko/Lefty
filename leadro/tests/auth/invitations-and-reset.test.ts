@@ -4,7 +4,7 @@ import {
   acceptInvitation,
   authenticateRequest,
   completePasswordReset,
-  createInvitation,
+  createInvitationUnchecked,
   login,
   requestPasswordReset,
   setAuthNotifier,
@@ -34,7 +34,7 @@ describe("invitations", () => {
   it("creates a user on accept, sets the password, and the user can then log in", async () => {
     const tenant = await createTenant("auth-invite");
     const email = uniqueEmail("invitee");
-    const invitation = await createInvitation(tenant.id, { email, invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email, invitedById: null }, testClient());
 
     const { userId } = await acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient());
     const result = await login({ tenantSlug: tenant.slug, email, password: NEW_PASSWORD }, testClient());
@@ -45,7 +45,7 @@ describe("invitations", () => {
     const tenant = await createTenant("auth-invite2");
     const invited = await createActiveUser(tenant, { status: "INVITED" });
     const before = Date.now();
-    const invitation = await createInvitation(tenant.id, { email: invited.email, invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email: invited.email, invitedById: null }, testClient());
 
     const row = await withTenant(tenant.id, (tx) => tx.invitation.findUniqueOrThrow({ where: { id: invitation.invitationId } }));
     expect(row.tokenHash).toBe(hashToken(invitation.token));
@@ -62,7 +62,7 @@ describe("invitations", () => {
 
   it("is single-use", async () => {
     const tenant = await createTenant("auth-invite3");
-    const invitation = await createInvitation(tenant.id, { email: uniqueEmail(), invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email: uniqueEmail(), invitedById: null }, testClient());
     await acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient());
     await expect(acceptInvitation({ token: invitation.token, password: "another passphrase!" }, testClient())).rejects.toBeInstanceOf(
       ValidationError,
@@ -71,7 +71,7 @@ describe("invitations", () => {
 
   it("lets only one of two concurrent accepts win", async () => {
     const tenant = await createTenant("auth-invite4");
-    const invitation = await createInvitation(tenant.id, { email: uniqueEmail(), invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email: uniqueEmail(), invitedById: null }, testClient());
     const attempts = await Promise.allSettled([
       acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient()),
       acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient()),
@@ -82,8 +82,8 @@ describe("invitations", () => {
   it("rejects expired, revoked (superseded) and garbage tokens with the same message", async () => {
     const tenant = await createTenant("auth-invite5");
     const email = uniqueEmail();
-    const first = await createInvitation(tenant.id, { email, invitedById: null }, testClient());
-    const second = await createInvitation(tenant.id, { email, invitedById: null }, testClient()); // revokes `first`
+    const first = await createInvitationUnchecked(tenant.id, { email, invitedById: null }, testClient());
+    const second = await createInvitationUnchecked(tenant.id, { email, invitedById: null }, testClient()); // revokes `first`
     await withTenant(tenant.id, (tx) =>
       tx.invitation.update({ where: { id: second.invitationId }, data: { expiresAt: new Date(Date.now() - 1000) } }),
     );
@@ -99,7 +99,7 @@ describe("invitations", () => {
 
   it("enforces the password policy without consuming the token", async () => {
     const tenant = await createTenant("auth-invite6");
-    const invitation = await createInvitation(tenant.id, { email: uniqueEmail(), invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email: uniqueEmail(), invitedById: null }, testClient());
     await expect(acceptInvitation({ token: invitation.token, password: "short" }, testClient())).rejects.toMatchObject({ field: "password" });
     await expect(acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient())).resolves.toBeTruthy();
   });
@@ -113,7 +113,7 @@ describe("invitations", () => {
     const orgUnit = await withTenant(tenant.id, (tx) =>
       tx.orgUnit.create({ data: { tenantId: tenant.id, type: "BRANCH", name: "Main branch" } }),
     );
-    const invitation = await createInvitation(
+    const invitation = await createInvitationUnchecked(
       tenant.id,
       { email, invitedById: null, roleId: role.id, scope: { type: "ORG_UNIT", orgUnitId: orgUnit.id, includeDescendants: false } },
       testClient(),
@@ -136,7 +136,7 @@ describe("invitations", () => {
     const other = await createTenant("auth-invite-val-other");
     const foreignRole = await withTenant(other.id, (tx) => tx.role.create({ data: { tenantId: other.id, name: "Foreign" } }));
     const role = await withTenant(tenant.id, (tx) => tx.role.create({ data: { tenantId: tenant.id, name: "Local" } }));
-    const create = (extra: object) => createInvitation(tenant.id, { email: uniqueEmail(), invitedById: null, ...extra }, testClient());
+    const create = (extra: object) => createInvitationUnchecked(tenant.id, { email: uniqueEmail(), invitedById: null, ...extra }, testClient());
 
     await expect(create({ roleId: "nope", scope: { type: "TENANT" } })).rejects.toMatchObject({ field: "roleId" });
     await expect(create({ roleId: foreignRole.id, scope: { type: "TENANT" } })).rejects.toMatchObject({ field: "roleId" });
@@ -152,7 +152,7 @@ describe("invitations", () => {
   it("is refused at accept time when the inviter was deactivated in the meantime", async () => {
     const tenant = await createTenant("auth-invite-inviter");
     const inviter = await createActiveUser(tenant);
-    const invitation = await createInvitation(tenant.id, { email: uniqueEmail(), invitedById: inviter.userId }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email: uniqueEmail(), invitedById: inviter.userId }, testClient());
     await withTenant(tenant.id, (tx) => tx.user.update({ where: { id: inviter.userId }, data: { status: "DEACTIVATED" } }));
     await expect(acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient())).rejects.toBeInstanceOf(ValidationError);
   });
@@ -160,7 +160,7 @@ describe("invitations", () => {
   it("does not let an invitation take over an existing active account", async () => {
     const tenant = await createTenant("auth-invite8");
     const existing = await createActiveUser(tenant);
-    const invitation = await createInvitation(tenant.id, { email: existing.email, invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenant.id, { email: existing.email, invitedById: null }, testClient());
     await expect(acceptInvitation({ token: invitation.token, password: NEW_PASSWORD }, testClient())).rejects.toBeTruthy();
     await expect(loginAs(existing)).resolves.toBeTruthy(); // old password still works
   });
@@ -168,7 +168,7 @@ describe("invitations", () => {
   it("does not resolve a token in another tenant's namespace", async () => {
     const tenantA = await createTenant("auth-invite9a");
     const tenantB = await createTenant("auth-invite9b");
-    const invitation = await createInvitation(tenantA.id, { email: uniqueEmail(), invitedById: null }, testClient());
+    const invitation = await createInvitationUnchecked(tenantA.id, { email: uniqueEmail(), invitedById: null }, testClient());
     const forged = `${tenantB.id}.${invitation.token.split(".")[1]}`;
     await expect(acceptInvitation({ token: forged, password: NEW_PASSWORD }, testClient())).rejects.toBeInstanceOf(ValidationError);
   });

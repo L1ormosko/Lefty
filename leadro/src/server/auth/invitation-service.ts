@@ -49,10 +49,14 @@ export interface CreatedInvitation {
  * Everything the invitation points at (inviter, role, employee, scope targets) is checked to exist
  * in the tenant, so mistakes surface as validation errors rather than database errors.
  *
+ * "Unchecked": the permission to invite (`users.create`) is the CALLER's job, and with `invitedById: null`
+ * (seed/bootstrap) the role is granted without anti-escalation. Application code goes through
+ * `inviteEmployee` / the users module, never this directly.
+ *
  * @throws ValidationError for unknown ids, a role without a scope, or a scope without a role;
  *   ForbiddenError when the inviter may not grant the role.
  */
-export async function createInvitation(
+export async function createInvitationUnchecked(
   tenantId: string,
   input: CreateInvitationInput,
   client: ClientInfo,

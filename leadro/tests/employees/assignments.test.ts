@@ -3,7 +3,7 @@ import { GET as history, POST as assign } from "@/app/api/v1/employees/[id]/assi
 import { POST as endAssignment } from "@/app/api/v1/employees/[id]/assignments/[assignmentId]/end/route";
 import { GET as orgUnitAtRoute } from "@/app/api/v1/employees/[id]/org-unit-at/route";
 import { PATCH as patchEmployee } from "@/app/api/v1/employees/[id]/route";
-import { orgUnitAt } from "@/server/employees";
+import { orgUnitAtUnchecked } from "@/server/employees";
 import { withTenant } from "@/server/db";
 import { buildWorld, createPerson, disconnect, type World } from "../authz/fixtures";
 import { auditEvents, call, sessionCookie } from "../org/org-helpers";
@@ -48,12 +48,12 @@ describe("transfers keep history", () => {
     expect(event).toMatchObject({ previousValue: { orgUnitId: w.units.cityA }, reason: "Relocation" });
   });
 
-  it("answers 'where was this person on that date' from history (orgUnitAt)", async () => {
+  it("answers 'where was this person on that date' from history (orgUnitAtUnchecked)", async () => {
     const worker = await createPerson(w.tenantId, "historian", { orgUnitId: w.units.cityA }); // placed yesterday
     const moveAt = iso(1);
     expect((await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityB, effectiveFrom: moveAt })).status).toBe(201);
 
-    const at = (offsetDays: number) => orgUnitAt(w.tenantId, worker.employeeId!, new Date(Date.now() + offsetDays * DAY));
+    const at = (offsetDays: number) => orgUnitAtUnchecked(w.tenantId, worker.employeeId!, new Date(Date.now() + offsetDays * DAY));
     expect((await at(-10))?.orgUnitId).toBeUndefined(); // before they were placed anywhere
     expect((await at(0))?.orgUnitId).toBe(w.units.cityA); // scheduled move has not happened yet
     expect((await at(2))?.orgUnitId).toBe(w.units.cityB);
@@ -160,7 +160,7 @@ describe("temporary and secondary placements; legal employer is separate", () =>
     expect(open.map((row) => row.orgUnitId).sort()).toEqual([w.units.cityA, w.units.cityB].sort());
 
     // the primary placement (operational team) is still the one reporting uses
-    expect((await orgUnitAt(w.tenantId, worker.employeeId!, new Date()))?.orgUnitId).toBe(w.units.cityA);
+    expect((await orgUnitAtUnchecked(w.tenantId, worker.employeeId!, new Date()))?.orgUnitId).toBe(w.units.cityA);
 
     const duplicate = await place(ceo, worker.employeeId!, { orgUnitId: w.units.cityB, kind: "SECONDARY" });
     expect(duplicate.status).toBe(409);

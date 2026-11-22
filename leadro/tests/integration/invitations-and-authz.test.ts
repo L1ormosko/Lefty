@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   acceptInvitation,
-  createInvitation,
+  createInvitationUnchecked,
   resetAuthNotifier,
   resetRateLimits,
   setAuthNotifier,
@@ -94,7 +94,7 @@ describe("invitation creation runs the anti-escalation dry run", () => {
   it("refuses a role the inviter does not hold (dispatch permissions), a scope outside their reach, and a sensitive role", async () => {
     const { admin } = await cityAAdmin();
     const invite = (roleId: string, orgUnitId: string) =>
-      createInvitation(
+      createInvitationUnchecked(
         w.tenantId,
         { email: email(), invitedById: admin.userId, roleId, scope: { type: "ORG_UNIT", orgUnitId } },
         testClient(),
@@ -109,10 +109,10 @@ describe("invitation creation runs the anti-escalation dry run", () => {
   it("a tenant-level invitee (no employee) needs a tenant-wide permissions.assign", async () => {
     const { admin } = await cityAAdmin();
     await expect(
-      createInvitation(w.tenantId, { email: email(), invitedById: admin.userId, roleId: await jobsViewer(), scope: { type: "ORG_UNIT", orgUnitId: w.units.cityA } }, testClient()),
+      createInvitationUnchecked(w.tenantId, { email: email(), invitedById: admin.userId, roleId: await jobsViewer(), scope: { type: "ORG_UNIT", orgUnitId: w.units.cityA } }, testClient()),
     ).rejects.toBeInstanceOf(ForbiddenError);
     await expect(
-      createInvitation(w.tenantId, { email: email(), invitedById: w.ceo.userId, roleId: await jobsViewer(), scope: { type: "ORG_UNIT", orgUnitId: w.units.cityA } }, testClient()),
+      createInvitationUnchecked(w.tenantId, { email: email(), invitedById: w.ceo.userId, roleId: await jobsViewer(), scope: { type: "ORG_UNIT", orgUnitId: w.units.cityA } }, testClient()),
     ).resolves.toBeTruthy();
   });
 });
@@ -127,7 +127,7 @@ describe("invitation acceptance creates the assignment through authz and re-vali
     });
     const roleId = await jobsViewer();
     const address = email();
-    const invitation = await createInvitation(
+    const invitation = await createInvitationUnchecked(
       w.tenantId,
       { email: address, invitedById: admin.userId, employeeId: employee.employeeId!, roleId, scope: { type: "ORG_UNIT", orgUnitId: w.units.cityA } },
       testClient(),
@@ -173,7 +173,7 @@ describe("invitation acceptance creates the assignment through authz and re-vali
       tx.orgUnit.create({ data: { tenantId: w.tenantId, type: "TEAM", name: `Doomed ${Date.now()}`, parentId: w.units.cityA } }),
     );
     // Issued by the tenant-wide Owner: even a tenant-wide granter must not hand out a dead scope at accept time.
-    const issued = await createInvitation(
+    const issued = await createInvitationUnchecked(
       w.tenantId,
       { email: email(), invitedById: w.ceo.userId, roleId: await jobsViewer(), scope: { type: "ORG_UNIT", orgUnitId: unit.id } },
       testClient(),
@@ -184,7 +184,7 @@ describe("invitation acceptance creates the assignment through authz and re-vali
 
   it("a system invitation (no inviter) is still granted, with its scope", async () => {
     const roleId = await jobsViewer();
-    const invitation = await createInvitation(
+    const invitation = await createInvitationUnchecked(
       w.tenantId,
       { email: email(), invitedById: null, roleId, scope: { type: "TENANT" } },
       testClient(),
@@ -234,7 +234,7 @@ describe("invitation creation is one transaction with its authority check", () =
   it("a failing in-transaction precheck creates nothing and sends nothing", async () => {
     const address = email();
     await expect(
-      createInvitation(w.tenantId, { email: address, invitedById: null }, testClient(), async () => {
+      createInvitationUnchecked(w.tenantId, { email: address, invitedById: null }, testClient(), async () => {
         throw new ForbiddenError();
       }),
     ).rejects.toBeInstanceOf(ForbiddenError);

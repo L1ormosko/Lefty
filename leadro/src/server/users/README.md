@@ -16,7 +16,7 @@ Invariants:
 - Responses are projected through `USER_FIELD_MAP`; password hash, MFA secret, failed-login count and lockout
   are never selected or returned.
 - Deactivation needs `users.archive`, a reason, is refused for yourself and revokes every session
-  (`auth.deactivateUserAccount`). `/users/me` and password change are self-service (no permission, own row only).
+  (`auth.deactivateUserAccountUnchecked`). `/users/me` and password change are self-service (no permission, own row only).
 - Password change needs the current password, enforces the password policy, is rate limited per account and
   signs out every other session.
 - `employeeStatus` / `loginPendingDeactivation` mark ACTIVE logins of TERMINATED employees (filter `?pendingDeactivation=true`); only tenant-wide user administrators see them.
