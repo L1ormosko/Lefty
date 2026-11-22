@@ -1,5 +1,5 @@
 import { EmptyState } from "@/components/ui";
-import { loadShellIdentity } from "../_lib/account-queries";
+import { loadAccountSummary } from "../_lib/account-queries";
 import { requireFullSession } from "../_lib/page-context";
 
 /**
@@ -7,7 +7,7 @@ import { requireFullSession } from "../_lib/page-context";
  */
 export default async function HomePage() {
   const { actor, t } = await requireFullSession();
-  const identity = await loadShellIdentity(actor);
+  const identity = await loadAccountSummary(actor);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

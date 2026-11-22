@@ -3,7 +3,7 @@
 User accounts: list, read, preferences, deactivate (§22). Accounts are created only by accepting an
 invitation (`employees.inviteEmployee` -> `auth.acceptInvitation`); credentials stay in `auth`.
 
-Public API (`index.ts`): `listInvitations` (read-only list of invitations with their state; scoped through the invited employee; the token is never selected), `listUsers`, `getUser`, `getOwnProfile`, `updateUser`, `deactivateUser`,
+Public API (`index.ts`): `listInvitations` (read-only list of invitations with their state; scoped through the invited employee; the token is never selected), `listUsers`, `getUser`, `getOwnProfile`, `getOwnAccountSummary`, `updateOwnLocale` (self-service, own row only), `updateUser`, `deactivateUser`,
 `userScopeColumns` (and its parts, reused by `roles`), `USER_FIELD_MAP`, the Zod schemas.
 
 Routes: `/api/v1/users`, `/users/me`, `/users/me/password` (-> `auth.changeOwnPassword`), `/users/{id}`,

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { findAuditHistoryInTx } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, orgUnitScopeColumns, resolveScope, withinScope } from "@/server/authz";
 import { pageArgs, toPage, type Actor, type Page } from "@/server/core";
 import { withTenant } from "@/server/db";
@@ -53,30 +53,22 @@ export async function listUnitChanges(
     const now = new Date();
     const scope = await resolveScope(tx, actor, "organization.view", now);
 
-    const where: Prisma.AuditEventWhereInput = {
-      tenantId: actor.tenantId,
-      targetType: "OrgUnit",
-      action: { in: [...UNIT_CHANGE_ACTIONS] },
-      ...(query.orgUnitId ? { targetId: query.orgUnitId } : {}),
-    };
     let visibleIds: Set<string> | null = null; // null = tenant-wide, everything is visible
+    let targetIds: string[] | undefined = query.orgUnitId ? [query.orgUnitId] : undefined;
     if (!scope.tenantWide) {
       const visible = await tx.orgUnit.findMany({
         where: withinScope(buildScopeWhere(scope, orgUnitScopeColumns, now), { tenantId: actor.tenantId }),
         select: { id: true },
       });
       visibleIds = new Set(visible.map((unit) => unit.id));
-      where.targetId = query.orgUnitId
-        ? { in: visible.map((unit) => unit.id).filter((id) => id === query.orgUnitId) }
-        : { in: visible.map((unit) => unit.id) };
+      targetIds = query.orgUnitId ? visible.map((unit) => unit.id).filter((id) => id === query.orgUnitId) : visible.map((unit) => unit.id);
     }
 
-    const rows = await tx.auditEvent.findMany({
-      where,
-      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-      select: { id: true, occurredAt: true, action: true, targetId: true, actorUserId: true, previousValue: true, newValue: true, reason: true },
-      ...pageArgs(query),
-    });
+    const rows = await findAuditHistoryInTx(
+      tx,
+      { tenantId: actor.tenantId, targetType: "OrgUnit", actions: [...UNIT_CHANGE_ACTIONS], targetIds },
+      pageArgs(query),
+    );
     const page = toPage(rows, query.limit);
 
     const parentIds = new Set<string>();

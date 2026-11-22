@@ -1,13 +1,13 @@
 import { UserProfileCard, buttonClasses, focusRing } from "@/components/ui";
 import type { TranslateFn } from "@/lib/i18n";
 import { logoutAction } from "../../_actions/session";
-import type { ShellIdentity } from "../../_lib/account-queries";
+import type { OwnAccountSummary } from "@/server/users";
 
 /**
  * Account menu: who you are, your sessions, security settings, sign out. A native `<details>`
  * keeps it keyboard accessible (Enter/Space on the summary) without any client script.
  */
-export function UserMenu({ identity, t }: { identity: ShellIdentity; t: TranslateFn }) {
+export function UserMenu({ identity, t }: { identity: OwnAccountSummary; t: TranslateFn }) {
   const linkClasses = `block rounded px-3 py-2 text-sm text-start hover:bg-neutral-soft ${focusRing}`;
   return (
     <details className="relative">
