@@ -10,6 +10,7 @@ import {
 } from "./config";
 import type { ClientInfo } from "./client-info";
 import { recordAuthEvent } from "./events";
+import { userRequiresMfa } from "./mfa-policy";
 import { hashToken, issueToken, tenantIdFromToken } from "./tokens";
 
 export interface CreatedSession {
@@ -87,13 +88,22 @@ export async function resolveSession(
     });
     if (!session) return { kind: "unknown" as const };
 
+    // MFA is not only a login-time rule: a user can be given an MFA-requiring role mid-session (or the
+    // role itself can start requiring it). A full session that never passed MFA is sent back to
+    // "pending" so the existing MFA step (enroll or verify) runs before anything else works.
+    let mfaPending = session.mfaPending;
+    if (!mfaPending && !session.mfaVerifiedAt && !session.revokedAt && session.user.status === "ACTIVE" && (await userRequiresMfa(tx, tenantId, session.userId, now))) {
+      await tx.session.update({ where: { id: session.id }, data: { mfaPending: true } });
+      mfaPending = true;
+    }
+
     let denial: SessionDenialReason | null = null;
     if (session.revokedAt) denial = "revoked";
     else if (session.expiresAt <= now) denial = "expired";
     else if (now.getTime() - session.lastSeenAt.getTime() > SESSION_IDLE_TIMEOUT_MS) denial = "idle_timeout";
     else if (tenant.status !== "ACTIVE") denial = "tenant_inactive";
     else if (session.user.status !== "ACTIVE") denial = "user_inactive";
-    else if (session.mfaPending && !options.allowMfaPending) denial = "mfa_required";
+    else if (mfaPending && !options.allowMfaPending) denial = "mfa_required";
 
     if (denial) {
       await recordAudit(tx, {
@@ -121,7 +131,7 @@ export async function resolveSession(
       sessionId: session.id,
       locale: session.user.locale,
     };
-    return { kind: "ok" as const, actor, mfaPending: session.mfaPending };
+    return { kind: "ok" as const, actor, mfaPending };
   });
 
   if (outcome.kind === "unknown") {

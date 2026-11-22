@@ -144,7 +144,7 @@ async function promotePendingSession(tx: TenantTx, actor: Actor): Promise<Promot
   const { token, tokenHash } = issueToken(actor.tenantId);
   const promoted = await tx.session.updateMany({
     where: { id: actor.sessionId, tenantId: actor.tenantId, mfaPending: true },
-    data: { mfaPending: false, tokenHash },
+    data: { mfaPending: false, mfaVerifiedAt: new Date(), tokenHash },
   });
   if (promoted.count === 0) return null;
   // Deferred from login: the login is only complete now, so this is where the failure count resets.

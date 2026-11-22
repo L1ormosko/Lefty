@@ -204,3 +204,27 @@ describe("MFA login path", () => {
     await expect(verifyMfaChallenge(actor, "123456", testClient())).rejects.toThrow(/not enabled/);
   });
 });
+
+describe("MFA required by a role granted after login", () => {
+  it("sends an already-logged-in session back to the MFA step until a code is verified", async () => {
+    const user = await createTenantWithUser();
+    const login = await loginAs(user);
+    expect(login.mfaRequired).toBe(false);
+    // A normal session works...
+    await expect(authenticateRequest(requestWithToken(login.token))).resolves.toMatchObject({ userId: user.userId });
+
+    // ...until the user is given a role that requires MFA mid-session.
+    await assignRole(user, { requiresMfa: true });
+    await expect(authenticateRequest(requestWithToken(login.token))).rejects.toBeInstanceOf(UnauthenticatedError);
+    const actor = await authenticateMfaRequest(requestWithToken(login.token));
+
+    // The existing enrollment step promotes it and records when MFA was passed.
+    const enrollment = await startMfaEnrollment(actor, testClient());
+    const code = hotp(base32Decode(enrollment.secret), totpTimeStep(Date.now()));
+    const promoted = await confirmMfaEnrollment(actor, code, testClient());
+    if (!promoted) throw new Error("expected promotion");
+    await expect(authenticateRequest(requestWithToken(promoted.token))).resolves.toMatchObject({ userId: user.userId });
+    const session = await withTenant(user.tenantId, (tx) => tx.session.findUniqueOrThrow({ where: { id: actor.sessionId } }));
+    expect(session.mfaVerifiedAt).not.toBeNull();
+  });
+});
