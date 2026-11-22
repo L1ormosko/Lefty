@@ -42,7 +42,17 @@ export function toCertificationView(row: Certification) {
   };
 }
 
-export function toQualificationView(row: EmployeeQualification) {
+/**
+ * Licence and certificate numbers identify a person to an issuing authority and can be abused, so they
+ * are shown in full only to the holder and to approvers (HR). Everyone else with `qualifications.view`
+ * sees the last four characters, which is enough to tell two records apart.
+ */
+export function maskCredentialNumber(number: string | null): string | null {
+  if (number === null) return null;
+  return number.length > 4 ? `\u2022\u2022\u2022\u2022${number.slice(-4)}` : "\u2022\u2022\u2022\u2022";
+}
+
+export function toQualificationView(row: EmployeeQualification, revealPrivate: boolean) {
   return {
     id: row.id,
     employeeId: row.employeeId,
@@ -50,7 +60,7 @@ export function toQualificationView(row: EmployeeQualification) {
     skillId: row.skillId,
     certificationId: row.certificationId,
     level: row.level,
-    number: row.number,
+    number: revealPrivate ? row.number : maskCredentialNumber(row.number),
     issuingAuthority: row.issuingAuthority,
     issuedAt: dateOnly(row.issuedAt),
     expiresAt: dateOnly(row.expiresAt),
@@ -90,7 +100,8 @@ export function toJobPermissionView(row: EmployeeJobPermission) {
   };
 }
 
-export function toAvailabilityView(row: Availability) {
+/** `note` (why someone is away) is shown only to the holder and approvers, like credential numbers. */
+export function toAvailabilityView(row: Availability, revealPrivate: boolean) {
   return {
     id: row.id,
     employeeId: row.employeeId,
@@ -103,7 +114,7 @@ export function toAvailabilityView(row: Availability) {
     validTo: dateOnly(row.validTo),
     startsAt: instantOf(row.startsAt),
     endsAt: instantOf(row.endsAt),
-    note: row.note,
+    note: revealPrivate ? row.note : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

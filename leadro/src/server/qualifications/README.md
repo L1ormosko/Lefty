@@ -8,8 +8,8 @@ eligibility check that dispatch builds on. The pure rules live in `src/lib/eligi
 Public API (`index.ts`):
 - Eligibility: `isEligible(tx, tenantId, employeeId, requirements, { at, window, timeZone })` returns
   `{ eligible, failures: [{ code, params }], checked }`; `evaluateCandidates` does many employees in one load.
-  Build `requirements` with `requirementsForJobType` (type + extras, for "what if") or `requirementsForJob`
-  (the job's own `JobRequirement` rows). `resolveWorkTimeZone` gives the zone for the query. These take a
+  Build `requirements` with `requirementsForJobType` (type + extras, for "what if") or `requirementsFromInputs`
+  (the jobs module hands over `EligibilityInputs`; this module never reads job tables). `resolveWorkTimeZone` gives the zone for the query. These take a
   tenant transaction and do NOT check permissions: the caller (dispatch) has already authorized itself.
 - API-facing: `checkEligibilityAsActor` (needs `qualifications.view` over the employee),
   `renderEligibilityFailure(translate, failure)` for server-rendered text.

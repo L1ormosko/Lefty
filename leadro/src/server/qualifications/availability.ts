@@ -12,6 +12,7 @@ import {
 } from "@/server/core";
 import { withTenant } from "@/server/db";
 import type { CreateAvailabilityInput, ListByEmployeeQuery } from "./schemas";
+import { employeesWithVisiblePrivateFields } from "./reveal";
 import { resolveEmployeeTimeZone } from "./time-zones";
 import { assertBaseFields, availabilityScopeColumns, toAvailabilityView } from "./views";
 
@@ -66,9 +67,9 @@ export async function createAvailability(actor: Actor, ctx: RequestContext, inpu
       action: "availability.create",
       targetType: "Availability",
       targetId: row.id,
-      newValue: { ...toAvailabilityView(row) },
+      newValue: { ...toAvailabilityView(row, true) },
     });
-    return toAvailabilityView(row);
+    return toAvailabilityView(row, (await employeesWithVisiblePrivateFields(tx, actor, [row.employeeId])).has(row.employeeId));
   });
 }
 
@@ -85,7 +86,7 @@ export async function deleteAvailability(actor: Actor, ctx: RequestContext, avai
       action: "availability.delete",
       targetType: "Availability",
       targetId: row.id,
-      previousValue: toAvailabilityView(row),
+      previousValue: toAvailabilityView(row, true),
     });
   });
 }
@@ -115,6 +116,7 @@ export async function listAvailability(actor: Actor, query: ListByEmployeeQuery)
       ...pageArgs(query),
     });
     const page = toPage(rows, query.limit);
-    return { data: page.data.map(toAvailabilityView), page: page.page };
+    const revealed = await employeesWithVisiblePrivateFields(tx, actor, page.data.map((row) => row.employeeId));
+    return { data: page.data.map((row) => toAvailabilityView(row, revealed.has(row.employeeId))), page: page.page };
   });
 }

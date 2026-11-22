@@ -24,7 +24,7 @@ function hasExpiredBy(expiresAt: Date | null, lastNeeded: number, zone: string):
   return expiresAt !== null && lastNeeded >= endOfLocalDay(dateOnly(expiresAt), zone);
 }
 
-type RowVerdict = "OK" | "LEVEL_TOO_LOW" | "EXPIRED" | "NOT_VERIFIED";
+type RowVerdict = "OK" | "LEVEL_TOO_LOW" | "EXPIRED" | "NOT_VERIFIED" | "RENEWAL_PENDING";
 
 /**
  * Judges the employee's rows for ONE required skill or credential. Several rows can exist (a renewed
@@ -43,7 +43,7 @@ function judgeRows(
     expiresAt: null,
     level: null,
   };
-  const rank: Record<RowVerdict | "MISSING", number> = { OK: 4, LEVEL_TOO_LOW: 3, EXPIRED: 2, NOT_VERIFIED: 1, MISSING: 0 };
+  const rank: Record<RowVerdict | "MISSING", number> = { OK: 4, LEVEL_TOO_LOW: 3, EXPIRED: 2, RENEWAL_PENDING: 2, NOT_VERIFIED: 1, MISSING: 0 };
 
   for (const row of rows) {
     if (row.status === "REJECTED" || row.status === "REVOKED") continue;
@@ -54,6 +54,12 @@ function judgeRows(
     else verdict = "OK";
     if (rank[verdict] > rank[best.verdict]) best = { verdict, expiresAt: row.expiresAt, level: row.level };
   }
+  // An expired credential whose renewal (a pending row that would still be valid) awaits HR is a
+  // paperwork delay, not a lapsed qualification: say so, so HR knows what unblocks the employee.
+  const renewalPending = rows.some(
+    (row) => row.status === "PENDING_VERIFICATION" && !hasExpiredBy(row.expiresAt, last, query.timeZone),
+  );
+  if (best.verdict === "EXPIRED" && renewalPending) return { ...best, verdict: "RENEWAL_PENDING" };
   return best;
 }
 
@@ -71,6 +77,8 @@ function failureForSkill(
       return { code: "QUALIFICATION_MISSING", params: base };
     case "NOT_VERIFIED":
       return { code: "QUALIFICATION_NOT_VERIFIED", params: base };
+    case "RENEWAL_PENDING":
+      return { code: "QUALIFICATION_RENEWAL_PENDING", params: base };
     case "EXPIRED":
       return { code: "QUALIFICATION_EXPIRED", params: { ...base, expiresOn: judged.expiresAt ? dateOnly(judged.expiresAt) : null } };
     case "LEVEL_TOO_LOW":
@@ -93,6 +101,8 @@ function failureForCertification(
       return { code: "QUALIFICATION_MISSING", params: base };
     case "NOT_VERIFIED":
       return { code: "QUALIFICATION_NOT_VERIFIED", params: base };
+    case "RENEWAL_PENDING":
+      return { code: "QUALIFICATION_RENEWAL_PENDING", params: base };
     case "EXPIRED":
       return { code: "QUALIFICATION_EXPIRED", params: { ...base, expiresOn: judged.expiresAt ? dateOnly(judged.expiresAt) : null } };
   }
@@ -107,7 +117,7 @@ const coversSpan = (from: Date, to: Date | null, span: { first: number; last: nu
  * this work in this time span? Pure and deterministic; every rule that fails is reported with a
  * language-neutral code and params, in this stable order:
  *
- *  1. employment: ACTIVE now, hired and not terminated across the span;
+ *  1. employment: not TERMINATED, not ON_LEAVE for work starting now, hired and not terminated across the span;
  *  2. every required skill (verified, not expired by the end of the span, at least the minimum level);
  *  3. every required certification / license / equipment / training (verified and unexpired);
  *  4. a job-category permission (the job type OR its category) covering the span;
@@ -126,9 +136,14 @@ export function evaluateEligibility(
   const span = neededSpan(query);
 
   // 1. Employment
-  if (facts.status !== "ACTIVE") {
+  // ON_LEAVE only blocks a decision about the present: for work in the future, leave is expressed by
+  // EXCEPTION_UNAVAILABLE availability rows (the status has no end date, so it says nothing about then).
+  // TERMINATED always blocks.
+  const blockedByStatus =
+    facts.status === "TERMINATED" || (facts.status === "ON_LEAVE" && span.first <= query.at.getTime());
+  if (blockedByStatus) {
     failures.push({ code: "EMPLOYEE_NOT_ACTIVE", params: { status: facts.status } });
-  } else {
+  } else if (facts.status === "ACTIVE" || facts.status === "ON_LEAVE") {
     const startsBeforeHire = facts.hireDate !== null && span.first < startOfLocalDay(dateOnly(facts.hireDate), query.timeZone);
     const endsAfterTermination =
       facts.terminationDate !== null && span.last >= endOfLocalDay(dateOnly(facts.terminationDate), query.timeZone);
@@ -177,6 +192,7 @@ export function evaluateEligibility(
   if (area) {
     const covered = facts.territories.some(
       (territory) =>
+        territory.orgUnitActive &&
         coversSpan(territory.effectiveFrom, territory.effectiveTo, span) &&
         (territory.orgUnitId === area.orgUnitId ||
           (territory.includeDescendants && area.ancestorOrgUnitIds.includes(territory.orgUnitId))),
@@ -193,10 +209,8 @@ export function evaluateEligibility(
     if (!verdict.available) {
       failures.push(
         verdict.reason === "TIME_OFF"
-          ? {
-              code: "UNAVAILABLE_TIME_OFF",
-              params: { from: new Date(verdict.blockedBy.start).toISOString(), to: new Date(verdict.blockedBy.end).toISOString() },
-            }
+          ? // Only that the time is blocked, never the span: why and when someone is away is private.
+            { code: "UNAVAILABLE_TIME_OFF", params: {} }
           : {
               code: "UNAVAILABLE_OUTSIDE_HOURS",
               params: { from: query.window.startsAt.toISOString(), to: query.window.endsAt.toISOString() },

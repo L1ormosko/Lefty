@@ -77,7 +77,7 @@ function facts(extra: Partial<EmployeeFacts> = {}): EmployeeFacts {
     terminationDate: null,
     qualifications: [],
     jobPermissions: [{ jobTypeId: null, category: "repair", effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }],
-    territories: [{ orgUnitId: "city", includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }],
+    territories: [{ orgUnitId: "city", orgUnitActive: true, includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }],
     availability: [weekly(1, "08:00", "17:00")],
     ...extra,
   };
@@ -109,7 +109,12 @@ describe("evaluateEligibility: the happy path and employment", () => {
   });
 
   it("rejects an employee on leave or terminated, and one hired after the window or terminated before its end", () => {
-    expect(codes(evaluateEligibility(facts({ status: "ON_LEAVE" }), requirements(), query()))).toEqual(["EMPLOYEE_NOT_ACTIVE"]);
+    // ON_LEAVE blocks a decision about the present (window starting now or earlier) ...
+    const duringLeave = query({ at: d("2026-11-23T14:30:00Z") });
+    expect(codes(evaluateEligibility(facts({ status: "ON_LEAVE" }), requirements(), duringLeave))).toEqual(["EMPLOYEE_NOT_ACTIVE"]);
+    // ... but not work in the future: leave there is expressed by EXCEPTION_UNAVAILABLE rows.
+    expect(evaluateEligibility(facts({ status: "ON_LEAVE" }), requirements(), query()).eligible).toBe(true);
+    expect(codes(evaluateEligibility(facts({ status: "ON_LEAVE", availability: [exception("EXCEPTION_UNAVAILABLE", "2026-11-23T00:00:00Z", "2026-11-24T00:00:00Z")] }), requirements(), query()))).toEqual(["UNAVAILABLE_TIME_OFF"]);
     expect(codes(evaluateEligibility(facts({ status: "TERMINATED" }), requirements(), query()))).toEqual(["EMPLOYEE_NOT_ACTIVE"]);
     expect(codes(evaluateEligibility(facts({ hireDate: d("2026-11-24T00:00:00Z") }), requirements(), query()))).toEqual(["EMPLOYEE_NOT_EMPLOYED"]);
     expect(codes(evaluateEligibility(facts({ terminationDate: d("2026-11-22T00:00:00Z") }), requirements(), query()))).toEqual(["EMPLOYEE_NOT_EMPLOYED"]);
@@ -180,6 +185,17 @@ describe("evaluateEligibility: skills and credentials", () => {
     expect(result.eligible).toBe(true);
   });
 
+  it("an expired credential with a still-valid pending renewal reports RENEWAL_PENDING, not EXPIRED", () => {
+    const needs = requirements({ certifications: [{ certificationId: "lic", kind: "LICENSE", name: "Electrical" }] });
+    const renewing = facts({ qualifications: [credential("lic", "VERIFIED", "2026-01-01"), credential("lic", "PENDING_VERIFICATION", "2028-01-01")] });
+    expect(evaluateEligibility(renewing, needs, query()).failures).toEqual([
+      { code: "QUALIFICATION_RENEWAL_PENDING", params: { kind: "LICENSE", id: "lic", name: "Electrical" } },
+    ]);
+    // A pending row that is itself expired is no renewal.
+    const stale = facts({ qualifications: [credential("lic", "VERIFIED", "2026-01-01"), credential("lic", "PENDING_VERIFICATION", "2026-02-01")] });
+    expect(codes(evaluateEligibility(stale, needs, query()))).toEqual(["QUALIFICATION_EXPIRED"]);
+  });
+
   it("collects every failure, not just the first, in a stable order", () => {
     const result = evaluateEligibility(
       facts({ jobPermissions: [], territories: [], availability: [] }),
@@ -225,17 +241,22 @@ describe("evaluateEligibility: job-category permissions", () => {
 
 describe("evaluateEligibility: territories", () => {
   it("covers the unit itself, or its descendants only when the territory says so", () => {
-    const exactUnit = facts({ territories: [{ orgUnitId: "team", includeDescendants: false, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
-    const ancestorNoDescendants = facts({ territories: [{ orgUnitId: "city", includeDescendants: false, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
-    const sibling = facts({ territories: [{ orgUnitId: "other-city", includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
+    const exactUnit = facts({ territories: [{ orgUnitId: "team", orgUnitActive: true, includeDescendants: false, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
+    const ancestorNoDescendants = facts({ territories: [{ orgUnitId: "city", orgUnitActive: true, includeDescendants: false, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
+    const sibling = facts({ territories: [{ orgUnitId: "other-city", orgUnitActive: true, includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
     expect(evaluateEligibility(exactUnit, requirements(), query()).eligible).toBe(true);
     expect(codes(evaluateEligibility(ancestorNoDescendants, requirements(), query()))).toEqual(["OUTSIDE_TERRITORY"]);
     expect(codes(evaluateEligibility(sibling, requirements(), query()))).toEqual(["OUTSIDE_TERRITORY"]);
   });
 
   it("an ended territory no longer covers later work", () => {
-    const ended = facts({ territories: [{ orgUnitId: "city", includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: d("2026-11-01T00:00:00Z") }] });
+    const ended = facts({ territories: [{ orgUnitId: "city", orgUnitActive: true, includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: d("2026-11-01T00:00:00Z") }] });
     expect(codes(evaluateEligibility(ended, requirements(), query()))).toEqual(["OUTSIDE_TERRITORY"]);
+  });
+
+  it("a territory on an archived unit no longer covers anything", () => {
+    const archived = facts({ territories: [{ orgUnitId: "city", orgUnitActive: false, includeDescendants: true, effectiveFrom: d("2025-01-01T00:00:00Z"), effectiveTo: null }] });
+    expect(codes(evaluateEligibility(archived, requirements(), query()))).toEqual(["OUTSIDE_TERRITORY"]);
   });
 });
 
@@ -282,7 +303,7 @@ describe("evaluateEligibility: availability in the employee's own time zone", ()
     const sick = facts({ availability: [weekly(1, "08:00", "17:00"), exception("EXCEPTION_UNAVAILABLE", "2026-11-23T15:30:00Z", "2026-11-23T20:00:00Z")] });
     const result = evaluateEligibility(sick, requirements(), query());
     expect(result.failures).toEqual([
-      { code: "UNAVAILABLE_TIME_OFF", params: { from: "2026-11-23T15:30:00.000Z", to: "2026-11-23T20:00:00.000Z" } },
+      { code: "UNAVAILABLE_TIME_OFF", params: {} }, // blocked, but never when or why
     ]);
 
     const saturday = { startsAt: d("2026-11-28T15:00:00Z"), endsAt: d("2026-11-28T17:00:00Z") };

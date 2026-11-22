@@ -19,11 +19,11 @@ export {
   isEligible,
   evaluateCandidates,
   loadEmployeeFacts,
-  requirementsForJob,
+  requirementsFromInputs,
   requirementsForJobType,
   orgUnitAncestry,
 } from "./eligibility";
-export type { AdditionalRequirements } from "./eligibility";
+export type { AdditionalRequirements, EligibilityInputs } from "./eligibility";
 export { checkEligibilityAsActor, renderEligibilityFailure } from "./eligibility-check";
 export { resolveWorkTimeZone, resolveEmployeeTimeZone } from "./time-zones";
 

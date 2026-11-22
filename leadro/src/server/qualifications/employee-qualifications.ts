@@ -16,7 +16,8 @@ import {
 } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import type { CreateQualificationInput, ListQualificationsQuery, UpdateQualificationInput } from "./schemas";
-import { assertBaseFields, qualificationScopeColumns, toQualificationView, type QualificationView } from "./views";
+import { employeesWithVisiblePrivateFields } from "./reveal";
+import { assertBaseFields, maskCredentialNumber, qualificationScopeColumns, toQualificationView, type QualificationView } from "./views";
 
 /**
  * An employee's skills and credentials (§10.1): create, edit, read, list. Verification (HR) is in
@@ -25,6 +26,11 @@ import { assertBaseFields, qualificationScopeColumns, toQualificationView, type 
  *
  * A new record starts PENDING_VERIFICATION and only counts for eligibility once HR verifies it.
  */
+
+/** Audit values of a change: the credential number, if present, is masked. */
+function maskNumberChange(values: Record<string, unknown>): Record<string, unknown> {
+  return "number" in values ? { ...values, number: maskCredentialNumber((values.number as string | null) ?? null) } : values;
+}
 
 const DUPLICATE_SKILL = "This employee already has this skill recorded. Edit the existing record instead.";
 
@@ -81,9 +87,10 @@ export async function createQualification(actor: Actor, ctx: RequestContext, inp
         action: "qualification.create",
         targetType: "EmployeeQualification",
         targetId: row.id,
-        newValue: { ...input, kind, status: row.status },
+        // Credential numbers never enter the audit log in clear (the log is readable by auditors).
+        newValue: { ...input, number: maskCredentialNumber(input.number ?? null), kind, status: row.status },
       });
-      return toQualificationView(row);
+      return toQualificationView(row, (await employeesWithVisiblePrivateFields(tx, actor, [row.employeeId])).has(row.employeeId));
     }),
   );
 }
@@ -123,7 +130,8 @@ export async function updateQualification(
     }
 
     const { changedKeys, previous, next } = changedFields(row, input);
-    if (changedKeys.length === 0) return toQualificationView(row);
+    const revealed = (await employeesWithVisiblePrivateFields(tx, actor, [row.employeeId])).has(row.employeeId);
+    if (changedKeys.length === 0) return toQualificationView(row, revealed);
 
     const materialChange = changedKeys.some((key) => (VERIFIED_FACT_FIELDS as readonly string[]).includes(key));
     const resubmission = row.status === "REJECTED" || row.status === "REVOKED";
@@ -141,10 +149,10 @@ export async function updateQualification(
       action: "qualification.update",
       targetType: "EmployeeQualification",
       targetId: row.id,
-      previousValue: { ...previous, ...(backToPending ? { status: row.status } : {}) },
-      newValue: { ...next, ...(backToPending ? { status: "PENDING_VERIFICATION" } : {}) },
+      previousValue: { ...maskNumberChange(previous), ...(backToPending ? { status: row.status } : {}) },
+      newValue: { ...maskNumberChange(next), ...(backToPending ? { status: "PENDING_VERIFICATION" } : {}) },
     });
-    return toQualificationView(updated);
+    return toQualificationView(updated, revealed);
   });
 }
 
@@ -156,7 +164,7 @@ export async function getQualification(actor: Actor, qualificationId: string): P
     if (!row) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "qualifications.view", { employeeId: row.employeeId });
     assertBaseFields(decision);
-    return toQualificationView(row);
+    return toQualificationView(row, (await employeesWithVisiblePrivateFields(tx, actor, [row.employeeId])).has(row.employeeId));
   });
 }
 
@@ -180,6 +188,7 @@ export async function listQualifications(actor: Actor, query: ListQualifications
       ...pageArgs(query),
     });
     const page = toPage(rows, query.limit);
-    return { data: page.data.map(toQualificationView), page: page.page };
+    const revealed = await employeesWithVisiblePrivateFields(tx, actor, page.data.map((row) => row.employeeId));
+    return { data: page.data.map((row) => toQualificationView(row, revealed.has(row.employeeId))), page: page.page };
   });
 }

@@ -99,7 +99,7 @@ describe("recording and verifying qualifications", () => {
 
     const created = await record(cityManagerA, { employeeId: w.techA1.employeeId, certificationId: cert.id, number: "L-1", expiresAt: daysFromNow(200) });
     expect(created.status).toBe(201);
-    expect(created.json.data).toMatchObject({ kind: "LICENSE", status: "PENDING_VERIFICATION", number: "L-1", verifiedById: null });
+    expect(created.json.data).toMatchObject({ kind: "LICENSE", status: "PENDING_VERIFICATION", number: "\u2022\u2022\u2022\u2022", verifiedById: null });
     const [event] = await auditEvents(w.tenantId, "qualification.create", created.json.data.id);
     expect(event.actorUserId).toBe(w.cityManagerA.userId);
   });
@@ -302,5 +302,49 @@ describe("availability", () => {
     expect((await call(deleteAvailability, "DELETE", "/x", { cookie: cityManagerA, params: { id: timeOff.json.data.id } })).status).toBe(404);
     const [event] = await auditEvents(w.tenantId, "availability.delete", timeOff.json.data.id);
     expect(event.previousValue).toMatchObject({ kind: "EXCEPTION_UNAVAILABLE", note: "holiday" });
+  });
+});
+
+describe("private fields: credential numbers and availability notes", () => {
+  const FULL = "ABC-123456";
+  const MASKED = "••••3456";
+
+  it("shows the number in full only to the holder and approvers; keeps it out of the audit log in clear", async () => {
+    const cert = await newCertification();
+    const created = await record(cityManagerA, { employeeId: w.techA1.employeeId, certificationId: cert.id, number: FULL, expiresAt: daysFromNow(300) });
+    expect(created.json.data.number).toBe(MASKED); // a manager (edit/create, no approve) never gets it back
+    const id = created.json.data.id;
+
+    const read = (cookie: string) => call(getQualification, "GET", "/x", { cookie, params: { id } });
+    expect((await read(cityManagerA)).json.data.number).toBe(MASKED);
+    expect((await read(dispatcher)).json.data.number).toBe(MASKED);
+    expect((await read(hr)).json.data.number).toBe(FULL);
+    expect((await read(techA1)).json.data.number).toBe(FULL); // the holder
+    const asList = (cookie: string) => call(listQualifications, "GET", "/x", { cookie, query: { certificationId: cert.id } });
+    expect((await asList(cityManagerA)).json.data[0].number).toBe(MASKED);
+    expect((await asList(hr)).json.data[0].number).toBe(FULL);
+
+    const changed = await call(patchQualification, "PATCH", "/x", { cookie: cityManagerA, params: { id }, body: { number: "ZZZ-987654" } });
+    expect(changed.json.data.number).toBe("••••7654");
+    const verified = await verifyQualification(hr, id);
+    expect(verified.json.data.number).toBe("ZZZ-987654");
+
+    const events = [...(await auditEvents(w.tenantId, "qualification.create", id)), ...(await auditEvents(w.tenantId, "qualification.update", id))];
+    expect(events.length).toBe(2);
+    const serialized = JSON.stringify(events.map((event) => [event.previousValue, event.newValue]));
+    for (const secret of [FULL, "ZZZ-987654", "123456", "987654"]) expect(serialized).not.toContain(secret);
+    expect(serialized).toContain("3456");
+  });
+
+  it("availability notes are shown to the holder and approvers only", async () => {
+    const created = await call(createAvailability, "POST", "/x", {
+      cookie: cityManagerA,
+      body: { kind: "EXCEPTION_UNAVAILABLE", employeeId: w.techA1Other.employeeId, startsAt: "2027-01-10T00:00:00Z", endsAt: "2027-01-11T00:00:00Z", note: "surgery" },
+    });
+    expect(created.json.data.note).toBeNull();
+    const list = (cookie: string) => call(listAvailability, "GET", "/x", { cookie, query: { employeeId: w.techA1Other.employeeId as string } });
+    expect((await list(cityManagerA)).json.data[0].note).toBeNull();
+    expect((await list(dispatcher)).json.data[0].note).toBeNull();
+    expect((await list(hr)).json.data[0].note).toBe("surgery");
   });
 });

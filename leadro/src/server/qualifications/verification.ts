@@ -3,6 +3,8 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
+import { localIsoDate } from "@/lib/zoned-time";
+import { employeesWithVisiblePrivateFields } from "./reveal";
 import { assertBaseFields, toQualificationView, type QualificationView } from "./views";
 
 /**
@@ -51,7 +53,10 @@ async function decide(
         }
       }
       // Verifying something already past its date would only create a row that never counts.
-      if (row.expiresAt && row.expiresAt.getTime() < Date.parse(new Date().toISOString().slice(0, 10))) {
+      // "Already expired" is judged on the company's calendar date, not UTC's.
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId }, select: { defaultTimeZone: true } });
+      const today = localIsoDate(Date.now(), tenant.defaultTimeZone);
+      if (row.expiresAt && row.expiresAt.toISOString().slice(0, 10) < today) {
         throw new ValidationError({ message: "This credential has already expired.", field: "expiresAt" });
       }
     }
@@ -73,7 +78,7 @@ async function decide(
       newValue: { status: target },
       reason: reason ?? undefined,
     });
-    return toQualificationView(updated);
+    return toQualificationView(updated, (await employeesWithVisiblePrivateFields(tx, actor, [row.employeeId])).has(row.employeeId));
   });
 }
 

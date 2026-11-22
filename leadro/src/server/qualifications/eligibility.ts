@@ -47,7 +47,7 @@ export async function loadEmployeeFacts(tx: TenantTx, tenantId: string, employee
       terminationDate: true,
       qualifications: { select: { skillId: true, certificationId: true, level: true, status: true, expiresAt: true } },
       jobPermissions: { select: { jobTypeId: true, category: true, effectiveFrom: true, effectiveTo: true } },
-      serviceTerritories: { select: { orgUnitId: true, includeDescendants: true, effectiveFrom: true, effectiveTo: true } },
+      serviceTerritories: { select: { orgUnitId: true, includeDescendants: true, effectiveFrom: true, effectiveTo: true, orgUnit: { select: { active: true } } } },
       availabilities: {
         select: {
           kind: true,
@@ -73,7 +73,7 @@ export async function loadEmployeeFacts(tx: TenantTx, tenantId: string, employee
         terminationDate: employee.terminationDate,
         qualifications: employee.qualifications,
         jobPermissions: employee.jobPermissions,
-        territories: employee.serviceTerritories,
+        territories: employee.serviceTerritories.map(({ orgUnit, ...territory }) => ({ ...territory, orgUnitActive: orgUnit.active })),
         availability: employee.availabilities,
       },
     ]),
@@ -155,7 +155,10 @@ async function skillRequirements(
 /**
  * Requirements for a job TYPE (its skills, credentials and category) plus optional extras and the
  * service-area org unit. For "what if" checks and for jobs not yet created; for an existing job use
- * `requirementsForJob`, which reads the job's own snapshot.
+ * `requirementsFromInputs` with the job's own requirement rows.
+ *
+ * Ownership note: `JobType` is job configuration and belongs to the jobs module; this reads it only
+ * because that module does not exist yet. When it does, replace this read with its public API.
  *
  * @throws NotFoundError for an unknown job type.
  */
@@ -193,40 +196,40 @@ export async function requirementsForJobType(
 }
 
 /**
- * Requirements of an existing job: its own `JobRequirement` rows (type defaults copied at creation
- * plus manual additions), its type and category, and its service-area org unit. Also returns the
- * zone to read dates in, so the caller can build the query: `job.timeZone`, else the unit's, else the company's.
- *
- * @throws NotFoundError for an unknown job.
+ * What the jobs module hands over about an existing job (it implements `getJobEligibilityInputs`; this
+ * module never reads job tables). `timeZone` is the job's own zone, null = the unit's, then the company's.
  */
-export async function requirementsForJob(
+export interface EligibilityInputs {
+  jobTypeId: string;
+  jobCategory: string;
+  orgUnitId: string;
+  timeZone: string | null;
+  /** The job's own requirement rows (type defaults copied at creation plus manual additions). */
+  requirements: Array<{ skillId?: string | null; certificationId?: string | null; minLevel?: number | null }>;
+}
+
+/**
+ * Turns a job's eligibility inputs into the requirements the rules take, adding catalog names, kinds,
+ * the service area with its ancestors and the zone to read dates in.
+ *
+ * @throws NotFoundError for an unknown org unit.
+ */
+export async function requirementsFromInputs(
   tx: TenantTx,
   tenantId: string,
-  jobId: string,
+  inputs: EligibilityInputs,
 ): Promise<{ requirements: EligibilityRequirements; timeZone: string }> {
-  const job = await tx.job.findFirst({
-    where: { id: jobId, tenantId },
-    select: {
-      jobTypeId: true,
-      orgUnitId: true,
-      timeZone: true,
-      jobType: { select: { category: true } },
-      requirements: { select: { skillId: true, certificationId: true, minLevel: true } },
-    },
-  });
-  if (!job) throw new NotFoundError();
-
-  const skillEntries = job.requirements.flatMap((row) => (row.skillId ? [{ skillId: row.skillId, minLevel: row.minLevel }] : []));
-  const certificationIds = job.requirements.flatMap((row) => (row.certificationId ? [row.certificationId] : []));
+  const skillEntries = inputs.requirements.flatMap((row) => (row.skillId ? [{ skillId: row.skillId, minLevel: row.minLevel ?? null }] : []));
+  const certificationIds = inputs.requirements.flatMap((row) => (row.certificationId ? [row.certificationId] : []));
   return {
     requirements: {
-      jobTypeId: job.jobTypeId,
-      jobCategory: job.jobType.category,
-      serviceArea: await serviceAreaOf(tx, tenantId, job.orgUnitId),
+      jobTypeId: inputs.jobTypeId,
+      jobCategory: inputs.jobCategory,
+      serviceArea: await serviceAreaOf(tx, tenantId, inputs.orgUnitId),
       skills: await skillRequirements(tx, tenantId, skillEntries),
       certifications: await certificationRequirements(tx, tenantId, certificationIds),
     },
-    timeZone: await resolveWorkTimeZone(tx, tenantId, { jobTimeZone: job.timeZone, orgUnitId: job.orgUnitId }),
+    timeZone: await resolveWorkTimeZone(tx, tenantId, { jobTimeZone: inputs.timeZone, orgUnitId: inputs.orgUnitId }),
   };
 }
 

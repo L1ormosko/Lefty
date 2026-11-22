@@ -959,6 +959,11 @@ Calendar dates (`issuedAt`, `expiresAt`, `validFrom`, `validTo`) are `YYYY-MM-DD
 datetimes. A credential is valid through the END of its `expiresAt` day in the job's time zone. None of
 these records hold performance data (§10.3).
 
+Private fields: a credential `number` is returned in full only to the holder and to callers who hold
+`qualifications.approve` over the employee (HR, Owner); everyone else with `qualifications.view` gets it masked
+(`\u2022\u2022\u2022\u20221234`, last four characters). Availability `note` is returned only to the same two groups
+(others get `null`). The audit log never stores a number in clear (masked likewise).
+
 Statuses (`PENDING_VERIFICATION`, `VERIFIED`, `REJECTED`, `REVOKED`) follow `src/lib/qualification-lifecycle.ts`;
 only `VERIFIED`, unexpired rows count for eligibility.
 
@@ -1178,7 +1183,9 @@ only `VERIFIED`, unexpired rows count for eligibility.
 - **Purpose**: may this employee do this job type here and then? A read (nothing is stored); POST because the
   requirements are a body. Checks, in order: employment, required skills (verified, unexpired by the end of the
   window, minimum level), required credentials, job-category permission, service territory, availability for the
-  whole window. Every failing rule is reported.
+  whole window. Every failing rule is reported. `UNAVAILABLE_TIME_OFF` carries no params: only that the time is
+  blocked, never when or why. A territory on an archived unit does not cover. Status gate: `TERMINATED` always
+  fails; `ON_LEAVE` fails only for work starting now or earlier (future leave is an `EXCEPTION_UNAVAILABLE` row).
 - **Auth**: session. **Permission**: `qualifications.view` over the employee.
 - **Request body** (strict): `employeeId`, `jobTypeId` (required); `orgUnitId?` (service area; omit to skip the
   territory rule); `extraSkills?` `[{ skillId, minLevel? }]`, `extraCertificationIds?` (on top of the type's);
@@ -1186,7 +1193,7 @@ only `VERIFIED`, unexpired rows count for eligibility.
   company's).
 - **Response**: `200 { data: { employeeId, timeZone, eligible, failures: [{ code, params }], checked: {
   availability, territory, jobPermission } } }`. `code` is one of `EMPLOYEE_NOT_ACTIVE`, `EMPLOYEE_NOT_EMPLOYED`,
-  `QUALIFICATION_MISSING`, `QUALIFICATION_NOT_VERIFIED`, `QUALIFICATION_EXPIRED`, `SKILL_LEVEL_TOO_LOW`,
+  `QUALIFICATION_MISSING`, `QUALIFICATION_NOT_VERIFIED`, `QUALIFICATION_EXPIRED`, `QUALIFICATION_RENEWAL_PENDING` (expired, but a still-valid renewal awaits verification), `SKILL_LEVEL_TOO_LOW`,
   `JOB_PERMISSION_MISSING`, `OUTSIDE_TERRITORY`, `UNAVAILABLE_TIME_OFF`, `UNAVAILABLE_OUTSIDE_HOURS`; clients
   translate with the key `QUALIFICATION.FAILURE.<code>` and the params (a `kind` param via
   `QUALIFICATION.KIND.<kind>`). No prose is returned.

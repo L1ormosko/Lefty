@@ -30,7 +30,7 @@ export interface CertificationRequirement {
 
 /**
  * Everything the rules need to know about the work. Built from `JobType` + `JobRequirement` rows by
- * the server module (`requirementsForJob`, `requirementsForJobType`), or by hand for a "what if".
+ * the server module (`requirementsFromInputs`, `requirementsForJobType`), or by hand for a "what if".
  */
 export interface EligibilityRequirements {
   /** Job type, for the job-category permission. Null = no permission is required. */
@@ -66,6 +66,8 @@ export interface JobPermissionFact {
 
 export interface TerritoryFact {
   orgUnitId: string;
+  /** False when the unit is archived: an archived unit no longer covers anything (treated as ended). */
+  orgUnitActive: boolean;
   includeDescendants: boolean;
   effectiveFrom: Date;
   effectiveTo: Date | null;
@@ -123,6 +125,7 @@ export type EligibilityFailureCode =
   | "QUALIFICATION_MISSING"
   | "QUALIFICATION_NOT_VERIFIED"
   | "QUALIFICATION_EXPIRED"
+  | "QUALIFICATION_RENEWAL_PENDING"
   | "SKILL_LEVEL_TOO_LOW"
   | "JOB_PERMISSION_MISSING"
   | "OUTSIDE_TERRITORY"
@@ -135,6 +138,7 @@ export const ELIGIBILITY_FAILURE_CODES: readonly EligibilityFailureCode[] = [
   "QUALIFICATION_MISSING",
   "QUALIFICATION_NOT_VERIFIED",
   "QUALIFICATION_EXPIRED",
+  "QUALIFICATION_RENEWAL_PENDING",
   "SKILL_LEVEL_TOO_LOW",
   "JOB_PERMISSION_MISSING",
   "OUTSIDE_TERRITORY",

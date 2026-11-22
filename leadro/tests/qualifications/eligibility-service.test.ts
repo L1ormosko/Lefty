@@ -10,7 +10,7 @@ import {
   findExpiringQualifications,
   isEligible,
   renderEligibilityFailure,
-  requirementsForJob,
+  requirementsFromInputs,
   requirementsForJobType,
 } from "@/server/qualifications";
 import { buildWorld, createPerson, disconnect, type World } from "../authz/fixtures";
@@ -26,7 +26,6 @@ const ids = {
   epa: "",
   jobType: "",
   otherJobType: "",
-  job: "",
 };
 
 /** Window on a fixed future Wednesday, 09:00-11:00 New York (the company default zone). */
@@ -85,26 +84,7 @@ beforeAll(async () => {
     await tx.jobTypeSkill.create({ data: { tenantId: w.tenantId, jobTypeId: jobType.id, skillId: hvac.id, minLevel: 3 } });
     await tx.jobTypeCertification.create({ data: { tenantId: w.tenantId, jobTypeId: jobType.id, certificationId: epa.id } });
     const otherJobType = await tx.jobType.create({ data: { tenantId: w.tenantId, code: "install", name: "Install", category: "installation", defaultDurationMinutes: 240 } });
-    const customer = await tx.customer.create({ data: { tenantId: w.tenantId, number: 1, name: "Pat Customer" } });
-    const address = await tx.customerAddress.create({
-      data: { tenantId: w.tenantId, customerId: customer.id, line1: "1 Main St", city: "Springfield", region: "NY", postalCode: "10001", normalizedKey: "1 main st|||springfield|ny|10001|us" },
-    });
-    const job = await tx.job.create({
-      data: {
-        tenantId: w.tenantId,
-        number: 1,
-        customerId: customer.id,
-        serviceAddressId: address.id,
-        jobTypeId: jobType.id,
-        orgUnitId: w.units.teamA1,
-        title: "Furnace repair",
-        estimatedDurationMinutes: 120,
-        timeZone: "America/Chicago",
-      },
-    });
-    await tx.jobRequirement.create({ data: { tenantId: w.tenantId, jobId: job.id, skillId: hvac.id, minLevel: 4 } });
-    await tx.jobRequirement.create({ data: { tenantId: w.tenantId, jobId: job.id, certificationId: epa.id } });
-    Object.assign(ids, { hvac: hvac.id, epa: epa.id, jobType: jobType.id, otherJobType: otherJobType.id, job: job.id });
+    Object.assign(ids, { hvac: hvac.id, epa: epa.id, jobType: jobType.id, otherJobType: otherJobType.id });
   });
 });
 afterAll(disconnect);
@@ -130,12 +110,21 @@ describe("building requirements", () => {
     await expect(withTenant(w.tenantId, (tx) => requirementsForJobType(tx, w.tenantId, "nope"))).rejects.toThrow();
   });
 
-  it("requirementsForJob uses the job's own requirement rows and zone (job zone beats the unit's and the company's)", async () => {
-    const { requirements, timeZone } = await withTenant(w.tenantId, (tx) => requirementsForJob(tx, w.tenantId, ids.job));
+  it("requirementsFromInputs turns the jobs module's inputs into requirements (names, ancestry) and resolves the zone: job zone beats the unit's and the company's", async () => {
+    const inputs = {
+      jobTypeId: ids.jobType,
+      jobCategory: "repair",
+      orgUnitId: w.units.teamA1,
+      timeZone: "America/Chicago",
+      requirements: [{ skillId: ids.hvac, minLevel: 4 }, { certificationId: ids.epa }],
+    };
+    const { requirements, timeZone } = await withTenant(w.tenantId, (tx) => requirementsFromInputs(tx, w.tenantId, inputs));
     expect(requirements.skills).toEqual([{ skillId: ids.hvac, minLevel: 4, name: "HVAC" }]);
     expect(requirements.certifications.map((row) => row.certificationId)).toEqual([ids.epa]);
     expect(requirements.serviceArea?.orgUnitId).toBe(w.units.teamA1);
     expect(timeZone).toBe("America/Chicago");
+    const fallback = await withTenant(w.tenantId, (tx) => requirementsFromInputs(tx, w.tenantId, { ...inputs, timeZone: null }));
+    expect(fallback.timeZone).toBe("America/New_York"); // company default
   });
 });
 
@@ -194,6 +183,26 @@ describe("isEligible and evaluateCandidates against the database", () => {
     });
     expect(result.wrong.failures.map((failure) => failure.code)).toEqual(["JOB_PERMISSION_MISSING"]);
     expect(result.terminated.failures.map((failure) => failure.code)).toContain("EMPLOYEE_NOT_ACTIVE");
+  });
+
+  it("a territory on an archived unit stops covering, and an ON_LEAVE employee can still be scheduled ahead", async () => {
+    const person = await createPerson(w.tenantId, "archived-terr", { orgUnitId: w.units.teamA1, legalEntityId: w.legalEntityId });
+    const employeeId = person.employeeId as string;
+    await equip(employeeId);
+    await qualify(employeeId, { kind: "SKILL", skillId: ids.hvac, level: 4 });
+    await qualify(employeeId, { kind: "LICENSE", certificationId: ids.epa });
+    const run = (extra: Record<string, unknown> = {}) =>
+      withTenant(w.tenantId, async (tx) => {
+        const requirements = await requirementsForJobType(tx, w.tenantId, ids.jobType, { orgUnitId: w.units.cityA });
+        return (await isEligible(tx, w.tenantId, employeeId, requirements, query(extra))).failures.map((failure) => failure.code);
+      });
+    expect(await run()).toEqual([]);
+    await withTenant(w.tenantId, (tx) => tx.employee.update({ where: { id: employeeId }, data: { status: "ON_LEAVE" } }));
+    expect(await run()).toEqual([]); // future window: leave is an availability exception, not a status
+    expect(await run({ at: WINDOW.startsAt })).toEqual(["EMPLOYEE_NOT_ACTIVE"]);
+    await withTenant(w.tenantId, (tx) => tx.orgUnit.update({ where: { id: w.units.cityA }, data: { active: false } }));
+    expect(await run()).toEqual(["OUTSIDE_TERRITORY"]);
+    await withTenant(w.tenantId, (tx) => tx.orgUnit.update({ where: { id: w.units.cityA }, data: { active: true } }));
   });
 
   it("does not see another tenant's employee (row-level security): not found", async () => {
