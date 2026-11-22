@@ -159,9 +159,12 @@ matrix's "Full scope"; assign `TENANT` when a company wants that); Technician ->
 Technician-specific qualifiers use `fields` (`necessary`, `status`, `execution`); the COO's
 `permissions.assign` carries `{ set: "non_sensitive_roles" }`, to be enforced by the permissions module.
 
-**MFA.** `Role.requiresMfa = true` for the Owner/CEO, Finance Director and HR Manager templates and for
+**MFA.** `Role.requiresMfa = true` for the Owner/CEO, Finance Director and HR Manager templates, for
 any role holding `permissions.manage`, `permissions.assign` or a `*.configure` permission (this makes the
-COO template MFA-required too). Authentication enforces it at login; the authz engine exposes it as
+COO template MFA-required too), and for CUSTOM roles (no `templateKey`, clones included) holding any
+sensitive permission or sensitive field set. Template-derived roles (edits of a shipped template) keep the
+template rule, so a Technician stays MFA-free. Authentication enforces it per request, not only at login
+(a session that never passed MFA is sent back to the MFA step); the authz engine exposes the flag as
 `via.requiresMfa`.
 
 **Granting roles (anti-escalation).** `assignRole(tx, actor, input)` is the only request-path way to
@@ -220,7 +223,8 @@ Rules (all enforced in code, all tested):
   with the COO `non_sensitive_roles` qualifier honoured, so a City admin cannot strip a tenant-wide assignment and a COO
   cannot revoke an Owner role. Revoking your own assignment is allowed (it only reduces access).
 - **MFA flag**: a role with `permissions.manage|assign` or any `*.configure` requires MFA, as do the Owner, Finance and HR
-  templates; the flag can be raised freely and never lowered while mandatory.
+  templates and custom roles (clones too) holding a sensitive permission or field set; the flag can be raised freely
+  and never lowered while mandatory. It is enforced per request, not "at login".
 - **Invitations obey the same rules** at creation and at acceptance (see `auth` README).
 
 ## 7. Testing obligations (spec 26.3)

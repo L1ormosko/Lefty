@@ -259,6 +259,8 @@ No new dependencies (Zod already present). No schema change and no migration: ev
    holding `permissions.manage`, `permissions.assign` or any `*.configure` (the brief said manage/configure; I also
    included `permissions.assign` because it can hand out sensitive roles, which makes the COO template MFA-required).
    The authz engine does not enforce MFA; authentication reads the flag at login. Documented in PERMISSIONS.md.
+   **Superseded (follow-up round):** MFA is re-checked on every request (`resolveSession`), and custom roles
+   (no template key, clones included) with any sensitive permission/field set also require it. See AUTH.md.
 10. **Duplicate active assignments (T1 review minor)**: enforced in the service (`assignRole`), not by a DB
     constraint. Scopes live in a child table, so an exclusion constraint on `RoleAssignment` cannot see them, and
     forbidding any second (user, role) row would block legitimate temporary extra scopes. A per-(tenant, user)

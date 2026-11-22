@@ -114,6 +114,10 @@ Missing capabilities (do not assume these exist):
 - Pickers are capped at 200 entries; some admin lists are capped at 50 with no pager.
 
 Security-relevant limitations:
+- **MFA is re-checked on every request** for sessions that never passed MFA (`mfaVerifiedAt` null). That costs
+  one extra query per request for such sessions only (verified sessions skip it). Sessions that existed before
+  this was deployed have a null `mfaVerifiedAt`, so users holding an MFA-requiring role are prompted for MFA once
+  after the deploy; completing it sets the column.
 - **MFA enrollment is trust-on-first-use** for an MFA-role user who has not enrolled yet: whoever holds
   that session first binds the authenticator. There is no recovery or MFA-disable flow.
 - **Rate limiting is in memory per instance**; with several instances the limits multiply (the database
