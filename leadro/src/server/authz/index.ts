@@ -21,6 +21,7 @@ export {
   buildScopeWhere,
   withinScope,
   fieldSetsForRow,
+  narrowScopeToFieldSet,
   projectRows,
 } from "./scope-filter";
 export type { ScopeColumns, ScopeOptions, ResolvedScope, ScopePart, RowScopeAttributes } from "./scope-filter";

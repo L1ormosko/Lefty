@@ -115,6 +115,26 @@ export async function resolveScope(
   };
 }
 
+/**
+ * Narrows a resolved scope to the grants whose field sets include `fieldSet` (e.g. `"base"`). Use it
+ * for read models that expose a whole field set at once (names, dates of people) rather than
+ * projecting per row: a field-limited grant (availability only, financial only) then contributes
+ * nothing. Totals are rebuilt from the surviving parts only, so `buildScopeWhere` on the result can
+ * never be wider than the grants that really cover the field set. ASSIGNED is kept as-is by type.
+ */
+export function narrowScopeToFieldSet(scope: ResolvedScope, fieldSet: string): ResolvedScope {
+  const parts = scope.parts.filter((part) => part.fieldSets.includes(fieldSet));
+  const ofType = (type: ScopeType) => parts.filter((part) => part.type === type);
+  return {
+    tenantWide: ofType("TENANT").length > 0,
+    orgUnitIds: [...new Set(ofType("ORG_UNIT").flatMap((part) => part.orgUnitIds))],
+    legalEntityIds: [...new Set(ofType("LEGAL_ENTITY").flatMap((part) => part.legalEntityIds))],
+    ownEmployeeId: ofType("OWN")[0]?.employeeId ?? null,
+    assignedEmployeeId: ofType("ASSIGNED")[0]?.employeeId ?? null,
+    parts,
+  };
+}
+
 /** What the caller knows about one fetched row, to decide which scope parts cover it. */
 export interface RowScopeAttributes {
   orgUnitIds?: string[];

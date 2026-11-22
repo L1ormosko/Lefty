@@ -54,3 +54,5 @@ Field sets (read before returning records):
   unmapped fields are dropped, so a new column is hidden until classified.
 - `assignRole` also requires the target user inside the granter's `permissions.assign` scope, and checks (scope AND
   field sets) together per held grant.
+
+- `narrowScopeToFieldSet(scope, "base")`: keeps only the scope parts whose grant covers that field set (for read models exposing a whole field set, e.g. placement history); totals are rebuilt from the surviving parts.

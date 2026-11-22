@@ -34,6 +34,18 @@ describe("listUnitChanges", () => {
     await expect(listUnitChanges(world.cityManagerA.actor, { limit: 5, orgUnitId: world.units.cityB })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("withholds the name of a parent outside the caller's scope", async () => {
+    const world = await buildWorld("hist-parent-scope");
+    // CEO moves City A's team under City B and back: City B is outside City Manager A's scope.
+    const ctx = contextFor(world.ceo.actor);
+    await moveOrgUnit(world.ceo.actor, ctx, world.units.teamA1, { newParentId: world.units.cityB });
+    await moveOrgUnit(world.ceo.actor, ctx, world.units.teamA1, { newParentId: world.units.cityA });
+    const page = await listUnitChanges(world.cityManagerA.actor, { limit: 20, orgUnitId: world.units.teamA1 });
+    const toB = page.data.find((entry) => entry.newParentOutOfScope);
+    expect(toB).toMatchObject({ newParentName: null, newParentOutOfScope: true, previousParentName: "City A", previousParentOutOfScope: false });
+    expect(JSON.stringify(page.data)).not.toContain("City B");
+  });
+
   it("refuses a caller without organization.view", async () => {
     const world = await buildWorld("hist-deny");
     await expect(listUnitChanges(world.finance.actor, { limit: 5 })).rejects.toMatchObject({ code: "FORBIDDEN" });

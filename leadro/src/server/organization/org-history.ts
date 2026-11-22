@@ -20,9 +20,12 @@ export interface UnitChangeEntry {
   action: string;
   orgUnitId: string;
   orgUnitName: string | null;
-  /** Names of the parent before / after, for `org_unit.move` (null = top level / not applicable). */
+  /** Names of the parent before / after, for `org_unit.move` (null = top level / not applicable / outside scope). */
   previousParentName: string | null;
   newParentName: string | null;
+  /** True when that parent exists but lies outside the caller's scope: its name is withheld. */
+  previousParentOutOfScope: boolean;
+  newParentOutOfScope: boolean;
   /** Display name of the user responsible (their employee name, else their login email). */
   recordedBy: string | null;
   reason: string | null;
@@ -56,11 +59,13 @@ export async function listUnitChanges(
       action: { in: [...UNIT_CHANGE_ACTIONS] },
       ...(query.orgUnitId ? { targetId: query.orgUnitId } : {}),
     };
+    let visibleIds: Set<string> | null = null; // null = tenant-wide, everything is visible
     if (!scope.tenantWide) {
       const visible = await tx.orgUnit.findMany({
         where: withinScope(buildScopeWhere(scope, orgUnitScopeColumns, now), { tenantId: actor.tenantId }),
         select: { id: true },
       });
+      visibleIds = new Set(visible.map((unit) => unit.id));
       where.targetId = query.orgUnitId
         ? { in: visible.map((unit) => unit.id).filter((id) => id === query.orgUnitId) }
         : { in: visible.map((unit) => unit.id) };
@@ -91,7 +96,10 @@ export async function listUnitChanges(
     });
     const userName = new Map(users.map((user) => [user.id, user.employee ? `${user.employee.firstName} ${user.employee.lastName}` : user.email]));
 
-    const parentName = (parentId: unknown) => (typeof parentId === "string" ? (unitName.get(parentId) ?? null) : null);
+    // A parent outside the caller's scope must not leak its name through a child's history.
+    const isHidden = (parentId: unknown) => typeof parentId === "string" && visibleIds !== null && !visibleIds.has(parentId);
+    const parentName = (parentId: unknown) =>
+      typeof parentId === "string" && !isHidden(parentId) ? (unitName.get(parentId) ?? null) : null;
     return {
       data: page.data.map((row) => {
         const previous = asRecord(row.previousValue);
@@ -104,6 +112,8 @@ export async function listUnitChanges(
           orgUnitName: row.targetId ? (unitName.get(row.targetId) ?? null) : null,
           previousParentName: parentName(previous.parentId),
           newParentName: parentName(next.parentId),
+          previousParentOutOfScope: isHidden(previous.parentId),
+          newParentOutOfScope: isHidden(next.parentId),
           recordedBy: row.actorUserId ? (userName.get(row.actorUserId) ?? null) : null,
           reason: row.reason,
           changedFields: row.action === "org_unit.update" ? Object.keys(next) : [],

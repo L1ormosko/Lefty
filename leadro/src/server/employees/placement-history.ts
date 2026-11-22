@@ -3,9 +3,9 @@ import {
   buildScopeWhere,
   employeeScopeColumns,
   enforceInTx,
+  narrowScopeToFieldSet,
   resolveScope,
   withinScope,
-  type ResolvedScope,
 } from "@/server/authz";
 import { ForbiddenError, pageArgs, toPage, type Actor, type Page } from "@/server/core";
 import { withTenant } from "@/server/db";
@@ -27,24 +27,6 @@ export interface PlacementHistoryEntry {
 }
 
 /**
- * Narrows a resolved scope to the grants that cover the `base` field set. Placement history shows
- * names and dates of people, so a field-limited grant (e.g. a Dispatcher's availability-only view)
- * must not reach it, exactly like `listEmployeeAssignments`.
- */
-function baseFieldScope(scope: ResolvedScope): ResolvedScope {
-  const parts = scope.parts.filter((part) => part.fieldSets.includes("base"));
-  const ofType = (type: string) => parts.filter((part) => part.type === type);
-  return {
-    tenantWide: ofType("TENANT").length > 0,
-    orgUnitIds: [...new Set(ofType("ORG_UNIT").flatMap((part) => part.orgUnitIds))],
-    legalEntityIds: [...new Set(ofType("LEGAL_ENTITY").flatMap((part) => part.legalEntityIds))],
-    ownEmployeeId: ofType("OWN")[0]?.employeeId ?? null,
-    assignedEmployeeId: null,
-    parts,
-  };
-}
-
-/**
  * Placement changes of every employee the caller may see, newest first: previous unit, new unit,
  * effective dates, who recorded it and why. Needs `employees.view` with the `base` field set; the
  * employee scope is part of the query, so paging cannot leak rows. Optionally limited to one unit.
@@ -57,7 +39,7 @@ export async function listPlacementHistory(
   return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "employees.view");
     const now = new Date();
-    const scope = baseFieldScope(await resolveScope(tx, actor, "employees.view", now));
+    const scope = narrowScopeToFieldSet(await resolveScope(tx, actor, "employees.view", now), "base");
     // Same answer as `listEmployeeAssignments` for a grant without the base field set.
     if (scope.parts.length === 0) throw new ForbiddenError();
     const where: Prisma.OrganizationalAssignmentWhereInput = {

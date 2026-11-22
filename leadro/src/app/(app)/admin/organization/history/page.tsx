@@ -15,11 +15,13 @@ const PATH = "/admin/organization/history";
 /** One sentence describing a structural change, translated (the audit action is a language-neutral id). */
 function describeChange(entry: UnitChangeEntry, t: TranslateFn): string {
   const unknown = t("ADMIN.HISTORY_UNKNOWN_UNIT");
+  const outside = t("ADMIN.HISTORY_OUT_OF_SCOPE_UNIT");
+  const parentLabel = (name: string | null, hiddenByScope: boolean) => (hiddenByScope ? outside : (name ?? t("ADMIN.ORG_TOP_LEVEL")));
   switch (entry.action) {
     case "org_unit.create":
-      return t("ADMIN.HISTORY_UNIT_CREATED", { parent: entry.newParentName ?? t("ADMIN.ORG_TOP_LEVEL") });
+      return t("ADMIN.HISTORY_UNIT_CREATED", { parent: parentLabel(entry.newParentName, entry.newParentOutOfScope) });
     case "org_unit.move":
-      return t("ADMIN.HISTORY_UNIT_MOVED", { from: entry.previousParentName ?? t("ADMIN.ORG_TOP_LEVEL"), to: entry.newParentName ?? t("ADMIN.ORG_TOP_LEVEL") });
+      return t("ADMIN.HISTORY_UNIT_MOVED", { from: parentLabel(entry.previousParentName, entry.previousParentOutOfScope), to: parentLabel(entry.newParentName, entry.newParentOutOfScope) });
     case "org_unit.archive":
       return t("ADMIN.HISTORY_UNIT_ARCHIVED");
     case "org_unit.manager_assign":
