@@ -3,7 +3,9 @@ import type { NotificationChannel as ChannelKind, Prisma } from "@prisma/client"
 import { findParamsProblem, isChannelOptedOut } from "@/lib/notification-rules";
 import { ValidationError } from "@/server/core";
 import type { TenantTx } from "@/server/db";
+import { logger } from "@/server/logging";
 import { NOTIFICATION_EVENTS, type NotificationEvent } from "./events";
+import { filterRecipientsWithAccess } from "./target-access";
 
 const ID_LIKE = /^[A-Za-z0-9_.:-]{1,128}$/;
 const MAX_RECIPIENTS = 500;
@@ -15,6 +17,8 @@ export interface NotifyResult {
   duplicateCount: number;
   /** Recipients dropped because they are not active users of the tenant. */
   skippedRecipientCount: number;
+  /** Recipients dropped because they may not see the target record (`target.permission` on `target.resource`). */
+  inaccessibleRecipientCount: number;
 }
 
 /**
@@ -32,17 +36,41 @@ export interface NotifyResult {
  * repeated call a no-op for recipients already notified. `ON CONFLICT DO NOTHING` is used so a race
  * between two transactions cannot abort either one.
  *
- * @throws ValidationError when `params` break the ids-only contract (a programming error: fix the caller).
+ * Access: when the event links to a record (`event.target`), a recipient for whom
+ * `canInTx(target.permission, target.resource)` fails is silently dropped (counted and logged), so
+ * a record's existence and number never reach someone outside its scope. Read time re-checks too
+ * (`redactInaccessible`).
+ *
+ * @throws ValidationError on programming errors: params that are undeclared, missing or not ids-only,
+ *   a bad eventId/targetId, a target type that does not match the event. It propagates into the
+ *   caller's transaction and rolls it back, which is intended: fix the caller.
  */
 export async function notifyInTx(tx: TenantTx, event: NotificationEvent): Promise<NotifyResult> {
   const { tenantId } = event;
   const definition = NOTIFICATION_EVENTS[event.eventType];
   const params = event.params ?? {};
+  const declared: readonly string[] = definition.params;
+  const undeclared = Object.keys(params).filter((name) => !declared.includes(name));
+  const missing = declared.filter((name) => !(name in params));
+  if (undeclared.length > 0 || missing.length > 0) {
+    throw new ValidationError({
+      message: `Notification params for ${event.eventType} must be exactly [${declared.join(", ")}] (undeclared: [${undeclared.join(", ")}], missing: [${missing.join(", ")}]).`,
+      field: "params",
+    });
+  }
   const paramsProblem = findParamsProblem(params);
   if (paramsProblem) throw new ValidationError({ message: `Notification params rejected: ${paramsProblem}`, field: "params" });
   if (!ID_LIKE.test(event.eventId)) throw new ValidationError({ message: "Notification eventId must be an identifier.", field: "eventId" });
   const idempotencyKey = event.idempotencyKey ?? `${event.eventType}:${event.eventId}`;
   if (idempotencyKey.length > 200) throw new ValidationError({ message: "Notification idempotencyKey is too long.", field: "idempotencyKey" });
+
+  const target = event.target;
+  if (target) {
+    if (!ID_LIKE.test(target.targetId)) throw new ValidationError({ message: "Notification targetId must be an identifier.", field: "target.targetId" });
+    if (target.targetType !== definition.targetType) {
+      throw new ValidationError({ message: `Event ${event.eventType} links to ${definition.targetType ?? "no record"}, not ${target.targetType}.`, field: "target.targetType" });
+    }
+  }
 
   const requested = [...new Set(event.recipientUserIds)];
   if (requested.length > MAX_RECIPIENTS) throw new ValidationError({ message: `At most ${MAX_RECIPIENTS} recipients per event.`, field: "recipientUserIds" });
@@ -51,8 +79,14 @@ export async function notifyInTx(tx: TenantTx, event: NotificationEvent): Promis
     select: { id: true },
   });
   const skippedRecipientCount = requested.length - recipients.length;
-  if (recipients.length === 0) return { createdNotificationIds: [], duplicateCount: 0, skippedRecipientCount };
-  const recipientIds = recipients.map((recipient) => recipient.id);
+  const recipientIds = target
+    ? await filterRecipientsWithAccess(tx, tenantId, recipients.map((recipient) => recipient.id), target.permission, target.resource)
+    : recipients.map((recipient) => recipient.id);
+  const inaccessibleRecipientCount = recipients.length - recipientIds.length;
+  if (inaccessibleRecipientCount > 0) {
+    logger.info("notification recipients dropped: no access to the target record", { tenantId, eventType: event.eventType, dropped: inaccessibleRecipientCount });
+  }
+  if (recipientIds.length === 0) return { createdNotificationIds: [], duplicateCount: 0, skippedRecipientCount, inaccessibleRecipientCount };
 
   // Ids are generated here so we know afterwards which rows THIS call inserted (createMany skips duplicates).
   const candidates = recipientIds.map((recipientId) => ({ id: randomUUID(), recipientId }));
@@ -66,8 +100,8 @@ export async function notifyInTx(tx: TenantTx, event: NotificationEvent): Promis
       idempotencyKey,
       templateKey: definition.templateKey,
       params: Object.keys(params).length > 0 ? (params as Prisma.InputJsonObject) : undefined,
-      targetType: event.targetId ? definition.targetType : null,
-      targetId: event.targetId ?? null,
+      targetType: target ? target.targetType : null,
+      targetId: target ? target.targetId : null,
       critical: definition.critical,
     })),
     skipDuplicates: true,
@@ -84,6 +118,7 @@ export async function notifyInTx(tx: TenantTx, event: NotificationEvent): Promis
     createdNotificationIds: created.map((candidate) => candidate.id),
     duplicateCount: recipientIds.length - created.length,
     skippedRecipientCount,
+    inaccessibleRecipientCount,
   };
 }
 

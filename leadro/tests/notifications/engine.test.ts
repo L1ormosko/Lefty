@@ -3,6 +3,9 @@ import { withTenant } from "@/server/db";
 import {
   deliverAfterCommit,
   deliverPending,
+  deliverPendingForAllTenants,
+  registerNotificationTargetResolver,
+  resetNotificationTargetResolvers,
   notifyInTx,
   renderNotification,
   renderNotificationForRecipient,
@@ -41,11 +44,11 @@ async function notify(recipients: string[], overrides: Partial<Parameters<typeof
 
 describe("notifyInTx", () => {
   it("writes one notification per recipient with an in-app delivery, storing keys and ids only", async () => {
-    const result = await notify([w.techA1.userId, w.techB.userId], { targetId: "lead-1" });
+    const result = await notify([w.techA1.userId, w.techB.userId]);
     expect(result.createdNotificationIds).toHaveLength(2);
     const rows = await withTenant(w.tenantId, (tx) => tx.notification.findMany({ where: { id: { in: result.createdNotificationIds } } }));
     expect(rows.map((row) => row.recipientId).sort()).toEqual([w.techA1.userId, w.techB.userId].sort());
-    expect(rows[0]).toMatchObject({ eventType: "lead.assigned", templateKey: "NOTIFICATION.LEAD_ASSIGNED", params: { leadNumber: 7 }, targetType: "lead", targetId: "lead-1", critical: false, readAt: null });
+    expect(rows[0]).toMatchObject({ eventType: "lead.assigned", templateKey: "NOTIFICATION.LEAD_ASSIGNED", params: { leadNumber: 7 }, targetType: null, targetId: null, critical: false, readAt: null });
     const [delivery] = await deliveries(rows[0].id);
     expect(delivery).toMatchObject({ channel: "IN_APP", attempt: 1, status: "PENDING" });
   });
@@ -332,5 +335,113 @@ describe("rendering at read time", () => {
     const forDefault = await renderNotificationForRecipient(w.tenantId, w.ceo.userId, row);
     expect(forSpanish.title).toBe("Trabajo cancelado");
     expect(forDefault.title).toBe("Job cancelled");
+  });
+});
+
+describe("event contract", () => {
+  it("rejects undeclared and missing params, a bad targetId and a mismatched target type", async () => {
+    await expect(notify([w.techA1.userId], { params: { leadNumber: 1, extra: "x" } })).rejects.toMatchObject({ field: "params" });
+    await expect(notify([w.techA1.userId], { params: {} })).rejects.toMatchObject({ field: "params" });
+    const target = { targetType: "lead", targetId: "lead-1", permission: "leads.view", resource: { orgUnitId: w.units.cityA } };
+    await expect(notify([w.cityManagerA.userId], { target: { ...target, targetId: "has spaces!" } })).rejects.toMatchObject({ field: "target.targetId" });
+    await expect(notify([w.cityManagerA.userId], { target: { ...target, targetType: "job" } })).rejects.toMatchObject({ field: "target.targetType" });
+  });
+
+  it("drops recipients without access to the target record and reports how many", async () => {
+    const result = await notify([w.cityManagerA.userId, w.cityManagerB.userId, w.techA1.userId], {
+      target: { targetType: "lead", targetId: "lead-2", permission: "leads.view", resource: { orgUnitId: w.units.cityA } },
+    });
+    expect(result.createdNotificationIds).toHaveLength(1);
+    expect(result.inaccessibleRecipientCount).toBe(2);
+    const row = await withTenant(w.tenantId, (tx) => tx.notification.findUniqueOrThrow({ where: { id: result.createdNotificationIds[0] } }));
+    expect(row).toMatchObject({ recipientId: w.cityManagerA.userId, targetType: "lead", targetId: "lead-2" });
+  });
+});
+
+describe("delivery claims", () => {
+  it("does not record an outcome for a claim that another worker took over", async () => {
+    const { createdNotificationIds } = await notify([w.techA1.userId]);
+    const id = createdNotificationIds[0];
+    setNotificationChannel({
+      channel: "IN_APP",
+      send: async () => {
+        // Simulate a reclaim while this (slow) worker was still sending.
+        await withTenant(w.tenantId, (tx) =>
+          tx.notificationDelivery.updateMany({ where: { notificationId: id }, data: { attemptedAt: new Date(Date.now() + 1000) } }),
+        );
+        return { outcome: "DELIVERED", provider: "in_app" };
+      },
+    });
+    const summary = await deliverPending(w.tenantId, { notificationIds: createdNotificationIds });
+    expect(summary).toMatchObject({ attempted: 1, delivered: 0 });
+    expect((await deliveries(id))[0].status).toBe("PENDING");
+  });
+
+  it("hands a provider the redacted message when the recipient lost access to the record", async () => {
+    registerNotificationTargetResolver("lead", "leads.view", () => ({ orgUnitId: w.units.cityB })); // now City B: cityManagerA has no access
+    try {
+      await setChannels(["IN_APP", "EMAIL"]);
+      const seen: Array<{ templateKey: string; params: unknown; targetId: string | null }> = [];
+      setNotificationChannel({
+        channel: "EMAIL",
+        send: async (message) => {
+          seen.push({ templateKey: message.templateKey, params: message.params, targetId: message.targetId });
+          return { outcome: "SENT", provider: "p" };
+        },
+      });
+      const { createdNotificationIds } = await notify([w.cityManagerA.userId], {
+        target: { targetType: "lead", targetId: "lead-3", permission: "leads.view", resource: { orgUnitId: w.units.cityA } },
+      });
+      await deliverPending(w.tenantId, { notificationIds: createdNotificationIds });
+      expect(seen).toEqual([{ templateKey: "NOTIFICATION.ITEM_UNAVAILABLE", params: {}, targetId: null }]);
+    } finally {
+      resetNotificationTargetResolvers();
+      await setChannels(["IN_APP"]);
+    }
+  });
+});
+
+describe("deliverPendingForAllTenants", () => {
+  it("delivers every tenant's rows, survives one tenant's channel failing, and never crosses tenants", async () => {
+    const b = await buildWorld("notify-sweep-b");
+    const enable = (tenantId: string) =>
+      withTenant(tenantId, (tx) =>
+        tx.operationsSettings.upsert({ where: { tenantId }, create: { tenantId, enabledChannels: ["IN_APP", "EMAIL"] }, update: { enabledChannels: ["IN_APP", "EMAIL"] } }),
+      );
+    await enable(w.tenantId);
+    await enable(b.tenantId);
+    try {
+      const mine = await notify([w.techA1.userId]);
+      const theirs = await withTenant(b.tenantId, (tx) =>
+        notifyInTx(tx, { tenantId: b.tenantId, eventType: "job.assigned", eventId: nextEventId(), recipientUserIds: [b.techA1.userId], params: { jobNumber: 9 } }),
+      );
+      const sentFor: string[] = [];
+      setNotificationChannel({
+        channel: "EMAIL",
+        send: async (message) => {
+          if (message.tenantId === w.tenantId) throw new Error("tenant A provider outage");
+          sentFor.push(message.tenantId);
+          return { outcome: "SENT", provider: "p" };
+        },
+      });
+
+      const attempted = await deliverPendingForAllTenants({ tenantIds: [w.tenantId, b.tenantId] });
+      expect(attempted).toBeGreaterThanOrEqual(4); // at least this test's two in-app + two email deliveries
+
+      const mineRows = await deliveries(mine.createdNotificationIds[0]);
+      expect(mineRows.find((row) => row.channel === "IN_APP")?.status).toBe("DELIVERED");
+      expect(mineRows.find((row) => row.channel === "EMAIL")).toMatchObject({ status: "FAILED", failureReason: "CHANNEL_ERROR", retryStatus: "SCHEDULED" });
+
+      const theirRows = await withTenant(b.tenantId, (tx) => tx.notificationDelivery.findMany({ where: { notificationId: theirs.createdNotificationIds[0] } }));
+      expect(theirRows.find((row) => row.channel === "IN_APP")?.status).toBe("DELIVERED");
+      expect(theirRows.find((row) => row.channel === "EMAIL")?.status).toBe("SENT");
+      expect(sentFor).toContain(b.tenantId);
+      expect(sentFor).not.toContain(w.tenantId);
+      // Tenant B's rows are invisible from tenant A and vice versa.
+      const crossed = await withTenant(w.tenantId, (tx) => tx.notificationDelivery.count({ where: { notificationId: theirs.createdNotificationIds[0] } }));
+      expect(crossed).toBe(0);
+    } finally {
+      await setChannels(["IN_APP"]);
+    }
   });
 });

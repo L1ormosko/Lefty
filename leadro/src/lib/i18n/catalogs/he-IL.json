@@ -179,6 +179,8 @@
     "NOTIFICATION.QUALIFICATION_EXPIRED.BODY": "תוקפה של הסמכה פג והיא אינה נחשבת עוד לזכאות לעבודות.",
     "NOTIFICATION.SECURITY_ALERT.TITLE": "התראת אבטחה",
     "NOTIFICATION.SECURITY_ALERT.BODY": "בוצע שינוי רלוונטי לאבטחה בחשבון שלך.",
+    "NOTIFICATION.ITEM_UNAVAILABLE.TITLE": "הפריט אינו זמין עוד",
+    "NOTIFICATION.ITEM_UNAVAILABLE.BODY": "אין לך עוד גישה לפריט שההתראה הזו מתייחסת אליו.",
     "NOTIFICATION.MARK_READ": "סמן כנקרא",
     "NOTIFICATION.MARK_ALL_READ": "סמן הכול כנקרא",
     "NOTIFICATION.EMPTY": "אין התראות",

@@ -5,8 +5,8 @@ import { GET as listPreferences, PUT as setPreference } from "@/app/api/v1/notif
 import { POST as markAllRead } from "@/app/api/v1/notifications/read-all/route";
 import { GET as unreadCount } from "@/app/api/v1/notifications/unread-count/route";
 import { withTenant } from "@/server/db";
-import { notifyInTx } from "@/server/notifications";
-import { buildWorld, createPerson, disconnect, grantTemplate, type World } from "../authz/fixtures";
+import { notifyInTx, registerNotificationTargetResolver, resetNotificationTargetResolvers } from "@/server/notifications";
+import { buildWorld, createPerson, disconnect, grantTemplate, type Person, type World } from "../authz/fixtures";
 import { call, sessionCookie } from "../org/org-helpers";
 
 let w: World;
@@ -17,25 +17,46 @@ let eventCounter = 0;
 
 beforeAll(async () => {
   w = await buildWorld("notify-api");
+  registerTestResolvers();
   tech = await sessionCookie(w.techA1, w.tenantId);
   otherTech = await sessionCookie(w.techB, w.tenantId);
   // A user with no role at all: holds no notifications permission.
   noGrant = await sessionCookie(await createPerson(w.tenantId, "no-grant", { withEmployee: false }), w.tenantId);
 });
-afterAll(disconnect);
+afterAll(async () => {
+  resetNotificationTargetResolvers();
+  await disconnect();
+});
 
-async function notifyUser(userId: string, jobNumber: number, eventType: "job.assigned" | "job.cancelled" = "job.assigned") {
+/** Notifies a technician about a job assigned to them (jobs.view with ASSIGNED scope covers it). */
+async function notifyUser(person: Person, jobNumber: number, eventType: "job.assigned" | "job.cancelled" = "job.assigned") {
   const { createdNotificationIds } = await withTenant(w.tenantId, (tx) =>
-    notifyInTx(tx, { tenantId: w.tenantId, eventType, eventId: `api-${Date.now()}-${eventCounter++}`, recipientUserIds: [userId], params: { jobNumber }, targetId: `job-${jobNumber}` }),
+    notifyInTx(tx, {
+      tenantId: w.tenantId,
+      eventType,
+      eventId: `api-${Date.now()}-${eventCounter++}`,
+      recipientUserIds: [person.userId],
+      params: { jobNumber },
+      target: { targetType: "job", targetId: `job-${jobNumber}`, permission: "jobs.view", resource: { assignedEmployeeIds: [person.employeeId as string] } },
+    }),
   );
   return createdNotificationIds[0];
 }
 
+/** The test "job" module: job-N is assigned to the viewer's own employee; "lead-N" lives in City A. */
+function registerTestResolvers() {
+  registerNotificationTargetResolver("job", "jobs.view", async (tx, subject) => {
+    const employee = await tx.employee.findFirst({ where: { userId: subject.userId, tenantId: subject.tenantId }, select: { id: true } });
+    return employee ? { assignedEmployeeIds: [employee.id] } : null;
+  });
+  registerNotificationTargetResolver("lead", "leads.view", () => ({ orgUnitId: w.units.cityA }));
+}
+
 describe("own notifications API", () => {
   it("lists only the caller's notifications, newest first, with keys and ids but no display text", async () => {
-    const first = await notifyUser(w.techA1.userId, 1);
-    const second = await notifyUser(w.techA1.userId, 2);
-    await notifyUser(w.techB.userId, 3);
+    const first = await notifyUser(w.techA1, 1);
+    const second = await notifyUser(w.techA1, 2);
+    await notifyUser(w.techB, 3);
 
     const result = await call(list, "GET", "/api/v1/notifications", { cookie: tech });
     expect(result.status).toBe(200);
@@ -51,15 +72,16 @@ describe("own notifications API", () => {
       critical: false,
       readAt: null,
       createdAt: expect.any(String),
+      redacted: false,
     });
     expect(result.json.page).toEqual({ nextCursor: null, limit: 50 });
   });
 
   it("paginates with a cursor and filters unread", async () => {
     const lonely = await createPerson(w.tenantId, "pager", { orgUnitId: w.units.cityA });
-    await grantTemplate(w.tenantId, lonely, w.roles.TECHNICIAN, [{ type: "OWN" }]);
+    await grantTemplate(w.tenantId, lonely, w.roles.TECHNICIAN, [{ type: "OWN" }, { type: "ASSIGNED" }]);
     const cookie = await sessionCookie(lonely, w.tenantId);
-    const created = [await notifyUser(lonely.userId, 10), await notifyUser(lonely.userId, 11), await notifyUser(lonely.userId, 12)];
+    const created = [await notifyUser(lonely, 10), await notifyUser(lonely, 11), await notifyUser(lonely, 12)];
 
     const page1 = await call(list, "GET", "/x", { cookie, query: { limit: "2" } });
     expect(page1.json.data).toHaveLength(2);
@@ -76,9 +98,9 @@ describe("own notifications API", () => {
 
   it("counts unread and marks read idempotently, keeping the first readAt", async () => {
     const person = await createPerson(w.tenantId, "reader", { orgUnitId: w.units.cityA });
-    await grantTemplate(w.tenantId, person, w.roles.TECHNICIAN, [{ type: "OWN" }]);
+    await grantTemplate(w.tenantId, person, w.roles.TECHNICIAN, [{ type: "OWN" }, { type: "ASSIGNED" }]);
     const cookie = await sessionCookie(person, w.tenantId);
-    const [a] = [await notifyUser(person.userId, 20), await notifyUser(person.userId, 21)];
+    const [a] = [await notifyUser(person, 20), await notifyUser(person, 21)];
     expect((await call(unreadCount, "GET", "/x", { cookie })).json.data).toEqual({ unread: 2 });
 
     const read = await call(markRead, "POST", "/x", { cookie, params: { id: a } });
@@ -94,7 +116,7 @@ describe("own notifications API", () => {
   });
 
   it("answers 404 for someone else's notification and a missing one, and never changes the owner's row", async () => {
-    const mine = await notifyUser(w.techA1.userId, 30);
+    const mine = await notifyUser(w.techA1, 30);
     const stolen = await call(markRead, "POST", "/x", { cookie: otherTech, params: { id: mine } });
     expect(stolen.status).toBe(404);
     const missing = await call(markRead, "POST", "/x", { cookie: otherTech, params: { id: "does-not-exist" } });
@@ -125,6 +147,66 @@ describe("own notifications API", () => {
   it("rejects malformed query input", async () => {
     expect((await call(list, "GET", "/x", { cookie: tech, query: { limit: "0" } })).status).toBe(400);
     expect((await call(list, "GET", "/x", { cookie: tech, query: { unread: "maybe" } })).status).toBe(400);
+  });
+});
+
+describe("access to the linked record is re-checked", () => {
+  const leadFor = async (person: Person, leadNumber: number) =>
+    (
+      await withTenant(w.tenantId, (tx) =>
+        notifyInTx(tx, {
+          tenantId: w.tenantId,
+          eventType: "lead.assigned",
+          eventId: `lead-${Date.now()}-${eventCounter++}`,
+          recipientUserIds: [person.userId],
+          params: { leadNumber },
+          target: { targetType: "lead", targetId: `lead-${leadNumber}`, permission: "leads.view", resource: { orgUnitId: w.units.cityA } },
+        }),
+      )
+    ).createdNotificationIds[0];
+
+  it("hides the number and target once the recipient loses access, and shows them again if access returns", async () => {
+    const manager = await createPerson(w.tenantId, "revoked-mgr", { orgUnitId: w.units.cityA });
+    const assignmentId = await grantTemplate(w.tenantId, manager, w.roles.CITY_MANAGER, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
+    const cookie = await sessionCookie(manager, w.tenantId);
+    const id = await leadFor(manager, 4242);
+
+    const before = (await call(list, "GET", "/x", { cookie })).json.data.find((row: { id: string }) => row.id === id);
+    expect(before).toMatchObject({ templateKey: "NOTIFICATION.LEAD_ASSIGNED", params: { leadNumber: 4242 }, targetId: "lead-4242", redacted: false });
+
+    await withTenant(w.tenantId, (tx) => tx.roleAssignment.update({ where: { id: assignmentId }, data: { revokedAt: new Date() } }));
+    // Lose the notifications permission too would be a 403; keep a grant that still reads the inbox.
+    await grantTemplate(w.tenantId, manager, w.roles.TECHNICIAN, [{ type: "OWN" }]);
+    const after = (await call(list, "GET", "/x", { cookie })).json.data.find((row: { id: string }) => row.id === id);
+    expect(after).toMatchObject({ templateKey: "NOTIFICATION.ITEM_UNAVAILABLE", params: {}, targetType: null, targetId: null, redacted: true });
+    expect(JSON.stringify(after)).not.toContain("4242");
+    expect(JSON.stringify(after)).not.toContain("lead-4242");
+  });
+
+  it("redacts notifications whose target type has no registered resolver (fail closed)", async () => {
+    const id = await notifyUser(w.techA1, 77);
+    resetNotificationTargetResolvers();
+    try {
+      const row = (await call(list, "GET", "/x", { cookie: tech })).json.data.find((candidate: { id: string }) => candidate.id === id);
+      expect(row).toMatchObject({ redacted: true, targetId: null, params: {} });
+    } finally {
+      registerTestResolvers();
+    }
+  });
+
+  it("does not notify recipients outside the record's scope in the first place", async () => {
+    const result = await withTenant(w.tenantId, (tx) =>
+      notifyInTx(tx, {
+        tenantId: w.tenantId,
+        eventType: "lead.assigned",
+        eventId: `lead-scope-${eventCounter++}`,
+        recipientUserIds: [w.cityManagerA.userId, w.cityManagerB.userId, w.techB.userId],
+        params: { leadNumber: 5 },
+        target: { targetType: "lead", targetId: "lead-5", permission: "leads.view", resource: { orgUnitId: w.units.cityA } },
+      }),
+    );
+    expect(result.createdNotificationIds).toHaveLength(1);
+    expect(result.inaccessibleRecipientCount).toBe(2);
   });
 });
 

@@ -4,6 +4,7 @@ import { withTenant } from "@/server/db";
 import { enforceInTx } from "@/server/authz";
 import type { NotificationParams } from "@/lib/notification-rules";
 import type { ListNotificationsQuery } from "./schemas";
+import { redactInaccessible } from "./target-access";
 
 /**
  * What a client gets for one notification. No display text (docs/API_CONVENTIONS.md): the UI renders
@@ -20,6 +21,11 @@ export interface NotificationView {
   critical: boolean;
   readAt: Date | null;
   createdAt: Date;
+  /**
+   * True when the recipient may no longer see the linked record: the row then carries the generic
+   * `NOTIFICATION.ITEM_UNAVAILABLE` template, no params and no target (see `redactInaccessible`).
+   */
+  redacted: boolean;
 }
 
 const VIEW_SELECT = {
@@ -34,7 +40,7 @@ const VIEW_SELECT = {
   createdAt: true,
 } satisfies Prisma.NotificationSelect;
 
-const toView = (row: Prisma.NotificationGetPayload<{ select: typeof VIEW_SELECT }>): NotificationView => ({
+const withParams = (row: Prisma.NotificationGetPayload<{ select: typeof VIEW_SELECT }>) => ({
   ...row,
   params: (row.params ?? {}) as NotificationParams,
 });
@@ -58,7 +64,9 @@ export async function listOwnNotifications(actor: Actor, query: ListNotification
       ...pageArgs(query),
     });
     const page = toPage(rows, query.limit);
-    return { data: page.data.map(toView), page: page.page };
+    // The ids and numbers in a notification are not proof of access: re-check the target now.
+    const data = await redactInaccessible(tx, actor.tenantId, actor.userId, page.data.map(withParams));
+    return { data, page: page.page };
   });
 }
 

@@ -961,8 +961,9 @@ them. Responses carry `templateKey` + `params` (ids and numbers), never display 
 - **Auth**: session.
 - **Permission**: `notifications.view` (capability; rows are always the caller's own).
 - **Request query**: `cursor`, `limit` (collection rules); `unread` `true | false` (default `false`: all).
-- **Response**: `200 { data: [{ id, eventType, templateKey, params, targetType, targetId, critical, readAt, createdAt }], page }`.
-  `targetType`/`targetId` are a deep link only; opening the target re-checks the viewer's access there.
+- **Response**: `200 { data: [{ id, eventType, templateKey, params, targetType, targetId, critical, readAt, createdAt, redacted }], page }`.
+  `targetType`/`targetId` are a deep link only. The viewer's current access to the target is re-checked on every read: when lost
+  (or the record is gone), the row has `redacted: true`, `templateKey` `NOTIFICATION.ITEM_UNAVAILABLE`, empty `params` and no target.
 - **Errors**: `403` no `notifications.view` grant; `400` bad query.
 - **Audit**: none.
 

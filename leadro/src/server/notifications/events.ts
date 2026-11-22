@@ -1,4 +1,5 @@
 import type { NotificationParams } from "@/lib/notification-rules";
+import type { ResourceRef } from "@/server/authz";
 
 /**
  * The business events that produce notifications (§14.2). Each entry fixes the translation key
@@ -40,8 +41,13 @@ export interface NotificationEvent {
   recipientUserIds: readonly string[];
   /** Ids, numbers and codes only: see `findParamsProblem`. */
   params?: NotificationParams;
-  /** Record the notification links to (deep link); the viewer's access is re-checked when it opens. */
-  targetId?: string;
+  /**
+   * The record the notification links to, with what is needed to authorize recipients: recipients
+   * without `permission` on `resource` (the ResourceRef authz needs: orgUnitId, assignedEmployeeIds,
+   * sets...) are dropped. `targetType` must equal the event's registered target type. Omit for events
+   * without a record (e.g. a security alert).
+   */
+  target?: { targetType: string; targetId: string; permission: string; resource: ResourceRef };
   /** Override only when one event may legitimately notify the same user twice. */
   idempotencyKey?: string;
 }

@@ -570,3 +570,9 @@ Code: `src/server/notifications/`, `src/lib/notification-rules.ts`, `/api/v1/not
 - **Not audited**: mark-read and preference changes are per-user conveniences, not business changes; events are audited by the business write that raised them.
 - **Preference rows**: absent = enabled; a specific event row beats the `*` row. PUT refuses critical events and IN_APP instead of storing rows that would be ignored.
 - Not built (later tasks): the TopNav bell UI, a scheduler for the worker sweep, real providers.
+
+#### Task 4 fix round 1
+- **Access is checked twice.** Write time: `notifyInTx` takes `target { targetType, targetId, permission, resource }` and drops (counts, logs) recipients failing `canInTx(permission, resource)`; `resolveRecipientsByPermission` still only checks the org unit, so the target check is what applies record-level conditions. Read time: `registerNotificationTargetResolver(targetType, permission, resolve)` (the permission is part of the registration because the notification row does not store one); list and delivery redact (generic `NOTIFICATION.ITEM_UNAVAILABLE`, no params, no target) when access is lost, the record is gone or the type is unregistered (fail closed). Leads/jobs tasks must register "lead"/"job".
+- Event params are now exactly the declared list (undeclared or missing keys throw); `target.targetId` must be identifier-like and `targetType` must match the event.
+- `recordOutcome` only updates a row the worker still holds (PENDING with its own `attemptedAt` stamp). Delivery is at-least-once; providers dedupe on `notificationId` + `attempt`.
+- Retry scheduling uses `createMany(skipDuplicates)` after claiming the parent: a sweep found leftover rows whose next attempt already existed, and the unique violation would have aborted every retry of that tenant. `deliverPendingForAllTenants` takes optional `tenantIds` (used by tests; each tenant costs two transactions per sweep).

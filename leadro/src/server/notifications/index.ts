@@ -22,3 +22,5 @@ export { listOwnPreferences, setOwnPreference } from "./preferences";
 export type { PreferenceView } from "./preferences";
 export { listNotificationsQuerySchema, setPreferenceSchema } from "./schemas";
 export type { ListNotificationsQuery, SetPreferenceInput } from "./schemas";
+export { registerNotificationTargetResolver, resetNotificationTargetResolvers, redactInaccessible, UNAVAILABLE_TEMPLATE_KEY } from "./target-access";
+export type { TargetResolver, TargetedNotification } from "./target-access";

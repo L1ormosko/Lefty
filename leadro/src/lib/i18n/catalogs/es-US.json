@@ -179,6 +179,8 @@
     "NOTIFICATION.QUALIFICATION_EXPIRED.BODY": "Una credencial venció y ya no cuenta para la elegibilidad de trabajos.",
     "NOTIFICATION.SECURITY_ALERT.TITLE": "Alerta de seguridad",
     "NOTIFICATION.SECURITY_ALERT.BODY": "Hubo un cambio relevante para la seguridad en su cuenta.",
+    "NOTIFICATION.ITEM_UNAVAILABLE.TITLE": "Elemento ya no disponible",
+    "NOTIFICATION.ITEM_UNAVAILABLE.BODY": "Ya no tiene acceso al elemento al que se refiere esta notificación.",
     "NOTIFICATION.MARK_READ": "Marcar como leída",
     "NOTIFICATION.MARK_ALL_READ": "Marcar todas como leídas",
     "NOTIFICATION.EMPTY": "No hay notificaciones",
