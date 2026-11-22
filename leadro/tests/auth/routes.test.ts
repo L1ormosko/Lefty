@@ -5,7 +5,8 @@ import { POST as resetRequestRoute } from "@/app/api/v1/auth/password-reset/requ
 import { GET as sessionsRoute } from "@/app/api/v1/auth/sessions/route";
 import { DELETE as revokeSessionRoute } from "@/app/api/v1/auth/sessions/[sessionId]/route";
 import { POST as mfaVerifyRoute } from "@/app/api/v1/auth/mfa/verify/route";
-import { createTenantWithUser, resetAuthTestState, TEST_PASSWORD, uniqueEmail } from "./auth-helpers";
+import { POST as mfaEnrollRoute } from "@/app/api/v1/auth/mfa/enroll/route";
+import { assignRole, createTenantWithUser, resetAuthTestState, TEST_PASSWORD, uniqueEmail, useTestEncryptionKey } from "./auth-helpers";
 
 resetAuthTestState();
 
@@ -26,6 +27,15 @@ const post = (url: string, body: unknown, headers: Record<string, string> = {}) 
     headers: { "content-type": "application/json", "x-forwarded-for": ip(), ...headers },
     body: JSON.stringify(body),
   });
+
+/** What Next.js 15 hands a route for a bodyless POST/DELETE: an empty body stream and no Content-Type. */
+const bodylessRequest = (method: string, url: string, cookie: string) =>
+  new Request(`http://localhost${url}`, {
+    method,
+    headers: { cookie },
+    body: new ReadableStream<Uint8Array>({ start: (controller) => controller.close() }),
+    duplex: "half",
+  } as RequestInit);
 
 async function loginViaRoute(user: { tenantSlug: string; email: string }) {
   const response = await loginRoute(post("/api/v1/auth/login", { tenantSlug: user.tenantSlug, email: user.email, password: TEST_PASSWORD }));
@@ -122,5 +132,31 @@ describe("auth API routes", () => {
   it("MFA endpoints still require a session", async () => {
     const response = await mfaVerifyRoute(post("/api/v1/auth/mfa/verify", { code: "123456" }));
     expect(response.status).toBe(401);
+  });
+
+  it("bodyless POST/DELETE routes work with Next.js's empty body stream and no Content-Type (no 415)", async () => {
+    useTestEncryptionKey();
+    const user = await createTenantWithUser();
+    await assignRole(user, { requiresMfa: true });
+    const pending = await loginViaRoute(user);
+    const enroll = await mfaEnrollRoute(bodylessRequest("POST", "/api/v1/auth/mfa/enroll", pending.cookie));
+    expect(enroll.status).toBe(200);
+
+    const plain = await createTenantWithUser();
+    const second = await loginViaRoute(plain);
+    const { cookie } = await loginViaRoute(plain);
+    const sessions = (await (await sessionsRoute(new Request("http://localhost/api/v1/auth/sessions", { headers: { cookie } }))).json()).data as Array<{ id: string; isCurrent: boolean }>;
+    const other = sessions.find((session) => !session.isCurrent)!;
+    const revoke = await revokeSessionRoute(bodylessRequest("DELETE", `/api/v1/auth/sessions/${other.id}`, cookie), { params: Promise.resolve({ sessionId: other.id }) });
+    expect(revoke.status).toBe(204);
+    expect(second.cookie).toBeTruthy();
+
+    const logout = await logoutRoute(bodylessRequest("POST", "/api/v1/auth/logout", cookie));
+    expect(logout.status).toBe(204);
+  });
+
+  it("a JSON route still refuses text/plain with bytes (415)", async () => {
+    const response = await loginRoute(post("/api/v1/auth/login", "x=1", { "content-type": "text/plain" }));
+    expect(response.status).toBe(415);
   });
 });

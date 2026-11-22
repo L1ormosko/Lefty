@@ -31,6 +31,10 @@ describe("employee creation", () => {
     expect(result.status).toBe(201);
     const employee = result.json.data;
     expect(employee).toMatchObject({ jobTitle: "Installer", email: "new.hire@example.test", status: "ACTIVE", currentOrgUnitIds: [w.units.cityA] });
+    // Date-only fields are calendar dates (YYYY-MM-DD); timestamps stay ISO datetimes.
+    expect(employee.hireDate).toBe("2026-01-15");
+    expect(employee.terminationDate).toBeNull();
+    expect(employee.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 
     const placements = await withTenant(w.tenantId, (tx) => tx.organizationalAssignment.findMany({ where: { employeeId: employee.id } }));
     expect(placements).toHaveLength(1);
@@ -143,7 +147,7 @@ describe("terminating an employee", () => {
 
     const result = await call(terminate, "POST", "/x", { cookie: ceo, params: { id: worker.employeeId! }, body: { terminationDate: "2026-11-01", reason: "Resigned" } });
     expect(result.status).toBe(200);
-    expect(result.json.data).toMatchObject({ status: "TERMINATED", terminationDate: "2026-11-01T00:00:00.000Z", currentOrgUnitIds: [] });
+    expect(result.json.data).toMatchObject({ status: "TERMINATED", terminationDate: "2026-11-01", currentOrgUnitIds: [] });
 
     await withTenant(w.tenantId, async (tx) => {
       const placements = await tx.organizationalAssignment.findMany({ where: { employeeId: worker.employeeId! } });

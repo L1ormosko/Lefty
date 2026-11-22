@@ -46,8 +46,9 @@ const sameConditions = (a: unknown, b: unknown) => JSON.stringify(a ?? null) ===
 
 /**
  * MFA is mandatory for roles that can change who may do what, for the always-MFA templates, and for
- * custom roles holding any sensitive permission or sensitive field set. Template-derived roles
- * (clones/edits of a shipped template) follow the template rule so e.g. a cloned Technician stays MFA-free.
+ * custom roles holding any sensitive permission or sensitive field set. Roles that still carry a
+ * template key (edits of a shipped template) follow the template rule, so the Technician stays MFA-free.
+ * A CLONE is stored without a template key, so it follows the custom-role rule like any later edit.
  */
 function mfaIsMandatory(templateKey: string | null, grants: GrantInput[]): boolean {
   const asTemplateGrants = grants.map((grant) => ({ permission: grant.permission, conditions: grant.conditions ?? undefined }));
@@ -132,7 +133,8 @@ export async function cloneRole(actor: Actor, ctx: RequestContext, sourceRoleId:
           tenantId: actor.tenantId,
           name: input.name,
           description: input.description ?? source.description,
-          requiresMfa: source.requiresMfa || mfaIsMandatory(source.templateKey, grants),
+          // The clone has no templateKey, so judge it as the custom role it is (consistent with later edits).
+          requiresMfa: source.requiresMfa || mfaIsMandatory(null, grants),
         },
         select: { id: true },
       });

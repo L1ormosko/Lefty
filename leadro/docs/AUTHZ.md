@@ -39,8 +39,9 @@ Invariants:
 - A permission only combines with the scopes of its own assignment. Employee/org/legal-entity ids are verified
   to exist in the subject's tenant, so forged cross-tenant ids are never matched.
 - Resource attributes must be loaded server-side by the caller's resolver, never taken from request bodies.
-- `Role.requiresMfa` marks Owner/CEO, Finance Director, HR Manager and any role with `permissions.manage|assign`
-  or `*.configure`. Authentication enforces it; this module only stores/exposes it (`via.requiresMfa`).
+- `Role.requiresMfa` marks Owner/CEO, Finance Director, HR Manager, any role with `permissions.manage|assign`
+  or `*.configure` (COO included) and custom roles with a sensitive grant. Authentication enforces it on every
+  request; this module only stores/exposes it (`via.requiresMfa`).
 
 Files: `permission-catalog.ts` (catalog + sensitive field sets), `role-templates.ts` (templates + MFA rule),
 `evaluate.ts` (the single decision function), `load-grants.ts`, `resolve-resource.ts`, `org-tree.ts`,

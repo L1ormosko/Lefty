@@ -120,6 +120,20 @@ describe("cloning", () => {
   });
 });
 
+describe("cloning and MFA", () => {
+  it("judges a clone by the custom-role rule at clone time (consistent with later edits); templates keep the template rule", async () => {
+    // Technician is MFA-free as a template, but its sensitive field grants make a custom copy MFA-mandatory.
+    const original = await call(getRole, "GET", "/x", { cookie: ceo, params: { id: w.roles.TECHNICIAN } });
+    expect(original.json.data.requiresMfa).toBe(false);
+    const clone = await call(cloneRole, "POST", "/x", { cookie: ceo, params: { id: w.roles.TECHNICIAN }, body: { name: unique("Tech copy") } });
+    expect(clone.status).toBe(201);
+    expect(clone.json.data.requiresMfa).toBe(true);
+    // ...and the next edit does not flip it: the flag cannot be lowered while mandatory.
+    const lowered = await call(patchRole, "PATCH", "/x", { cookie: ceo, params: { id: clone.json.data.id }, body: { requiresMfa: false } });
+    expect(lowered.status).toBe(400);
+  });
+});
+
 describe("editing permissions", () => {
   it("replaces the permission set, records what was added/removed/changed, and serves it as history", async () => {
     const role = (await create(ceo, { name: unique("Evolving"), permissions: [{ permission: "jobs.view" }, { permission: "leads.view" }] })).json.data;
@@ -135,10 +149,21 @@ describe("editing permissions", () => {
     expect(history.status).toBe(200);
     const [change, creation] = history.json.data;
     expect(creation.action).toBe("role.create");
-    expect(change).toMatchObject({ action: "role.permissions_change", reason: "Quarterly review", actorUserId: w.ceo.userId });
-    expect(change.newValue.added.map((entry: { permission: string }) => entry.permission)).toEqual(["customers.view"]);
-    expect(change.previousValue.removed).toEqual(["leads.view"]);
-    expect(change.newValue.changed).toEqual([{ permission: "jobs.view", conditions: { fields: "operational" } }]);
+    expect(change).toMatchObject({ action: "role.permissions_change", reason: "Quarterly review", actor: { userId: w.ceo.userId } });
+    expect(change.changes).toEqual({
+      permissionsAdded: ["customers.view"],
+      permissionsRemoved: ["leads.view"],
+      permissionsChanged: ["jobs.view"],
+      fieldsChanged: [],
+    });
+    expect(creation.changes.permissionsAdded.sort()).toEqual(["jobs.view", "leads.view"]);
+
+    // History is an explicit projection: no network data, no raw audit values, no qualifiers.
+    const serialized = JSON.stringify(history.json.data);
+    for (const leaked of ["ipAddress", "userAgent", "previousValue", "newValue", "correlationId", "tenantId", "conditions", "operational"]) {
+      expect(serialized).not.toContain(leaked);
+    }
+    expect(Object.keys(change).sort()).toEqual(["action", "actor", "changes", "id", "occurredAt", "reason"]);
 
     const paged = await call(roleHistory, "GET", "/x", { cookie: ceo, params: { id: role.id }, query: { limit: "1" } });
     expect(paged.json.data).toHaveLength(1);

@@ -46,7 +46,7 @@ invitation, account security and sessions. Plus a `/dev/ui` component gallery.
 | `src/app/api/v1` | 41 route files (section 5) |
 | `src/app/(app)`, `(auth)` | screens and server actions |
 | `src/components/ui`, `src/lib` | design-system primitives, catalogs, TOTP, redaction |
-| `tests/` | 56 test files plus 4 component test files |
+| `tests/` | 57 test files plus 4 component test files |
 | `docs/` | ARCHITECTURE, ERD, PERMISSIONS, API_CONVENTIONS, CODING_STANDARDS, AUTH, AUTHZ, DECISIONS, PROJECT_STATE, this report |
 
 ## 3. Database changes (migrations, in order)
@@ -65,7 +65,7 @@ Final run, in `leadro/`:
 
 | Check | Result |
 |---|---|
-| `npm test` (Vitest, real Postgres 16) | **60 files, 624 tests: 624 passed, 0 failed, 0 skipped** (~172 s) |
+| `npm test` (Vitest, real Postgres 16) | **61 files, 687 tests: 687 passed, 0 failed, 0 skipped** |
 | `npm run typecheck` | passed, 0 errors |
 | `npm run lint` | passed, 0 problems (includes the index-only import rule) |
 | `npm run i18n:check` | passed |
@@ -114,6 +114,10 @@ Missing capabilities (do not assume these exist):
 - Pickers are capped at 200 entries; some admin lists are capped at 50 with no pager.
 
 Security-relevant limitations:
+- **MFA is re-checked on every request** for sessions that never passed MFA (`mfaVerifiedAt` null). That costs
+  one extra query per request for such sessions only (verified sessions skip it). Sessions that existed before
+  this was deployed have a null `mfaVerifiedAt`, so users holding an MFA-requiring role are prompted for MFA once
+  after the deploy; completing it sets the column.
 - **MFA enrollment is trust-on-first-use** for an MFA-role user who has not enrolled yet: whoever holds
   that session first binds the authenticator. There is no recovery or MFA-disable flow.
 - **Rate limiting is in memory per instance**; with several instances the limits multiply (the database

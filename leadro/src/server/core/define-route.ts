@@ -5,7 +5,7 @@ import { CORRELATION_HEADER, resolveCorrelationId } from "./correlation";
 import { toErrorResponse, zodIssuesToFieldIssues } from "./error-mapping";
 import { InternalError, UnauthenticatedError, ValidationError } from "./errors";
 import { withIdempotency } from "./idempotency";
-import { assertJsonContentType, readJsonBody } from "./request-body";
+import { assertJsonContentType, parseJsonText, readRequestText } from "./request-body";
 
 export const IDEMPOTENCY_HEADER = "idempotency-key";
 export const CLIENT_APP_HEADER = "x-leadro-client";
@@ -121,9 +121,10 @@ function parseWith(schema: ZodTypeAny | undefined, value: unknown, source: strin
 async function parseInput<S extends RouteSchemas>(
   schemas: S | undefined,
   req: Request,
+  bodyText: string,
   routeContext: NextRouteContext | undefined,
 ): Promise<RouteInput<S>> {
-  const body = schemas?.body ? parseWith(schemas.body, await readJsonBody(req), "body") : undefined;
+  const body = schemas?.body ? parseWith(schemas.body, parseJsonText(bodyText), "body") : undefined;
   const query = schemas?.query
     ? parseWith(schemas.query, Object.fromEntries(new URL(req.url).searchParams), "query")
     : undefined;
@@ -166,8 +167,11 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
       if (actor) log = log.child({ tenantId: actor.tenantId, userId: actor.userId });
 
       // After authentication, so anonymous callers learn nothing about the contract; before parsing.
-      assertJsonContentType(req);
-      const input = await parseInput(definition.schemas, req, routeContext);
+      // The body is read first and the content type enforced only when bytes arrived (see
+      // assertJsonContentType): bodyless POST/DELETE routes carry no Content-Type.
+      const bodyText = await readRequestText(req);
+      assertJsonContentType(req, bodyText);
+      const input = await parseInput(definition.schemas, req, bodyText, routeContext);
       const ctx: RequestContext = { correlationId, actor, sourceApp };
       if (actor && definition.authorize) await definition.authorize(actor, input, ctx);
 

@@ -22,17 +22,28 @@ Each entry has the same fields:
 - **Request**: path params, query, JSON body. Types are the Zod types; "strict" means unknown keys are
   rejected with `VALIDATION_FAILED`.
 - **Idempotency**: whether `Idempotency-Key` is honoured.
-- **Response**: the success status and `data` shape. Dates are ISO-8601 strings.
+- **Response**: the success status and `data` shape. Timestamps are ISO-8601 datetimes
+  (`2026-11-21T13:40:18.000Z`); calendar dates without a time (employee `hireDate` and
+  `terminationDate`) are `YYYY-MM-DD` (`2026-03-02`).
 - **Errors**: only the codes beyond the common ones below.
 - **Audit**: the `AuditEvent.action` values written. `outcome` is `SUCCESS` unless stated.
 
 ### Common to every endpoint
 
-- **Bodies must be JSON.** Mutating requests carry a JSON body; `Content-Type: application/json` is
-  the supported form (the exact content-type enforcement may be tightened to JSON-only in a parallel
-  change; this file describes the current code, which parses the body as JSON text).
-- **Pipeline order** (`defineRoute`): correlation id, authenticate, parse and validate input
-  (params, query, body), authorize, handler. Consequence: a malformed request is `400
+- **Bodies must be JSON.** A POST/PUT/PATCH/DELETE request that carries body bytes must send
+  `Content-Type: application/json` (a `charset` parameter or a `+json` type is fine); anything else
+  (`text/plain`, form types, a missing type) is `415 UNSUPPORTED_MEDIA_TYPE`, before any parsing. This
+  is the CSRF defence together with SameSite=Lax cookies. A request with an empty body needs no
+  content type, so bodyless calls such as `POST /auth/logout` or `DELETE /auth/sessions/{id}` work as
+  they are. The body is capped at 1 MB: more than that, by `Content-Length` or by the bytes actually
+  received, is `413 PAYLOAD_TOO_LARGE`. A non-empty body that is not valid JSON is `400
+  VALIDATION_FAILED` (`field: "body"`).
+- **MFA is checked on every request.** A session that never passed MFA, whose user now holds a role
+  that requires it, is sent back to the MFA-pending state and answers `401 UNAUTHENTICATED` on every
+  route except the `session, MFA-pending allowed` ones (audited as `auth.access_denied` with reason
+  `mfa_required`); the client then runs `/auth/mfa/enroll` or `/auth/mfa/verify`.
+- **Pipeline order** (`defineRoute`): correlation id, authenticate, read the body (size limit) and
+  check its content type, parse and validate input (params, query, body), authorize, handler. Consequence: a malformed request is `400
   VALIDATION_FAILED` before any permission check, and an unauthenticated caller always gets `401`
   first. Validation `field` values are prefixed with their source (`body.email`, `query.limit`,
   `params.id`); an unparsable body is `field: "body"`.
@@ -200,8 +211,9 @@ was wrong.
   (valid 1 hour, older unused tokens are invalidated) is handed to the notifier; it is never in the
   response.
 - **Errors**: `429 RATE_LIMITED` only for the per-IP limit (10 per 15 minutes). The per-account limit
-  (3 per 15 minutes per company+email) silently sends nothing but still answers `202`, so the response
-  cannot be used to probe accounts.
+  (3 per 15 minutes per company+email) silently sends nothing but still answers `202`. This is
+  intentional enumeration safety: a different answer once the limit is hit would reveal that the
+  account exists, so a caller can never tell "limited" from "sent" (nor "unknown account" from either).
 - **Audit**: `auth.password_reset_request` (only when an account matched).
 
 ### POST /api/v1/auth/password-reset/confirm
@@ -497,8 +509,8 @@ jobTitle, status, hireDate, terminationDate, createdAt, updatedAt`, plus the der
 `currentOrgUnitIds` (string array: where the person is placed right now). All are `base`; the
 reserved financial keys (`salary`, `payRate`, bank and tax fields) are classified `financial` and are
 not stored in this phase. `status` is `ACTIVE | ON_LEAVE | TERMINATED`. `hireDate` and
-`terminationDate` are Postgres dates but, like every `Date`, serialise as ISO datetimes at 00:00:00Z
-(`2026-03-02T00:00:00.000Z`); send them as `YYYY-MM-DD`. A write needs a grant that covers the `base`
+`terminationDate` are calendar dates: they are sent and returned as `YYYY-MM-DD` (`2026-03-02`), or
+`null`; `createdAt` / `updatedAt` stay ISO datetimes. A write needs a grant that covers the `base`
 set; a field-limited grant (for example availability-only) can read but gets `403` on writes. After a
 write the response is projected with what the caller may VIEW of the post-change record (falls back to
 `{ id }` if they can no longer view it).
@@ -865,10 +877,12 @@ it (permission management, `*.configure`, always-MFA templates) and cannot be sw
 - **Permission**: `permissions.view`, tenant-level.
 - **Request**: path `id`; query `cursor`, `limit` only. The cursor is opaque and specific to this
   endpoint (it is not interchangeable with other lists).
-- **Response**: `200 { data: [{ id, occurredAt, actorType, actorUserId, action, targetType, targetId,
-  previousValue, newValue, reason, outcome, sourceApp, correlationId, ipAddress }], page }`. These are
-  raw audit events: `previousValue` / `newValue` hold the permission delta and `ipAddress` is the
-  actor's, so treat the page as sensitive.
+- **Response**: `200 { data: [{ id, action, occurredAt, reason, actor, changes }], page }`. `actor`
+  is `{ userId, displayName }` (employee name, else login email) or `null`. `changes` is a summary
+  reduced to keys: `{ permissionsAdded: string[], permissionsRemoved: string[], permissionsChanged:
+  string[], fieldsChanged: string[] }` (`permissionsChanged` = kept permissions whose qualifiers
+  changed; `fieldsChanged` = which of `name`, `description`, `requiresMfa` an edit touched). The raw
+  audit values, qualifier contents, IP address, user agent and correlation id are not returned.
 - **Errors**: `403`; `404` role not found.
 - **Audit**: none.
 

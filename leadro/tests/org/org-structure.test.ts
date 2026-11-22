@@ -146,6 +146,21 @@ describe("unit managers", () => {
     expect((await auditEvents(w.tenantId, "org_unit.manager_unassign", w.units.cityA)).length).toBeGreaterThan(0);
   });
 
+  it("unassigning works for a bodyless DELETE (Next.js empty body stream, no Content-Type)", async () => {
+    const person = await createPerson(w.tenantId, "mgr-bodyless", { orgUnitId: w.units.cityA });
+    const added = await call(addManager, "POST", "/x", { cookie: ceo, params: { id: w.units.cityA }, body: { employeeId: person.employeeId } });
+    const response = await removeManager(
+      new Request("http://localhost/x", {
+        method: "DELETE",
+        headers: { cookie: ceo },
+        body: new ReadableStream<Uint8Array>({ start: (controller) => controller.close() }),
+        duplex: "half",
+      } as RequestInit),
+      { params: Promise.resolve({ id: w.units.cityA, managerId: added.json.data.id }) },
+    );
+    expect(response.status).toBe(204);
+  });
+
   it("does not grant data access: being a manager changes no permission", async () => {
     const person = await createPerson(w.tenantId, "mgr-noaccess", { orgUnitId: w.units.cityB });
     await call(addManager, "POST", "/x", { cookie: ceo, params: { id: w.units.cityB }, body: { employeeId: person.employeeId } });
