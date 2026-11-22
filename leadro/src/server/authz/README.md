@@ -3,56 +3,29 @@
 RBAC + ABAC authorization engine (§4.2-4.6, §25.5, §26.3). Roles are tenant-owned bundles of catalog
 permissions; data scopes (tenant, legal entity, org unit subtree, own, assigned) hang on role
 *assignments*. Role names never grant access; only permissions + scopes do.
+Full reference (every export and field-set rule): `docs/AUTHZ.md`; model: `docs/PERMISSIONS.md`.
 
 Public API (`index.ts`):
-- `can(subject, "module.action", resource?)` -> `{ allowed, reason, via, fieldSets }`. No resource = capability check.
-  `fieldSets` (`base`, `financial`, ...) say which fields are covered: ALWAYS project records with
-  `projectFields(record, decision, fieldMap)`. Sensitive sets (financial, billing) are opt-in.
-- `requirePermission(permission, resolver?)` -> function for `defineRoute({ authorize })`. Capability first (no grant -> 403),
-  then `resolver(actor, input, tx)` (same tx; `null` = missing); any denial once a record is involved -> 404;
-  denials are audited.
-- `scopeFilter(subject, permission, columns, { satisfiedSets? })` -> Prisma where-fragment (`{}` = tenant-wide; otherwise
-  `{ AND: [{ OR: parts }] }`; combine with the caller filter via `withinScope`, never by spreading;
-  no coverage = a never-matching fragment). `employeeScopeColumns` / `orgUnitScopeColumns` are ready-made column maps.
-- `canViewFields(subject, "employees.financial_fields", resource?)` for sensitive field sets.
-- `explainAccess(actor, targetUserId, permission, resource?)` -> "why can this user access this record?"; needs
-  `permissions.view`, target and record inside the actor's scope.
-- `assertNotSelfApproval(actorId, subjectCreatedById)`; `listAuditEventsAsActor(actor, options)` (needs `audit.view`).
-- Task 5 additions: `enforceInTx(tx, actor, permission, resource?)` (the in-transaction gate services use: 403 without the
-  capability, 404 for a record outside scope, 403 for a tenant-level `{}` record) and `enforceOnUser` (users: always 404
-  outside scope); `requireTenantLevelPermission(permission)` (route gate for company settings, roles, translations);
-  `assertMayGrantRole` (the dry run of `assignRole`, also used by invitations); `revokeRoleAssignment(tx, actor, input)`
-  (needs the same authority over the target and scopes as granting); `assertMayDefineGrants` (nobody puts a permission
-  into a role they do not hold); `assertNotHoldingRole` (nobody edits a role assigned to themselves, §21.3);
-  `holdsMfaRequiringRole` / `activeAssignmentWhere` (the single "active assignment" definition); `baseFieldMap`.
-- `provisionRoleTemplates(tx, tenantId)` creates the 12 spec 4.4 roles (idempotent, never overwrites edits);
-  `assignRole(tx, actor, input)` grants a role with anti-escalation checks (not self, holds `permissions.assign` over the
-  scopes, holds every permission and field set of the role; `non_sensitive_roles` enforced), rejects duplicate
-  (user, role, scope) periods, audits. `bootstrapRoleAssignment(tx, input)` is the actor-less variant for seeds/tests.
+- `can(subject, "module.action", resource?)` -> `{ allowed, reason, via, fieldSets }`. ALWAYS project records
+  with `projectFields(record, decision, fieldMap)`; sensitive field sets (financial, billing) are opt-in.
+- `requirePermission` / `requireTenantLevelPermission` — `defineRoute({ authorize })` gates; denials are audited
+  (`recordAuthzDenial` is exported for web code that catches a refusal from a service).
+- `enforceInTx(tx, actor, permission, resource?)` / `enforceOnUser` — the in-transaction gate services use
+  (403 without the capability, 404 for a record outside scope). Silent: the caller audits.
+- `scopeFilter` / `resolveScope` / `buildScopeWhere` / `projectRows` — list queries filtered and projected per row.
+- `assignRole`, `revokeRoleAssignment`, `assertMayDefineGrants`, `assertMayDisableUser`, `assertNotHoldingRole`
+  — anti-escalation and separation-of-duties rules for roles and lock-outs.
+- `activePlacementWhere`, `openEndedWhere`, `liveOrFutureAssignmentWhere`, `activeAssignmentWhere` — the ONE
+  definition of "in effect now" for placements, managers and role assignments. Never re-write these inline.
+- `provisionRoleTemplates` (the 12 spec 4.4 roles), `explainAccess`, `listAuditEventsAsActor`.
 
 Invariants:
-- Every decision re-reads the database (no cache across requests). Active = not revoked, started, not expired,
-  role active, user ACTIVE, employee not TERMINATED.
-- Org scopes expand over the org tree as of now; archived units (and their subtrees) grant nothing.
-- A permission only combines with the scopes of its own assignment. Employee/org/legal-entity ids are verified
-  to exist in the subject's tenant, so forged cross-tenant ids are never matched.
-- Resource attributes must be loaded server-side by the caller's resolver, never taken from request bodies.
-- `Role.requiresMfa` marks Owner/CEO, Finance Director, HR Manager and any role with `permissions.manage|assign`
-  or `*.configure`. Authentication enforces it; this module only stores/exposes it (`via.requiresMfa`).
-
-Files: `permission-catalog.ts` (catalog + sensitive field sets), `role-templates.ts` (templates + MFA rule),
-`evaluate.ts` (the single decision function), `load-grants.ts`, `resolve-resource.ts`, `org-tree.ts`,
-`conditions.ts`. Rationale and deviations: `docs/DECISIONS.md` "Task 4"; model: `docs/PERMISSIONS.md`.
-
-Field sets (read before returning records):
-- `AccessDecision.fieldSets` is only meaningful when `can` was given the record (`resource`); a capability check
-  (no resource) unions every scope and must not be used to project data.
-- Lists: `resolveScope` keeps field sets PER scope part. Derive a row's fields with `fieldSetsForRow` /
-  `projectRows(rows, scope, FIELD_MAP, attributesOf)` (`employeeScopeSelect` + `employeeRowAttributes` for employees),
-  never by unioning `parts[].fieldSets`.
-- `projectFields` requires an explicit field map (`EMPLOYEE_FIELD_MAP`, `CUSTOMER_FIELD_MAP` in `field-maps.ts`);
-  unmapped fields are dropped, so a new column is hidden until classified.
-- `assignRole` also requires the target user inside the granter's `permissions.assign` scope, and checks (scope AND
-  field sets) together per held grant.
-
-- `narrowScopeToFieldSet(scope, "base")`: keeps only the scope parts whose grant covers that field set (for read models exposing a whole field set, e.g. placement history); totals are rebuilt from the surviving parts.
+- Every decision re-reads the database (no cache across requests). Active = not revoked, started, not
+  expired, role active, user ACTIVE, employee not TERMINATED.
+- A permission only combines with the scopes of its own assignment; forged cross-tenant ids never match.
+- Resource attributes are loaded server-side by the caller's resolver, never taken from request bodies.
+- `Role.requiresMfa`: Owner/CEO, Finance Director, HR Manager, COO (holds `permissions.assign`) and any
+  role with `permissions.manage|assign` or `*.configure`; custom roles with any sensitive permission or
+  sensitive field set too. Authentication enforces it; this module computes and exposes it.
+- `AccessDecision.fieldSets` is only meaningful when `can` got the record; for lists use per-scope-part
+  field sets (`projectRows`), never a union.
