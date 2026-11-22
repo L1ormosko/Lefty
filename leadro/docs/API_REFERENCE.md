@@ -947,3 +947,201 @@ it (permission management, `*.configure`, always-MFA templates) and cannot be sw
   history.
 - **Errors**: `403`; `404` user or record missing or outside scope.
 - **Audit**: none.
+
+## Customers (`/api/v1/customers`) - Phase 2
+
+Code: `src/server/customers` (README there), routes `src/app/api/v1/customers/**`. Design decisions:
+`DECISIONS.md` "Phase 2 Task 2".
+
+Customer fields: `id, number, kind (INDIVIDUAL | BUSINESS), name, email, phone, phoneE164,
+preferredLocale (en-US | es-US | he-IL), preferredContactChannel (PHONE | SMS | EMAIL | IN_PERSON | CHAT |
+OTHER), contactPreferences (object), doNotContact, orgUnitId, archivedAt, createdById, createdAt, updatedAt` are
+`base`; `billingName, billingEmail, billingAddress (object), taxId, paymentTerms` are the opt-in `billing`
+set (`customers.billing_fields`: a grant must name it, Owner/CEO and Finance do). Single-customer reads add
+`addresses` (active service addresses, primary first). `phone` is stored as typed; `phoneE164` is the
+normalized match/search key (a number without `+` is read as US/Canada, 10 or 11 digits; anything else must
+use the international form, else `400 field: "phone"`). `orgUnitId` is the service-area unit that drives
+ORG_UNIT scope; a customer without one is tenant-level.
+
+Data scope: `ORG_UNIT` / `LEGAL_ENTITY` follow `orgUnitId`; `ASSIGNED` means a lead or job of the customer is
+assigned to the caller (directly, or through a team assignment to a team the caller belongs to); `OWN` matches
+nothing. A grant qualified by a record set covers only customers of the set: `job_related` (has a job),
+`lead_related` (has a lead). Outside the scope a customer is `404`, never `403`.
+
+### GET /api/v1/customers
+
+- **Purpose**: list customers, ordered by name then id.
+- **Auth**: session.
+- **Permission**: `customers.view`, capability; scope in the query; each row projected with the field sets of
+  the grants that cover that row (billing never leaks across rows).
+- **Request query**: `cursor`, `limit`; `q` 1-100 (name or email substring, partial phone digits, or `#number`);
+  `archived` `exclude` (default) | `include` | `only`; `orgUnitId`; `kind`; `preferredLocale`. Search and
+  filters only match rows the caller sees with the `base` set (a billing-only grant such as Finance gets no
+  rows from a filtered query), and such a page can hold fewer rows than `limit`.
+- **Response**: `200 { data: [customer], page }`. List rows carry no `addresses`.
+- **Errors**: `400` bad query.
+- **Audit**: none.
+
+### POST /api/v1/customers
+
+- **Purpose**: create a customer, optionally with service addresses (the first becomes the primary), and
+  flag possible duplicates (never blocks, never merges).
+- **Auth**: session.
+- **Permission**: `customers.create` over `orgUnitId` (without a unit the customer is tenant-level and a
+  tenant-wide grant is required, else `403`); each address `orgUnitId` is checked the same way. The grant must
+  name the billing set to write billing fields. A set-qualified create grant (Lead Operations) is judged as if
+  the new customer belongs to every set.
+- **Request body** (strict): `name` 1-200 (required); `kind` (default `INDIVIDUAL`); `email` (trimmed,
+  lower-cased) or null; `phone` or null; `preferredLocale`; `preferredContactChannel`; `contactPreferences`
+  object (4000 chars at most); `doNotContact` (default false); `orgUnitId`; billing fields; `addresses` (up
+  to 20): `{ label?, line1, line2?, city, region, postalCode, countryCode (default US), latitude?, longitude?
+  (together; entered, never geocoded), accessInstructions?, isPrimary?, orgUnitId? }`.
+- **Idempotency**: supported.
+- **Response**: `201 { data: customer + possibleDuplicates: [{ flagId, customerId, matchedOn: [PHONE | EMAIL |
+  ADDRESS | NAME] }] }`. Only duplicates whose other customer the caller may view are listed; a duplicate in
+  someone else's scope is flagged for them but not revealed here. The customer is projected to what the
+  caller may view after the write (`{ id }` if nothing).
+- **Errors**: `403`; `404` unit missing or outside scope; `409 INVALID_STATE_TRANSITION` unit archived; `400`.
+- **Audit**: `customer.create` (billing values are never copied into audit); `customer.duplicate_flag` per new flag.
+
+### GET /api/v1/customers/{id}
+
+- **Purpose**: one customer with its active addresses.
+- **Auth**: session. **Permission**: `customers.view` over the customer.
+- **Response**: `200 { data: customer }` projected to the grant. **Errors**: `404`. **Audit**: none.
+
+### PATCH /api/v1/customers/{id}
+
+- **Purpose**: partial update (strict, at least one key; same fields and formats as create, minus
+  `addresses`).
+- **Auth**: session.
+- **Permission**: `customers.edit` over the customer and the field set of every key sent (billing keys need
+  the billing grant, else `403`). Moving `orgUnitId` needs the permission over the destination too; clearing it
+  needs a tenant-wide grant.
+- **Response**: `200 { data: customer [+ possibleDuplicates when name, email or phone changed] }`; an unchanged
+  patch returns the record without audit.
+- **Errors**: `403`; `404`; `409 INVALID_STATE_TRANSITION` the customer is archived (restore first).
+- **Audit**: `customer.update` (changed fields; billing columns by name only: `billingFieldsChanged`).
+
+### POST /api/v1/customers/{id}/archive
+
+- **Purpose**: soft remove (nothing is deleted; leads, jobs and history keep pointing at it).
+- **Auth**: session. **Permission**: `customers.archive` over the customer.
+- **Request body** (optional, strict): `reason` 1-500.
+- **Response**: `200 { data: customer }`. **Errors**: `403`; `404`; `409` already archived.
+- **Audit**: `customer.archive` (`reason`).
+
+### POST /api/v1/customers/{id}/restore
+
+- **Purpose**: bring an archived customer back (re-runs duplicate detection).
+- **Auth**: session. **Permission**: `customers.archive` over the customer. **Request body**: as archive.
+- **Response**: `200 { data: customer }`. **Errors**: `403`; `404`; `409` not archived.
+- **Audit**: `customer.restore`.
+
+### GET /api/v1/customers/{id}/addresses
+
+- **Purpose**: service addresses, primary first.
+- **Auth**: session. **Permission**: `customers.view` over the customer.
+- **Request query**: `includeArchived` `true | false` (default false).
+- **Response**: `200 { data: [address] }`; address = `{ id, customerId, label, line1, line2, city, region,
+  postalCode, countryCode, latitude, longitude (numbers or null), coordinateSource, accessInstructions,
+  isPrimary, orgUnitId, archivedAt, createdAt, updatedAt }`. **Errors**: `404`. **Audit**: none.
+
+### POST /api/v1/customers/{id}/addresses
+
+- **Purpose**: add a service address (same body as one entry of `addresses` on create).
+- **Auth**: session. **Permission**: `customers.edit` over the customer with the `base` set (and over the
+  address's own `orgUnitId`).
+- **Response**: `201 { data: { address, possibleDuplicates } }`. **Errors**: `403`; `404`; `409` unit archived.
+- **Audit**: `customer.address_add`.
+
+### PATCH /api/v1/customers/{id}/addresses/{addressId}
+
+- **Purpose**: partial update of one address (strict, at least one key). `isPrimary: true` moves the primary
+  flag; `false` on the primary is `400` (make another primary instead). The duplicate-matching key is
+  recomputed.
+- **Auth**: session. **Permission**: as add.
+- **Response**: `200 { data: { address, possibleDuplicates } }`. **Errors**: `403`; `404`;
+  `409 INVALID_STATE_TRANSITION` the address is archived; `400` unpaired coordinates.
+- **Audit**: `customer.address_update` (changed fields).
+
+### POST /api/v1/customers/{id}/addresses/{addressId}/archive
+
+- **Purpose**: soft remove an address (jobs keep pointing at it); the oldest remaining active address becomes
+  primary when the primary was archived.
+- **Auth**: session. **Permission**: as add. **Response**: `200 { data: address }`.
+  **Errors**: `404`; `409` already archived. **Audit**: `customer.address_archive`.
+
+### GET /api/v1/customers/{id}/notes
+
+- **Purpose**: notes, newest first. **Auth**: session. **Permission**: `customers.view` over the customer.
+- **Request query**: `cursor`, `limit`. **Response**: `200 { data: [{ id, customerId, authorId, body, createdAt }], page }`.
+- **Errors**: `404`. **Audit**: none.
+
+### POST /api/v1/customers/{id}/notes
+
+- **Purpose**: append a note authored by the caller. Notes are not edited or deleted; a correction is a new note.
+- **Auth**: session. **Permission**: `customers.edit` over the customer with the `base` set.
+- **Request body** (strict): `body` 1-4000. **Response**: `201 { data: note }`. **Errors**: `403`; `404`.
+- **Audit**: `customer.note_add` (note id only).
+
+### GET /api/v1/customers/{id}/history
+
+- **Purpose**: the customer's leads and jobs (service history, §5.9).
+- **Auth**: session.
+- **Permission**: `customers.view` over the customer. Leads are shown only if the caller may view them
+  (`leads.view` scope); jobs only if the caller may view them (`jobs.view` scope, where a grant qualified
+  `customer_history` counts: Customer Relations). Money fields are never selected.
+- **Request query**: `limit` 1-200 (default 50; applied to leads and jobs separately, newest first).
+- **Response**: `200 { data: { leads: [entry], jobs: [entry], access: { leads, jobs } } }`; entry = `{ id,
+  number, status, createdAt, archivedAt }`; `access.*` is false when the caller holds no such permission
+  (an empty list then means "hidden", not "none"). **Errors**: `404`. **Audit**: none.
+
+### GET /api/v1/customers/{id}/employee-preferences
+
+- **Purpose**: preferred / avoided employees (a soft dispatch factor, never an eligibility rule).
+- **Auth**: session. **Permission**: `customers.view` over the customer.
+- **Response**: `200 { data: [{ employeeId, kind (PREFERRED | AVOID), note, createdAt }] }`. **Errors**: `404`.
+
+### PUT /api/v1/customers/{id}/employee-preferences
+
+- **Purpose**: replace the whole preference list.
+- **Auth**: session. **Permission**: `customers.edit` over the customer with the `base` set.
+- **Request body** (strict): `preferences` (up to 50) of `{ employeeId, kind, note? }`, an employee at most once;
+  new entries must be existing, non-terminated employees (`400 field: "preferences"`).
+- **Response**: `200 { data: [preference] }`. **Errors**: `403`; `404`; `400`. **Audit**: `customer.preferences_set`.
+
+### GET /api/v1/customers/duplicates
+
+- **Purpose**: the duplicate review queue, newest detection first.
+- **Auth**: session.
+- **Permission**: `customers.view`; a flag is listed only when the caller may view BOTH customers of the pair
+  (otherwise the queue would reveal customers outside the scope).
+- **Request query**: `cursor`, `limit`; `status` `OPEN` (default) | `NOT_DUPLICATE` | `CONFIRMED_DUPLICATE`;
+  `customerId` (flags involving this customer).
+- **Response**: `200 { data: [{ id, customerId, otherCustomerId, matchedOn, reason, status, detectedAt,
+  resolvedAt, resolvedById, resolutionNote }], page }`. **Audit**: none.
+
+### POST /api/v1/customers/duplicates/{flagId}/resolve
+
+- **Purpose**: record a human decision. `NOT_DUPLICATE` keeps the pair from ever being flagged again;
+  `CONFIRMED_DUPLICATE` records that they are the same party. Nothing is merged. A decision can be changed to
+  the other one; repeating the current one is `409`.
+- **Auth**: session. **Permission**: `customers.edit` over BOTH customers.
+- **Request body** (strict): `resolution` (required), `note` 1-500.
+- **Response**: `200 { data: flag }`. **Errors**: `403`; `404` (flag missing or either customer out of scope);
+  `409 INVALID_STATE_TRANSITION` same resolution; `409 CONFLICT` changed concurrently.
+- **Audit**: `customer.duplicate_resolve` (previous and new status, `reason`).
+
+### GET /api/v1/customers/duplicate-matchers
+
+- **Purpose**: which matchers run on create/update. **Auth**: session. **Permission**: `customers.view`.
+- **Response**: `200 { data: { matchers: { phone, email, address, name }, isDefault } }`. Defaults: phone, email
+  and address on, name off.
+
+### PUT /api/v1/customers/duplicate-matchers
+
+- **Purpose**: replace the configuration (only future detection is affected).
+- **Auth**: session. **Permission**: `customers.manage` with a TENANT scope (`403` otherwise).
+- **Request body** (strict): `phone`, `email`, `address`, `name`, all booleans, all required.
+- **Response**: `200 { data: { matchers, isDefault: false } }`. **Audit**: `customer.duplicate_matchers_update`.

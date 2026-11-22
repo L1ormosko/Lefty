@@ -34,5 +34,7 @@ export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, pageQuerySchema, pageArgs, toPage } f
 export type { Page, PageQuery } from "./pagination";
 export { MAX_JSON_BODY_BYTES } from "./request-body";
 export { conflictOnUniqueViolation, isUniqueViolation } from "./unique-violation";
+export { nextNumber } from "./number-sequence";
+export type { NumberSequenceName } from "./number-sequence";
 export { withIdempotency, hashIdempotentRequest, IDEMPOTENCY_RETENTION_MS, IDEMPOTENCY_IN_FLIGHT_MS } from "./idempotency";
 export type { IdempotencyScope, IdempotentResponse, IdempotentOutcome } from "./idempotency";
