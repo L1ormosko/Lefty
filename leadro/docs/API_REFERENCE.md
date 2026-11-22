@@ -947,3 +947,255 @@ it (permission management, `*.configure`, always-MFA templates) and cannot be sw
   history.
 - **Errors**: `403`; `404` user or record missing or outside scope.
 - **Audit**: none.
+
+## Qualifications (`/api/v1/qualifications`, Phase 2)
+
+Skills, credentials (certifications, licenses, equipment qualifications, training), job-category
+permissions, service territories, availability, and the eligibility check (spec 10.1). Module:
+`src/server/qualifications`; rules: `src/lib/eligibility`. Qualification records belong to an employee, so
+their data scope is the EMPLOYEE's (placements, legal employer, OWN) and every endpoint needs the `base`
+field set (a grant limited to another field set gets `403`). A record outside the caller's scope is `404`.
+Calendar dates (`issuedAt`, `expiresAt`, `validFrom`, `validTo`) are `YYYY-MM-DD`; instants are ISO
+datetimes. A credential is valid through the END of its `expiresAt` day in the job's time zone. None of
+these records hold performance data (§10.3).
+
+Private fields: a credential `number` is returned in full only to the holder and to callers who hold
+`qualifications.approve` over the employee (HR, Owner); everyone else with `qualifications.view` gets it masked
+(`\u2022\u2022\u2022\u20221234`, last four characters). Availability `note` is returned only to the same two groups
+(others get `null`). The audit log never stores a number in clear (masked likewise).
+
+Statuses (`PENDING_VERIFICATION`, `VERIFIED`, `REJECTED`, `REVOKED`) follow `src/lib/qualification-lifecycle.ts`;
+only `VERIFIED`, unexpired rows count for eligibility.
+
+### GET /api/v1/qualifications
+
+- **Purpose**: employees' skills and credentials in the caller's scope, newest first.
+- **Auth**: session. **Permission**: `qualifications.view`, scoped in the query.
+- **Request query**: `cursor`, `limit`; filters `employeeId`, `kind` (`SKILL|CERTIFICATION|LICENSE|EQUIPMENT|TRAINING`),
+  `status`, `skillId`, `certificationId`.
+- **Response**: `200 { data: [qualification], page }`; qualification = `{ id, employeeId, kind, skillId,
+  certificationId, level, number, issuingAuthority, issuedAt, expiresAt, status, verifiedById, verifiedAt,
+  notes, createdAt, updatedAt }`.
+- **Audit**: none.
+
+### POST /api/v1/qualifications
+
+- **Purpose**: record a skill or credential; it starts `PENDING_VERIFICATION`.
+- **Auth**: session. **Permission**: `qualifications.create` over the employee.
+- **Request body** (strict): `employeeId`; exactly one of `skillId` / `certificationId`; `level` 1-5 (skills
+  only); `number`, `issuingAuthority`, `issuedAt`, `expiresAt` (after `issuedAt`), `notes`. A certification with
+  `requiresNumber` needs `number`. `kind` is taken from the catalog entry.
+- **Idempotency**: honoured.
+- **Response**: `201 { data: qualification }`.
+- **Errors**: `404`; `400` unknown or retired catalog entry; `409 CONFLICT` the employee already has that skill;
+  `409 INVALID_STATE_TRANSITION` terminated employee.
+- **Audit**: `qualification.create`.
+
+### GET /api/v1/qualifications/{id}
+
+- **Purpose**: one record. **Auth**: session. **Permission**: `qualifications.view` over the holder.
+- **Response**: `200 { data: qualification }`. **Errors**: `404`.
+- **Audit**: none.
+
+### PATCH /api/v1/qualifications/{id}
+
+- **Purpose**: change the facts of a record. A change to `level`, `number`, `issuingAuthority`, `issuedAt` or
+  `expiresAt` of a `VERIFIED` row, or any edit of a `REJECTED` / `REVOKED` row (a resubmission), returns it to
+  `PENDING_VERIFICATION` and clears the verifier. Editing `notes` alone keeps the verification.
+- **Auth**: session. **Permission**: `qualifications.edit` over the holder.
+- **Request body** (strict, at least one key, nullable to clear): `level`, `number`, `issuingAuthority`, `issuedAt`,
+  `expiresAt`, `notes`.
+- **Response**: `200 { data: qualification }`.
+- **Errors**: `404`; `400` (`level` on a credential, number required, expiry not after issue date); `409
+  INVALID_STATE_TRANSITION` terminated employee.
+- **Audit**: `qualification.update` (changed fields; includes the status change when it reverted).
+
+### POST /api/v1/qualifications/{id}/verify
+
+- **Purpose**: HR confirms the record: `PENDING_VERIFICATION` to `VERIFIED`, recording verifier and time.
+- **Auth**: session. **Permission**: `qualifications.approve` over the holder (HR, Owner; not managers).
+- **Response**: `200 { data: qualification }`.
+- **Errors**: `403` your own record; `404`; `409 INVALID_STATE_TRANSITION`; `400` number missing or already expired.
+- **Audit**: `qualification.verify` (previous and new status).
+
+### POST /api/v1/qualifications/{id}/reject
+
+- **Purpose**: `PENDING_VERIFICATION` to `REJECTED`. **Auth**: session. **Permission**: `qualifications.approve`.
+- **Request body** (strict): `reason` string 1-500 (required).
+- **Response**: `200 { data: qualification }`. **Errors**: as `verify`.
+- **Audit**: `qualification.reject` (`reason`).
+
+### POST /api/v1/qualifications/{id}/revoke
+
+- **Purpose**: `VERIFIED` to `REVOKED` (the authority withdrew it, or it was found invalid).
+  **Auth**: session. **Permission**: `qualifications.approve`.
+- **Request body** (strict): `reason` string 1-500 (required).
+- **Response**: `200 { data: qualification }`. **Errors**: as `verify`.
+- **Audit**: `qualification.revoke` (`reason`).
+
+### GET /api/v1/qualifications/skills
+
+- **Purpose**: the skill catalog, by name. Company-wide reference data. **Auth**: session.
+  **Permission**: any `qualifications.view` grant.
+- **Request query**: `cursor`, `limit`, `active` (`true|false`).
+- **Response**: `200 { data: [{ id, code, name, category, description, active, createdAt, updatedAt }], page }`.
+- **Audit**: none.
+
+### POST /api/v1/qualifications/skills
+
+- **Purpose**: add a skill. **Auth**: session. **Permission**: `qualifications.manage` with a TENANT scope.
+- **Request body** (strict): `code` (`^[a-z0-9][a-z0-9_-]{0,62}$`), `name`, `category?`, `description?`.
+- **Idempotency**: honoured. **Response**: `201 { data: skill }`.
+- **Errors**: `403`; `409 CONFLICT` code exists.
+- **Audit**: `skill.create`.
+
+### PATCH /api/v1/qualifications/skills/{id}
+
+- **Purpose**: edit or retire (`active: false`) a skill; entries are never deleted. **Auth**: session.
+  **Permission**: `qualifications.manage` (TENANT).
+- **Request body** (strict, at least one key): `name`, `category`, `description`, `active`.
+- **Response**: `200 { data: skill }`. **Errors**: `403`; `404`.
+- **Audit**: `skill.update`.
+
+### GET /api/v1/qualifications/certifications
+
+- **Purpose**: the credential catalog (certifications, licenses, equipment qualifications, training).
+  **Auth**: session. **Permission**: any `qualifications.view` grant.
+- **Request query**: `cursor`, `limit`, `active`, `type` (`CERTIFICATION|LICENSE|EQUIPMENT|TRAINING`).
+- **Response**: `200 { data: [{ id, code, name, type, issuingAuthority, validityMonths, requiresNumber,
+  description, active, createdAt, updatedAt }], page }`.
+- **Audit**: none.
+
+### POST /api/v1/qualifications/certifications
+
+- **Purpose**: add a credential type. **Auth**: session. **Permission**: `qualifications.manage` (TENANT).
+- **Request body** (strict): `code`, `name`, `type` (default `CERTIFICATION`), `issuingAuthority?`,
+  `validityMonths?` (1-600), `requiresNumber` (default false), `description?`.
+- **Idempotency**: honoured. **Response**: `201 { data: certification }`. **Errors**: `403`; `409 CONFLICT`.
+- **Audit**: `certification.create`.
+
+### PATCH /api/v1/qualifications/certifications/{id}
+
+- **Purpose**: edit or retire a credential type (`code` and `type` are fixed). **Auth**: session.
+  **Permission**: `qualifications.manage` (TENANT).
+- **Request body** (strict, at least one key): `name`, `issuingAuthority`, `validityMonths`, `requiresNumber`,
+  `description`, `active`.
+- **Response**: `200 { data: certification }`. **Errors**: `403`; `404`.
+- **Audit**: `certification.update`.
+
+### GET /api/v1/qualifications/territories
+
+- **Purpose**: the employee's service territories (org units they may be dispatched into), oldest first.
+  **Auth**: session. **Permission**: `qualifications.view` over the employee.
+- **Request query**: `employeeId` (required), `activeOnly`, `cursor`, `limit`.
+- **Response**: `200 { data: [{ id, employeeId, orgUnitId, includeDescendants, effectiveFrom, effectiveTo,
+  createdAt }], page }`.
+- **Audit**: none.
+
+### POST /api/v1/qualifications/territories
+
+- **Purpose**: add a territory. Re-adding an ended one reopens that row (the audit event keeps the earlier period).
+- **Auth**: session. **Permission**: `qualifications.edit` over the employee AND over the org unit.
+- **Request body** (strict): `employeeId`, `orgUnitId`, `includeDescendants` (default true), `effectiveFrom?`.
+- **Response**: `201 { data: territory }`.
+- **Errors**: `404`; `409 CONFLICT` already a territory; `409 INVALID_STATE_TRANSITION` archived unit or terminated employee.
+- **Audit**: `service_territory.add`.
+
+### POST /api/v1/qualifications/territories/{id}/end
+
+- **Purpose**: end the territory now (a not-yet-started one is cancelled). **Auth**: session.
+  **Permission**: `qualifications.edit` over the employee.
+- **Request body** (strict): `reason?`. **Response**: `200 { data: territory }`.
+- **Errors**: `404`; `409 INVALID_STATE_TRANSITION` already ended.
+- **Audit**: `service_territory.end`.
+
+### GET /api/v1/qualifications/job-permissions
+
+- **Purpose**: the employee's job-category permissions (a job type OR a category, for a period).
+  **Auth**: session. **Permission**: `qualifications.view` over the employee.
+- **Request query**: `employeeId` (required), `activeOnly`, `cursor`, `limit`.
+- **Response**: `200 { data: [{ id, employeeId, jobTypeId, category, effectiveFrom, effectiveTo, grantedById,
+  reason, createdAt }], page }`.
+- **Audit**: none.
+
+### POST /api/v1/qualifications/job-permissions
+
+- **Purpose**: authorize an employee for a job type or category. A matching permission in force is a hard
+  requirement of eligibility. **Auth**: session. **Permission**: `qualifications.approve` over the employee
+  (an authorization decision: HR / Owner, not managers).
+- **Request body** (strict): `employeeId`; exactly one of `jobTypeId` / `category`; `effectiveFrom?`,
+  `effectiveTo?` (after `effectiveFrom`), `reason?`.
+- **Response**: `201 { data: permission }`.
+- **Errors**: `404`; `400` unknown or retired job type; `409 INVALID_STATE_TRANSITION` terminated employee.
+- **Audit**: `job_permission.grant`.
+
+### POST /api/v1/qualifications/job-permissions/{id}/end
+
+- **Purpose**: end the permission now. **Auth**: session. **Permission**: `qualifications.approve`.
+- **Request body** (strict): `reason?`. **Response**: `200 { data: permission }`.
+- **Errors**: `404`; `409 INVALID_STATE_TRANSITION` already ended.
+- **Audit**: `job_permission.end`.
+
+### GET /api/v1/qualifications/availability
+
+- **Purpose**: the employee's availability rows: weekly windows (by day and start) then exceptions.
+  **Auth**: session. **Permission**: `qualifications.view` over the employee.
+- **Request query**: `employeeId` (required), `activeOnly`, `cursor`, `limit`.
+- **Response**: `200 { data: [{ id, employeeId, kind, timeZone, isoDayOfWeek, startMinute, endMinute, validFrom,
+  validTo, startsAt, endsAt, note, createdAt, updatedAt }], page }`.
+- **Audit**: none.
+
+### POST /api/v1/qualifications/availability
+
+- **Purpose**: add a recurring weekly window or a dated exception. Windows are read in `timeZone` (default: the
+  employee's login zone, else their branch's, else the company's) per local date, DST included. They cannot cross
+  midnight: a night shift is two windows (Mon 1320-1440, Tue 0-360). Exceptions beat weekly windows;
+  `EXCEPTION_UNAVAILABLE` (time off) blocks, `EXCEPTION_AVAILABLE` adds hours.
+- **Auth**: session. **Permission**: `qualifications.edit` over the employee.
+- **Request body** (strict, by `kind`): `WEEKLY_WINDOW`: `employeeId`, `isoDayOfWeek` 1-7 (Monday = 1),
+  `startMinute` 0-1439, `endMinute` 1-1440 (after start), `validFrom?`, `validTo?`, `timeZone?`, `note?`;
+  `EXCEPTION_AVAILABLE` / `EXCEPTION_UNAVAILABLE`: `employeeId`, `startsAt`, `endsAt` (after start), `timeZone?`, `note?`.
+- **Response**: `201 { data: availability }`.
+- **Errors**: `404`; `400`; `409 INVALID_STATE_TRANSITION` terminated employee.
+- **Audit**: `availability.create`.
+
+### DELETE /api/v1/qualifications/availability/{id}
+
+- **Purpose**: remove a window or exception. Schedule data is deleted rather than ended (the audit event keeps
+  what it said). **Auth**: session. **Permission**: `qualifications.edit` over the employee.
+- **Response**: `204`. **Errors**: `404`.
+- **Audit**: `availability.delete` (previous value).
+
+### GET /api/v1/qualifications/expiring
+
+- **Purpose**: `VERIFIED` records of active employees expiring within `withinDays` (default: the company's
+  `qualificationWarningDays`, 30), soonest first; today's date is the company's. Drives HR's "expiring soon" list
+  and the notification engine.
+- **Auth**: session. **Permission**: `qualifications.view`, scoped in the query.
+- **Request query**: `withinDays` 1-730, `includeExpired` (`true|false`: also records already past their date),
+  `cursor`, `limit`.
+- **Response**: `200 { data: [{ qualificationId, employeeId, userId, kind, skillId, certificationId, name,
+  expiresOn, daysRemaining }], page }`; `daysRemaining` 0 = expires today, negative = already expired.
+- **Audit**: none.
+
+### POST /api/v1/qualifications/eligibility
+
+- **Purpose**: may this employee do this job type here and then? A read (nothing is stored); POST because the
+  requirements are a body. Checks, in order: employment, required skills (verified, unexpired by the end of the
+  window, minimum level), required credentials, job-category permission, service territory, availability for the
+  whole window. Every failing rule is reported. `UNAVAILABLE_TIME_OFF` carries no params: only that the time is
+  blocked, never when or why. A territory on an archived unit does not cover. Status gate: `TERMINATED` always
+  fails; `ON_LEAVE` fails only for work starting now or earlier (future leave is an `EXCEPTION_UNAVAILABLE` row).
+- **Auth**: session. **Permission**: `qualifications.view` over the employee.
+- **Request body** (strict): `employeeId`, `jobTypeId` (required); `orgUnitId?` (service area; omit to skip the
+  territory rule); `extraSkills?` `[{ skillId, minLevel? }]`, `extraCertificationIds?` (on top of the type's);
+  `startsAt` + `endsAt` (both or neither; omit to skip availability); `timeZone?` (default the unit's, else the
+  company's).
+- **Response**: `200 { data: { employeeId, timeZone, eligible, failures: [{ code, params }], checked: {
+  availability, territory, jobPermission } } }`. `code` is one of `EMPLOYEE_NOT_ACTIVE`, `EMPLOYEE_NOT_EMPLOYED`,
+  `QUALIFICATION_MISSING`, `QUALIFICATION_NOT_VERIFIED`, `QUALIFICATION_EXPIRED`, `QUALIFICATION_RENEWAL_PENDING` (expired, but a still-valid renewal awaits verification), `SKILL_LEVEL_TOO_LOW`,
+  `JOB_PERMISSION_MISSING`, `OUTSIDE_TERRITORY`, `UNAVAILABLE_TIME_OFF`, `UNAVAILABLE_OUTSIDE_HOURS`; clients
+  translate with the key `QUALIFICATION.FAILURE.<code>` and the params (a `kind` param via
+  `QUALIFICATION.KIND.<kind>`). No prose is returned.
+- **Errors**: `404`; `400` unknown job type, skill, certification or unit (`field` names it).
+- **Audit**: none.
