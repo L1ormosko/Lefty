@@ -15,7 +15,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:migrate:test": "DATABASE_URL=postgresql://leadro:leadro@127.0.0.1:5432/leadro_test prisma migrate deploy",
     "seed": "tsx --env-file=.env prisma/seed.ts",
-    "i18n:check": "tsx scripts/i18n-check.ts"
+    "i18n:check": "tsx scripts/i18n-check.ts",
+    "test:e2e": "playwright test --trace off"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.1",
+    "@playwright/test": "1.55.1",
     "@testing-library/dom": "10.4.1",
     "@testing-library/jest-dom": "6.10.0",
     "@testing-library/react": "16.3.3",

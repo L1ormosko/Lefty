@@ -93,3 +93,17 @@ tests/             Vitest (service, route and UI-action tests hit the real datab
 docs/              SPEC.md, ARCHITECTURE, ERD, PERMISSIONS, API_CONVENTIONS, CODING_STANDARDS, AUTH, AUTHZ,
                    DECISIONS, PROJECT_STATE, MILESTONE-1
 ```
+
+## Browser tests (Playwright)
+
+`npm run test:e2e` runs the Playwright suite in `e2e/`: it builds the app, starts it on port 3100 against the
+throw-away `leadro_test` database, seeds two fresh uniquely-named tenants (`e2e-main-*`, `e2e-other-*`) and drives
+Chromium through the CEO (MFA), City Manager (Hebrew, RTL), Technician, failed-login/lockout and tenant-isolation flows.
+
+- Needs PostgreSQL running and `npm install` done; no `.env` is required. Credentials are generated per run (password,
+  MFA seed, `LEADRO_ENCRYPTION_KEY`) and live only in memory/environment; nothing secret is committed.
+- The database name must end in `_test` (the suite refuses anything else). Each run leaves its `e2e-*` tenants behind
+  (they are not deleted: sign-ins write append-only audit events); they are harmless and the next run uses new ones.
+- Chromium is the container's `/opt/pw-browsers/chromium`; override with `E2E_CHROMIUM_PATH`. Other knobs: `E2E_PORT`, `E2E_DATABASE_URL`.
+- Traces are off (they can record typed passwords); pass `--trace on` to debug.
+- Layout: `playwright.config.ts`, `e2e/setup/` (seed + fixture), `e2e/helpers.ts`, one `*.spec.ts` per scenario.
