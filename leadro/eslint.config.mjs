@@ -17,6 +17,23 @@ const config = [
     },
   },
   {
+    // Modules are used only through their index.ts (docs/ARCHITECTURE.md): no "@/server/<module>/<file>".
+    files: ["src/**/*.{ts,tsx}", "prisma/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/server/*/*"],
+              message: "Import a server module through its index.ts (e.g. \"@/server/auth\"), never one of its internal files.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["tests/**/*.ts", "prisma/**/*.ts"],
     rules: { "@typescript-eslint/no-explicit-any": "off" },
   },

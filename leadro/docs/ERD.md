@@ -1,4 +1,4 @@
-# Entity-Relationship Diagram (Phase 1 schema)
+# Entity-Relationship Diagram (Phase 1 schema, Milestone 1)
 
 Source of truth: `prisma/schema.prisma`. Every box except `Tenant` and `Permission` carries a
 `tenantId` (FK to `Tenant`, FORCE-RLS protected, not drawn on each edge for readability). All
@@ -103,6 +103,8 @@ erDiagram
     string locale "nullable"
     string timeZone "nullable"
     boolean mfaEnabled
+    string mfaSecretEncrypted "AES-256-GCM, redacted in audit"
+    int mfaLastUsedStep "TOTP replay guard: highest accepted time step"
   }
   Role {
     string id PK
@@ -145,6 +147,8 @@ erDiagram
     string tokenHash UK
     datetime expiresAt
     datetime revokedAt
+    boolean mfaPending "password ok, MFA code outstanding"
+    datetime mfaVerifiedAt "set when MFA was passed; null on a MFA-requiring user re-triggers the MFA step"
   }
   AuthenticationEvent {
     string id PK
@@ -156,8 +160,16 @@ erDiagram
     string id PK
     string email
     string tokenHash UK
+    string invitedById FK "nullable"
+    string roleId "nullable, validated in the service"
+    string employeeId "nullable"
+    enum scopeType "nullable: data scope granted with roleId"
+    string scopeLegalEntityId "nullable, no FK"
+    string scopeOrgUnitId "nullable, no FK"
+    boolean scopeIncludeDescendants
     datetime expiresAt
     datetime acceptedAt
+    datetime revokedAt
   }
   PasswordResetToken {
     string id PK
@@ -192,6 +204,10 @@ erDiagram
     string locale
     string key "unique per tenant+locale"
     string value
+    boolean reviewed "only reviewed overrides are served (16.6)"
+    datetime reviewedAt
+    string reviewedById FK "nullable"
+    string updatedById FK "nullable"
   }
 ```
 
