@@ -26,3 +26,5 @@ Editing a role that is already assigned additionally requires that the editor co
 Assignments always carry explicit scopes; granting/revoking follows authz's anti-escalation rules (not to yourself, only
 over scopes you administer, only roles whose permissions you hold). Nothing is deleted: archived roles and revoked or
 expired assignments remain as history, and every change is audited (`role.*`, `role_assignment.*`).
+
+`saveRoleDefinition(actor, ctx, roleId, { update, permissionKeys, reason })`: the admin screen's editor. Updates name/description/MFA and the permission set in ONE transaction, keeping the stored conditions of grants that stay selected. The `/api/v1/roles/{id}` and `/permissions` routes keep their explicit semantics (PATCH edits attributes; PUT-style `permissions` replaces the full grant list including conditions); only the screen uses the key-toggle variant.

@@ -7,11 +7,10 @@ import {
   cloneRoleSchema,
   createRole,
   createRoleSchema,
-  getRole,
   grantRoleSchema,
   grantRoleToUser,
   replacePermissionsSchema,
-  replaceRolePermissions,
+  saveRoleDefinition,
   revokeAssignment,
   revokeAssignmentSchema,
   updateRole,
@@ -52,24 +51,17 @@ export async function cloneRoleAction(_previous: FormState, formData: FormData):
 }
 
 /**
- * Saves name/description and the permission grid. Grants that stay ticked keep their stored
- * conditions (record sets, field sets): the grid only toggles permissions, it must never silently
- * widen or drop a restriction.
+ * Saves name/description and the permission grid through ONE service transaction
+ * (`saveRoleDefinition`), which also keeps the stored conditions of grants that stay ticked.
  */
 export async function saveRoleAction(_previous: FormState, formData: FormData): Promise<FormState> {
   return runAdminAction(formData, {
     revalidate: [ROLES_PATH, `${ROLES_PATH}/${String(formData.get("roleId") ?? "")}`],
     run: async ({ actor, ctx, t }, data) => {
       const values = formValues(data);
-      const roleId = values.roleId ?? "";
-      const current = (await getRole(actor, roleId)) as { permissions?: Array<{ permission: string; conditions: unknown }> };
-      const keep = new Map((current.permissions ?? []).map((grant) => [grant.permission, grant.conditions]));
-      const permissions = ticked(data).map(({ permission }) => {
-        const conditions = keep.get(permission);
-        return conditions ? { permission, conditions } : { permission };
-      });
-      await updateRole(actor, ctx, roleId, parseWith(updateRoleSchema, { name: values.name, description: values.description ?? null }));
-      await replaceRolePermissions(actor, ctx, roleId, parseWith(replacePermissionsSchema, { permissions, reason: values.reason }));
+      const update = parseWith(updateRoleSchema, { name: values.name, description: values.description ?? null });
+      parseWith(replacePermissionsSchema, { permissions: ticked(data), reason: values.reason });
+      await saveRoleDefinition(actor, ctx, values.roleId ?? "", { update, permissionKeys: ticked(data).map((grant) => grant.permission), reason: values.reason });
       return t("ADMIN.SAVED");
     },
   });

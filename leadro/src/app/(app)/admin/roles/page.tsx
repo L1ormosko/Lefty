@@ -76,7 +76,7 @@ export default async function RolesPage({ searchParams }: { searchParams: Search
                 <ActionDialog triggerLabel={t("ADMIN.ROLES_CLONE")} title={t("ADMIN.ROLES_CLONE")} submitLabel={t("ADMIN.ROLES_CLONE")} cancelLabel={t("COMMON.CANCEL")} closeLabel={t("COMMON.CLOSE")} action={cloneRoleAction}>
                   <input type="hidden" name="roleId" value={String(row.id)} />
                   <AdminField label={t("ADMIN.ORG_UNIT_NAME")} htmlFor={`clone-${String(row.id)}`} required>
-                    <TextInput id={`clone-${String(row.id)}`} name="name" defaultValue={`${String(row.name)} (copy)`} required maxLength={80} />
+                    <TextInput id={`clone-${String(row.id)}`} name="name" defaultValue={t("ADMIN.ROLES_CLONE_DEFAULT_NAME", { name: String(row.name) })} required maxLength={80} />
                   </AdminField>
                 </ActionDialog>
               ) : null,

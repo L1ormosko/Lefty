@@ -579,6 +579,8 @@
     "ADMIN.LOCALIZATION_DELETE_HELP": "The built-in text is used again straight away.",
     "ADMIN.LOCALIZATION_SAVED": "Saved. It will go live after review.",
     "ADMIN.LOCALIZATION_REVIEWED": "Approved and live.",
-    "ADMIN.LOCALIZATION_DELETED": "Override removed."
+    "ADMIN.LOCALIZATION_DELETED": "Override removed.",
+    "ADMIN.ROLES_CLONE_DEFAULT_NAME": "{name} (copy)",
+    "ADMIN.HISTORY_OUT_OF_SCOPE_UNIT": "A unit outside your scope"
   }
 }
