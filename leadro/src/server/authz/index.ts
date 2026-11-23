@@ -38,7 +38,14 @@ export {
   assertWritableFields,
 } from "./writable-fields";
 export type { WriteAllowlists } from "./writable-fields";
-export { EMPLOYEE_FIELD_MAP, CUSTOMER_FIELD_MAP, LEAD_FIELD_MAP, JOB_FIELD_MAP, baseFieldMap } from "./field-maps";
+export {
+  EMPLOYEE_FIELD_MAP,
+  CUSTOMER_FIELD_MAP,
+  LEAD_FIELD_MAP,
+  JOB_FIELD_MAP,
+  LOCATION_EVENT_FIELD_MAP,
+  baseFieldMap,
+} from "./field-maps";
 export type { FieldMap } from "./project-fields";
 export { explainAccess } from "./explain-access";
 export type { AccessExplanation, AssignmentExplanation, ScopeExplanation } from "./explain-access";
