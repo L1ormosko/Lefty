@@ -28,7 +28,10 @@ export interface EndShiftResult {
   replayed: boolean;
 }
 
-/** The shift to end: the named one, or the caller's own ACTIVE one (falling back to their latest, so a retry is idempotent). */
+/** An end repeated within this long after it succeeded gets the ended shift back (a retry after a lost response), not an error. */
+const RETRY_WINDOW_MS = 5 * 60_000;
+
+/** The shift to end: the named one, or the caller's own ACTIVE one (or one that ended just now, so a plain retry is idempotent). */
 async function findShiftToEnd(tx: TenantTx, actor: Actor, shiftId: string | undefined) {
   if (shiftId) {
     const row = await tx.shift.findFirst({ where: { id: shiftId, tenantId: actor.tenantId }, select: shiftSelect });
@@ -36,11 +39,15 @@ async function findShiftToEnd(tx: TenantTx, actor: Actor, shiftId: string | unde
     return row;
   }
   const own = await tx.shift.findFirst({
-    where: { tenantId: actor.tenantId, employeeId: actor.employeeId as string },
+    where: {
+      tenantId: actor.tenantId,
+      employeeId: actor.employeeId as string,
+      OR: [{ status: "ACTIVE" }, { endedAt: { gte: new Date(Date.now() - RETRY_WINDOW_MS) } }],
+    },
     orderBy: [{ status: "asc" }, { startedAt: "desc" }], // ACTIVE sorts before ENDED
     select: shiftSelect,
   });
-  if (!own) throw new InvalidStateTransitionError({ message: "There is no shift to end." });
+  if (!own) throw new InvalidStateTransitionError({ message: "There is no active shift to end." });
   return own;
 }
 
