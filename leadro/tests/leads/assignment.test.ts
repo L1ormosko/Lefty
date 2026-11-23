@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GET as getLeadRoute } from "@/app/api/v1/leads/[id]/route";
 import { POST as assignRoute } from "@/app/api/v1/leads/[id]/assign/route";
 import { POST as unassignRoute } from "@/app/api/v1/leads/[id]/unassign/route";
-import { ConflictError, ForbiddenError, InvalidStateTransitionError, ValidationError } from "@/server/core";
+import { ForbiddenError, InvalidStateTransitionError, ValidationError } from "@/server/core";
 import { withTenant } from "@/server/db";
 import { assignLead, assignLeadSchema, createInteraction, createInteractionSchema, unassignLead, unassignLeadSchema } from "@/server/leads";
 import { listOwnNotifications } from "@/server/notifications";
@@ -196,13 +196,11 @@ describe("reassignment and the open-contact-attempt conflict (§25.1)", () => {
   it("gives exactly one winner when two assigners race", async () => {
     const leadId = await intake(w, w.stateManager.actor);
     const results = await Promise.allSettled([
-      assign(w.stateManager.actor, leadId, { employeeId: employeeIds.leadOps }),
-      assign(w.cityManagerA.actor, leadId, { employeeId: employeeIds.leadOps2 }),
+      assign(w.stateManager.actor, leadId, { employeeId: employeeIds.leadOps, reason: "first" }),
+      assign(w.cityManagerA.actor, leadId, { employeeId: employeeIds.leadOps2, reason: "second" }),
     ]);
-    expect(results.filter((result) => result.status === "fulfilled").length).toBeGreaterThanOrEqual(1);
-    for (const result of results) {
-      if (result.status === "rejected") expect(result.reason).toBeInstanceOf(ConflictError);
-    }
+    // The row lock queues the second assigner behind the first; it then replaces the first owner (reason given).
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
     expect(await activeAssignments(w.tenantId, leadId)).toHaveLength(1);
   });
 
@@ -233,7 +231,7 @@ describe("releasing the owner", () => {
   it("applies the open-contact-attempt rule to releasing as well", async () => {
     const leadId = await intake(w, w.stateManager.actor);
     await assign(w.stateManager.actor, leadId, { employeeId: employeeIds.leadOps });
-    await attempt(w.leadOps.actor, leadId);
+    await attempt(w.leadOps2.actor, leadId); // somebody ELSE than the owner is on the phone
     await expect(unassign(w.stateManager.actor, leadId, { reason: "Rebalance" })).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(unassign(w.stateManager.actor, leadId, { reason: "Rebalance", confirmOpenContactAttempt: true })).resolves.toMatchObject({ status: "UNASSIGNED" });
   });

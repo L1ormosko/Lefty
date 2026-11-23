@@ -155,3 +155,12 @@ export async function visibleLeadIds(tx: TenantTx, actor: Actor, leadIds: string
   });
   return new Set(rows.map((row) => row.id));
 }
+
+/**
+ * Locks the lead row (`FOR UPDATE`) for the rest of the transaction. Assignment, release and contact-attempt writes take
+ * it BEFORE reading open attempts or the owner, so "is somebody on the phone?" and "who owns it?" cannot change between the
+ * check and the write (spec 25.1), and conversions of one lead queue up.
+ */
+export async function lockLead(tx: TenantTx, tenantId: string, leadId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "Lead" WHERE id = ${leadId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+}

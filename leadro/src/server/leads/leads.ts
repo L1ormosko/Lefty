@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { changedFields } from "@/lib/changed-fields";
 import { normalizeAddressKey } from "@/lib/address-key";
-import { isClosedStatus, requestableLeadStatuses } from "@/lib/lead-lifecycle";
+import { isClosedStatus, isOwnedStatus, requestableLeadStatuses } from "@/lib/lead-lifecycle";
 import { normalizePhoneE164, phoneSearchDigits } from "@/lib/phone";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import {
@@ -22,7 +22,7 @@ import {
   type Page,
   type RequestContext,
 } from "@/server/core";
-import { withTenant } from "@/server/db";
+import { withTenant, type TenantTx } from "@/server/db";
 import { flagLeadDuplicates, revealableLeadDuplicates } from "./duplicates";
 import { LEAD_API_FIELD_MAP, leadRowSelect, leadView } from "./fields";
 import { leadResourceRef, leadRowAttributes, resolveLeadListAccess } from "./lead-access";
@@ -86,20 +86,22 @@ export async function listLeads(actor: Actor, query: ListLeadsQuery): Promise<Pa
 
     // "me" with no employee record matches nothing (a user without an employee owns no lead).
     const assigneeId = query.assigneeEmployeeId === "me" ? (actor.employeeId ?? "none") : query.assigneeEmployeeId;
-    const callerWhere: Prisma.LeadWhereInput = {
-      tenantId: actor.tenantId,
-      ...(query.archived === "exclude" ? { archivedAt: null } : query.archived === "only" ? { archivedAt: { not: null } } : {}),
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.priority ? { priority: query.priority } : {}),
-      ...(query.sourceId ? { sourceId: query.sourceId } : {}),
-      ...(query.orgUnitId ? { orgUnitId: query.orgUnitId } : {}),
-      ...(query.customerId ? { customerId: query.customerId } : {}),
-      ...(query.assigned === "true" ? { assignments: { some: { state: "ACTIVE" } } } : {}),
-      ...(query.assigned === "false" ? { assignments: { none: { state: "ACTIVE" } } } : {}),
-      ...(assigneeId ? { assignments: { some: { state: "ACTIVE", employeeId: assigneeId } } } : {}),
-      ...(query.followUpDue ? { nextFollowUpAt: { lte: now }, status: { notIn: ["CONVERTED", "LOST", "DUPLICATE", "CANCELLED"] } } : {}),
-      ...(query.q ? searchWhere(query.q) : {}),
-    };
+    // Each filter is its own AND member: two filters on the same relation or column (assigned + assignee, status +
+    // follow-up queue) must narrow each other, never overwrite one another.
+    const filters: Prisma.LeadWhereInput[] = [
+      query.archived === "exclude" ? { archivedAt: null } : query.archived === "only" ? { archivedAt: { not: null } } : {},
+      ...(query.status ? [{ status: query.status }] : []),
+      ...(query.priority ? [{ priority: query.priority }] : []),
+      ...(query.sourceId ? [{ sourceId: query.sourceId }] : []),
+      ...(query.orgUnitId ? [{ orgUnitId: query.orgUnitId }] : []),
+      ...(query.customerId ? [{ customerId: query.customerId }] : []),
+      ...(query.assigned === "true" ? [{ assignments: { some: { state: "ACTIVE" as const } } }] : []),
+      ...(query.assigned === "false" ? [{ assignments: { none: { state: "ACTIVE" as const } } }] : []),
+      ...(assigneeId ? [{ assignments: { some: { state: "ACTIVE" as const, employeeId: assigneeId } } }] : []),
+      ...(query.followUpDue ? [{ nextFollowUpAt: { lte: now }, status: { notIn: ["CONVERTED", "LOST", "DUPLICATE", "CANCELLED"] as Array<"CONVERTED" | "LOST" | "DUPLICATE" | "CANCELLED"> } }] : []),
+      ...(query.q ? [searchWhere(query.q)] : []),
+    ];
+    const callerWhere: Prisma.LeadWhereInput = { tenantId: actor.tenantId, AND: filters };
     const rows = await tx.lead.findMany({
       where: withinScope(access.where, callerWhere),
       select: leadRowSelect,
@@ -199,6 +201,22 @@ export async function restoreLead(actor: Actor, ctx: RequestContext, leadId: str
   return setArchived(actor, ctx, leadId, false, input.reason);
 }
 
+/**
+ * A lead archived in an owned status lost its assignment; restoring it must not leave "ASSIGNED without an owner"
+ * (invariant: ASSIGNED..DISPATCHED means somebody owns it). It goes back to UNASSIGNED, with a history row. Written
+ * directly (not through the machine) because restoring must always restore a consistent state, whatever a tenant disabled.
+ */
+async function releaseOwnerlessLead(tx: TenantTx, actor: Actor, leadId: string): Promise<void> {
+  const lead = await tx.lead.findFirst({ where: { id: leadId, tenantId: actor.tenantId }, select: { status: true } });
+  if (!lead || !isLeadStatus(lead.status) || !isOwnedStatus(lead.status)) return;
+  const owner = await tx.leadAssignment.findFirst({ where: { tenantId: actor.tenantId, leadId, state: "ACTIVE" }, select: { id: true } });
+  if (owner) return;
+  await tx.lead.update({ where: { id: leadId }, data: { status: "UNASSIGNED", statusChangedAt: new Date() } });
+  await tx.leadStatusHistory.create({
+    data: { tenantId: actor.tenantId, leadId, fromStatus: lead.status, toStatus: "UNASSIGNED", actorType: "USER", actorUserId: actor.userId, reason: "restored without an owner" },
+  });
+}
+
 async function setArchived(
   actor: Actor,
   ctx: RequestContext,
@@ -219,6 +237,7 @@ async function setArchived(
 
     const archivedAt = archive ? new Date() : null;
     await tx.lead.update({ where: { id: leadId }, data: { archivedAt } });
+    if (!archive) await releaseOwnerlessLead(tx, actor, leadId);
     if (archive) {
       await tx.leadAssignment.updateMany({
         where: { tenantId: actor.tenantId, leadId, state: "ACTIVE" },

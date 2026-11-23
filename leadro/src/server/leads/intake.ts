@@ -94,6 +94,17 @@ async function assertReferences(tx: TenantTx, actor: Actor, input: CreateLeadInp
 
 /** Creates a lead, or returns the existing one for a repeated `(source, externalId)`. */
 export async function createLead(actor: Actor, ctx: RequestContext, input: CreateLeadInput): Promise<CreateLeadResult> {
+  try {
+    return await createLeadOnce(actor, ctx, input);
+  } catch (error) {
+    // Two copies of one webhook raced: the loser hit the unique (source, externalId) index. Retry once: the lookup now
+    // finds the winner's lead and answers with it (200) instead of a 409. Field-level conflicts are real answers.
+    if (input.externalId && error instanceof ConflictError && error.field === undefined) return createLeadOnce(actor, ctx, input);
+    throw error;
+  }
+}
+
+async function createLeadOnce(actor: Actor, ctx: RequestContext, input: CreateLeadInput): Promise<CreateLeadResult> {
   let notificationIds: string[] = [];
   const result = await conflictOnUniqueViolation("This lead was just created by another request.", () =>
     withTenant(actor.tenantId, async (tx): Promise<CreateLeadResult> => {

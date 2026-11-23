@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as archiveRoute } from "@/app/api/v1/leads/[id]/archive/route";
 import { POST as restoreRoute } from "@/app/api/v1/leads/[id]/restore/route";
 import { GET as listSourcesRoute, POST as createSourceRoute } from "@/app/api/v1/leads/sources/route";
@@ -28,7 +28,9 @@ describe("lead sources", () => {
     expect((await call(createSourceRoute, "POST", "/api/v1/leads/sources", { cookie: w.cookies.leadOps, body })).status).toBe(403); // unit-scoped manage
     const created = await call(createSourceRoute, "POST", "/api/v1/leads/sources", { cookie: w.cookies.ceo, body });
     expect(created.status).toBe(201);
-    expect((await call(createSourceRoute, "POST", "/api/v1/leads/sources", { cookie: w.cookies.ceo, body })).status).toBe(409);
+    const quiet = (["log", "info", "warn", "error"] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => undefined));
+    expect((await call(createSourceRoute, "POST", "/api/v1/leads/sources", { cookie: w.cookies.ceo, body })).status).toBe(409); // Prisma logs the deliberate unique violation
+    quiet.forEach((spy) => spy.mockRestore());
     expect((await call(createSourceRoute, "POST", "/api/v1/leads/sources", { cookie: w.cookies.ceo, body: { ...body, code: "Bad Code!" } })).status).toBe(400);
     expect((await call(createSourceRoute, "POST", "/api/v1/leads/sources", { cookie: w.cookies.techA1, body })).status).toBe(403);
   });

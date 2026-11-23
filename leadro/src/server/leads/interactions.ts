@@ -13,7 +13,7 @@ import {
   type RequestContext,
 } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { leadResourceRef } from "./lead-access";
+import { leadResourceRef, lockLead } from "./lead-access";
 import type { CloseInteractionInput, CreateInteractionInput, ListInteractionsQuery } from "./schemas";
 import { applyLeadStatus, isLeadStatus, loadDisabledLeadTransitions } from "./status-change";
 
@@ -79,6 +79,8 @@ async function enforceInteractionWrite(tx: TenantTx, actor: Actor, leadId: strin
   if (!ref) throw new NotFoundError();
   const decision = await enforceInTx(tx, actor, "leads.edit", ref);
   assertWritableFields(decision, ["notes", ...extraFields], LEAD_FIELD_MAP, LEAD_WRITE_ALLOWLISTS);
+  // Same lock as assignment: an attempt cannot slip in between a reassignment's open-attempt check and its write (§25.1).
+  await lockLead(tx, actor.tenantId, leadId);
 }
 
 /**

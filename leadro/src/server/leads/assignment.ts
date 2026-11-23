@@ -14,7 +14,7 @@ import { withTenant, type TenantTx } from "@/server/db";
 import { deliverAfterCommit, notifyInTx } from "@/server/notifications";
 import { orgUnitAncestry } from "@/server/qualifications";
 import { findOpenContactAttempts } from "./interactions";
-import { leadResourceRef } from "./lead-access";
+import { leadResourceRef, lockLead } from "./lead-access";
 import { leadViewAfterWrite } from "./lead-view";
 import type { AssignLeadInput, UnassignLeadInput } from "./schemas";
 import { applyLeadStatus, isLeadStatus } from "./status-change";
@@ -109,6 +109,7 @@ export async function assignLead(
       const ref = await leadResourceRef(tx, actor.tenantId, leadId);
       if (!ref) throw new NotFoundError();
       await enforceInTx(tx, actor, "leads.assign", ref);
+      await lockLead(tx, actor.tenantId, leadId);
 
       const lead = await tx.lead.findFirst({
         where: { id: leadId, tenantId: actor.tenantId },
@@ -217,6 +218,7 @@ export async function unassignLead(
     const ref = await leadResourceRef(tx, actor.tenantId, leadId);
     if (!ref) throw new NotFoundError();
     await enforceInTx(tx, actor, "leads.assign", ref);
+    await lockLead(tx, actor.tenantId, leadId);
 
     const lead = await tx.lead.findFirst({ where: { id: leadId, tenantId: actor.tenantId }, select: { id: true, status: true, archivedAt: true } });
     if (!lead || !isLeadStatus(lead.status)) throw new NotFoundError();
@@ -226,7 +228,10 @@ export async function unassignLead(
 
     const now = new Date();
     const openAttempts = await findOpenContactAttempts(tx, actor.tenantId, leadId, now);
-    if (openAttempts.length > 0 && !input.confirmOpenContactAttempt) throw openAttemptsConflict();
+    // The owner's OWN open attempt is not a conflict: they are the one releasing the lead (it is closed with the release).
+    const ownerUserId = (await tx.employee.findFirst({ where: { id: owner.employeeId, tenantId: actor.tenantId }, select: { userId: true } }))?.userId;
+    const othersAttempts = openAttempts.filter((attempt) => attempt.authorId !== ownerUserId);
+    if (othersAttempts.length > 0 && !input.confirmOpenContactAttempt) throw openAttemptsConflict();
 
     await applyLeadStatus(tx, actor, ctx, { id: lead.id, status: lead.status }, "UNASSIGNED", {
       reason: input.reason,
@@ -239,7 +244,7 @@ export async function unassignLead(
       targetType: "Lead",
       targetId: leadId,
       previousValue: { employeeId: owner.employeeId },
-      newValue: { employeeId: null, conflictConfirmed: openAttempts.length > 0, closedOpenAttemptIds: openAttempts.map((attempt) => attempt.id) },
+      newValue: { employeeId: null, conflictConfirmed: othersAttempts.length > 0, closedOpenAttemptIds: openAttempts.map((attempt) => attempt.id) },
       reason: input.reason,
     });
     return leadViewAfterWrite(tx, actor, leadId);

@@ -6,7 +6,7 @@ import { withTenant } from "@/server/db";
 import { assertCustomerUsableForLead } from "./customer-link";
 import { confirmLeadCustomerFlag } from "./duplicates";
 import { createJobFromLead } from "./job-conversion-port";
-import { leadResourceRef } from "./lead-access";
+import { leadResourceRef, lockLead } from "./lead-access";
 import type { ConvertLeadInput } from "./schemas";
 import { applyLeadStatus, isLeadStatus, loadDisabledLeadTransitions } from "./status-change";
 
@@ -46,7 +46,7 @@ export async function convertLead(actor: Actor, ctx: RequestContext, leadId: str
     await enforceInTx(tx, actor, "leads.view", ref);
     // Serialise conversions of ONE lead: the second request waits here, then sees CONVERTED and replays the job
     // instead of failing on the unique (leadId) index. Everything below reads after the lock.
-    await tx.$queryRaw`SELECT id FROM "Lead" WHERE id = ${leadId} AND "tenantId" = ${actor.tenantId} FOR UPDATE`;
+    await lockLead(tx, actor.tenantId, leadId);
     try {
       await enforceInTx(tx, actor, "jobs.create", { ...(ref.orgUnitId ? { orgUnitId: ref.orgUnitId } : {}), assignedEmployeeIds: [], sets: [] });
     } catch (error) {
