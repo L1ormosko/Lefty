@@ -17,6 +17,10 @@ export const NOTIFICATION_EVENTS = {
   "job.reassigned": { templateKey: "NOTIFICATION.JOB_REASSIGNED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.rescheduled": { templateKey: "NOTIFICATION.JOB_RESCHEDULED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.cancelled": { templateKey: "NOTIFICATION.JOB_CANCELLED", critical: true, targetType: "job", params: ["jobNumber"] },
+  // Follow-up tasks (§5.6, §5.9): the notification links to the task itself; text carries no params (a task title is free text).
+  "follow_up.assigned": { templateKey: "NOTIFICATION.FOLLOW_UP_ASSIGNED", critical: false, targetType: "follow_up", params: [] },
+  "follow_up.due_soon": { templateKey: "NOTIFICATION.FOLLOW_UP_DUE_SOON", critical: false, targetType: "follow_up", params: [] },
+  "follow_up.overdue": { templateKey: "NOTIFICATION.FOLLOW_UP_OVERDUE", critical: false, targetType: "follow_up", params: [] },
   "qualification.expiring": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRING", critical: false, targetType: "employee_qualification", params: ["daysRemaining"] },
   "qualification.expired": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRED", critical: true, targetType: "employee_qualification", params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
