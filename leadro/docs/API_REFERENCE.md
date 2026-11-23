@@ -1908,3 +1908,96 @@ Permissions are checked over the job's service area; a job outside the caller's 
 - **Purpose**: decline the recommendation; the job stays pending and nobody is assigned. The reason is kept.
 - **Auth**: session. **Permission**: `dispatch.assign` over the job. **Request body** (strict): `reason` (required).
 - **Errors**: `400`; `403`; `404`; `409 INVALID_STATE_TRANSITION`. **Audit**: `dispatch.recommendation_reject`.
+
+## Follow-up tasks (`/api/v1/follow-ups`) - Phase 3
+
+Code: `src/server/follow-ups` (README there), routes `src/app/api/v1/follow-ups/**`, status machine `src/lib/follow-up-lifecycle.ts`.
+Design decisions: `DECISIONS.md` "Phase 3 Task 7".
+
+A follow-up is a generic task ("call the customer back") about ONE target: a `LEAD`, `CUSTOMER`, `JOB` or `RECOVERY_CASE`
+(`targetType` + the matching id column `leadId | customerId | jobId | recoveryCaseId`; the database allows exactly one).
+
+Fields (all `base`): `id, targetType, leadId, customerId, jobId, recoveryCaseId, orgUnitId (the target's service area, copied at
+creation), title, description, status, priority (LOW | NORMAL | HIGH | URGENT), origin (MANUAL | OUTCOME | RECOVERY_RULE | SYSTEM),
+assigneeId (employee), assignedAt, dueAt, completedAt, completedById, completionNote, cancelledAt, cancelReason, createdById,
+createdAt, updatedAt`, plus derived `overdue` (open and past due) and `nextStatuses`. The sweep stamps never leave the server.
+
+Statuses: `OPEN <-> IN_PROGRESS`, either -> `DONE` or `CANCELLED` (reason required); `DONE` / `CANCELLED` can only be reopened to `OPEN`.
+
+**Two access gates, both must pass (otherwise `404`, never `403`)**:
+1. The task, with `follow_ups.view | create | edit | assign`: `ORG_UNIT` / `LEGAL_ENTITY` follow `orgUnitId` (a task whose target has no
+   unit is tenant-level), `ASSIGNED` = the caller is the assignee, `OWN` = the caller created it.
+2. The target: the caller must be able to view the lead / customer / job / recovery case (`leads.view`, `customers.view`,
+   `jobs.view`, `recovery.view`, each with its own module's scope rules). A task never reveals or opens a record its reader cannot reach.
+
+**Assignee rules**: an ACTIVE employee with a login who can themselves open the task and its target. Assigning to somebody other than
+yourself needs `follow_ups.assign` over THAT employee (the grant's unit scope must cover their placement); an employee outside it is
+reported as `400` "Employee not found" on `assigneeId`, exactly like a missing one.
+
+**Offline** (§8.7, §25.3): create, status, complete and cancel accept `clientEventId` (UUID) and `occurredAt` (device time, not in the
+future). Idempotent per (company, employee, `clientEventId`) through `FieldEvent`: a replay returns the task as it is now and applies
+nothing; the same id with different content is `409 CONFLICT`; an event refused for a business reason is stored as `REJECTED` and a replay
+answers the same error class. Permission failures are not stored. `occurredAt` becomes `completedAt` / `cancelledAt`. An event needs an
+employee record (`400` on `clientEventId` otherwise).
+
+Notifications (in-app, link to the task, redacted at read time when access is lost): `follow_up.assigned` (to the new assignee, not the
+person assigning), `follow_up.due_soon` and `follow_up.overdue` (raised by the sweep `sweepFollowUps` / `sweepAllFollowUps`, which a worker
+calls; there is no scheduler yet). "Due soon" = within `OperationsSettings.followUpDueSoonMinutes` (default 60). Each is sent once per task
+and due time; changing the due date or reopening starts a new cycle. Unassigned tasks are not notified: list them with
+`unassigned=true&overdue=true`.
+
+### GET /api/v1/follow-ups
+
+- **Purpose**: the work queue, soonest due first (then id).
+- **Auth**: session. **Permission**: `follow_ups.view`, capability; scope and target access are part of the query.
+- **Request query**: `cursor`, `limit`; `status` (`OPEN | IN_PROGRESS | DONE | CANCELLED | open` where `open` = OPEN and IN_PROGRESS);
+  `priority`; `targetType` (+ `targetId`, which needs `targetType`); `assigneeEmployeeId` (an id or `me`); `unassigned` `true` (open, nobody
+  assigned) | `false`; `overdue` `true` (open and past due); `dueFrom`, `dueTo` (ISO datetimes, `dueTo` exclusive); `orgUnitId`.
+- **Response**: `200 { data: [followUp], page }`. **Errors**: `400` bad query (`targetId` without `targetType`). **Audit**: none.
+
+### POST /api/v1/follow-ups
+
+- **Purpose**: create a task about a target.
+- **Auth**: session. **Permission**: `follow_ups.create` over the target's service area, plus view access to the target; plus
+  `follow_ups.assign` over the assignee when it is somebody else.
+- **Request body** (strict): `targetType`, `targetId`, `title` 1-200, `description` 1-4000, `dueAt`, `priority` (default `NORMAL`),
+  `assigneeId`, `clientEventId`, `occurredAt`. `origin` and `dedupeKey` are not settable by a person (rules and the system set them in code).
+- **Idempotency**: `Idempotency-Key` honoured, and `clientEventId` (see Offline).
+- **Response**: `201 { data: followUp }` (only `{ id }` when the creator may not view what they created).
+- **Errors**: `400` (assignee unknown / out of scope / cannot work the task); `403`; `404` (target missing or out of reach);
+  `409 INVALID_STATE_TRANSITION` archived target; `409 CONFLICT` reused `clientEventId` with different content.
+- **Audit**: `follow_up.create` (ids, priority, due date, origin; never the title or description).
+
+### GET /api/v1/follow-ups/{id}
+
+- **Purpose**: one task with `overdue` and `nextStatuses`. **Permission**: `follow_ups.view` over the task and view access to its target.
+  **Errors**: `404`. **Audit**: none.
+
+### PATCH /api/v1/follow-ups/{id}
+
+- **Purpose**: edit an OPEN / IN_PROGRESS task. **Request body** (strict, at least one key): `title`, `description` (nullable), `dueAt`, `priority`.
+  A changed `dueAt` clears the sweep stamps (new reminders). **Permission**: `follow_ups.edit`.
+- **Errors**: `400`; `404`; `409 INVALID_STATE_TRANSITION` task is DONE / CANCELLED (reopen first). **Audit**: `follow_up.update` (changed fields; text shown as `[text]`).
+
+### POST /api/v1/follow-ups/{id}/assign
+
+- **Purpose**: assign, reassign, or unassign (`assigneeId: null`) an open task; the new assignee is notified. **Permission**: `follow_ups.assign` over the task.
+- **Request body** (strict): `assigneeId` (string | null). **Errors**: `400` (assignee rules above); `403`; `404`; `409 INVALID_STATE_TRANSITION`.
+- **Audit**: `follow_up.assign` / `follow_up.unassign`.
+
+### POST /api/v1/follow-ups/{id}/status
+
+- **Purpose**: start (`IN_PROGRESS`), put back or reopen (`OPEN`). **Permission**: `follow_ups.edit`.
+- **Request body** (strict): `status` (`OPEN | IN_PROGRESS`), `clientEventId`, `occurredAt`. **Errors**: `404`; `409 INVALID_STATE_TRANSITION`.
+  Reopening clears the completion / cancellation stamps and the reminder stamps. **Audit**: `follow_up.status_change`.
+
+### POST /api/v1/follow-ups/{id}/complete
+
+- **Purpose**: mark DONE. **Permission**: `follow_ups.edit`. **Request body** (strict): `note` (optional, 1-2000), `clientEventId`, `occurredAt`
+  (becomes `completedAt`). **Errors**: `404`; `409 INVALID_STATE_TRANSITION` (also for the loser of two simultaneous completions).
+  **Audit**: `follow_up.status_change` (`hasNote`, never the note).
+
+### POST /api/v1/follow-ups/{id}/cancel
+
+- **Purpose**: cancel. **Permission**: `follow_ups.edit`. **Request body** (strict): `reason` (required, 1-500), `clientEventId`, `occurredAt`.
+  **Errors**: `400`; `404`; `409 INVALID_STATE_TRANSITION`. **Audit**: `follow_up.status_change` (`hasReason`, never the reason).
