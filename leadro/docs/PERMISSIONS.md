@@ -292,7 +292,24 @@ Code: `src/server/customers/customer-access.ts` and `assignment-access.ts`.
 - **Duplicates**: flags are created from the whole tenant but shown/resolved only when the caller may view/edit BOTH customers;
   `customers.manage` (tenant-wide) configures the matchers.
 
-## 9. Jobs: how scopes, sets and fields apply (Phase 2 Task 6)
+## 9. Leads: how scopes, sets and fields apply (Phase 2 Task 5)
+
+Code: `src/server/leads/lead-access.ts`, `src/lib/lead-lifecycle.ts`.
+
+- **ORG_UNIT / LEGAL_ENTITY**: the lead's service-area unit `Lead.orgUnitId` (and that unit's legal entity). A lead without a unit is
+  tenant-level: only TENANT scopes reach it (and only a tenant-wide grant may create one).
+- **ASSIGNED**: the caller is the lead's current owner (ACTIVE `LeadAssignment`; shared fragment `leadAssignedToWhere`). Closing,
+  releasing or archiving a lead ends the assignment, so the access ends with it. **OWN** matches nothing.
+- **Record set** `dispatch_related` (Dispatcher `leads.view`): leads in QUALIFIED, SCHEDULED, DISPATCHED or CONVERTED. Unknown sets match nothing.
+- **Actions**: `leads.create` (intake), `leads.edit` (content, status, contact history, customer link, duplicate decisions), `leads.assign`
+  (assign, reassign, release), `leads.archive`, `leads.manage` (lead sources, tenant-wide). Conversion needs `leads.view` over the lead
+  AND `jobs.create` over its service area. Technician `leads.edit {fields:"status"}` writes only `status` and `closedReason`
+  (`LEAD_WRITE_ALLOWLISTS`), through the status action; it cannot log contact attempts or notes.
+- **Fields**: leads have no sensitive set; every column is `base` (the quoted amount is a sales estimate).
+- **Denials** on a lead are 404 once a record is involved; creating without a tenant-wide grant and no unit is 403.
+- **Duplicates**: flags are created from the whole tenant but revealed only for records the caller may view; the review queue needs both sides.
+
+## 10. Jobs: how scopes, sets and fields apply (Phase 2 Task 6)
 
 Code: `src/server/jobs/job-access.ts`, `assignment.ts`, `status.ts`; decisions in `DECISIONS.md` "Phase 2 Task 6".
 

@@ -18,7 +18,7 @@ import { deliverAfterCommit } from "@/server/notifications";
 import { evaluateCandidates, isEligible, orgUnitAncestry, requirementsFromInputs } from "@/server/qualifications";
 import { getJobEligibilityInputs } from "./eligibility-inputs";
 import { recordJobEvent } from "./events";
-import { jobResourceRef, loadJobAccessFacts, teamMembers } from "./job-access";
+import { jobResourceRef, loadJobAccessFacts, lockJob, teamMembers } from "./job-access";
 import { notifyJobEmployees } from "./notify";
 import { viewJobAfterWrite } from "./read";
 import type { AssignJobInput, UnassignJobInput } from "./schemas";
@@ -44,6 +44,12 @@ const NOT_OVERRIDABLE: ReadonlyArray<EligibilityFailure["code"]> = ["EMPLOYEE_NO
 
 type Target = { employeeId: string } | { teamOrgUnitId: string };
 
+/** What the qualification engine says about a target: the failures, and whether an approver may excuse them. */
+interface Verdict {
+  failures: EligibilityFailure[];
+  overridable: boolean;
+}
+
 const failureIssues = (field: string, failures: EligibilityFailure[]): FieldIssue[] => {
   const seen = new Set<string>();
   return failures.flatMap((failure) => {
@@ -65,20 +71,25 @@ function workWindow(job: JobForChange): { startsAt: Date; endsAt: Date } | null 
  * member is (the team lead then allocates inside the team; each member is still checked on their own
  * if the job is later assigned to them).
  */
-async function eligibilityFailures(tx: TenantTx, actor: Actor, job: JobForChange, target: Target): Promise<EligibilityFailure[]> {
+async function eligibilityFailures(tx: TenantTx, actor: Actor, job: JobForChange, target: Target): Promise<Verdict> {
   const tenantId = actor.tenantId;
   const { requirements, timeZone } = await requirementsFromInputs(tx, tenantId, await getJobEligibilityInputs(tx, tenantId, job.id));
   const query = { at: new Date(), window: workWindow(job), timeZone };
 
   if ("employeeId" in target) {
-    return (await isEligible(tx, tenantId, target.employeeId, requirements, query)).failures;
+    const failures = (await isEligible(tx, tenantId, target.employeeId, requirements, query)).failures;
+    return { failures, overridable: !failures.some((failure) => NOT_OVERRIDABLE.includes(failure.code)) };
   }
   const members = (await teamMembers(tx, tenantId, [target.teamOrgUnitId])).get(target.teamOrgUnitId) ?? [];
-  if (members.length === 0) return [{ code: "EMPLOYEE_NOT_ACTIVE", params: { reason: "TEAM_HAS_NO_ACTIVE_MEMBERS" } }];
+  if (members.length === 0) return { failures: [{ code: "EMPLOYEE_NOT_ACTIVE", params: { reason: "TEAM_HAS_NO_ACTIVE_MEMBERS" } }], overridable: false };
   const verdicts = await evaluateCandidates(tx, tenantId, members, requirements, query);
   const results = [...verdicts.values()];
-  if (results.some((verdict) => verdict.eligible)) return [];
-  return results.flatMap((verdict) => verdict.failures);
+  if (results.some((verdict) => verdict.eligible)) return { failures: [], overridable: true };
+  // Overridability is judged PER MEMBER: the team can be overridden when at least one member lacks only things an
+  // approver may excuse (a licence), even if another member is on leave or terminated (that member just is not the one
+  // who will take the work).
+  const overridable = results.some((verdict) => !verdict.failures.some((failure) => NOT_OVERRIDABLE.includes(failure.code)));
+  return { failures: results.flatMap((verdict) => verdict.failures), overridable };
 }
 
 /** Validates that the target exists and may be assigned this job at all (employee exists; team is an active TEAM inside the service area). */
@@ -113,6 +124,9 @@ export async function assignJob(actor: Actor, ctx: RequestContext, jobId: string
   const notificationIds: string[] = [];
   const result = await withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "jobs.assign");
+    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+    // concurrent assignment or status change cannot make this check stale (TOCTOU).
+    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     const ref = await jobResourceRef(tx, actor.tenantId, jobId);
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "jobs.assign", ref);
@@ -128,11 +142,17 @@ export async function assignJob(actor: Actor, ctx: RequestContext, jobId: string
       where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" },
       select: { id: true, employeeId: true, teamOrgUnitId: true },
     });
+    // Optional precondition: the caller names the assignment it saw (null = it saw none). Two dispatchers acting on the same
+    // stale screen: the second gets 409 instead of silently replacing the first one's decision.
+    if (input.expectedAssignmentId !== undefined) {
+      const stale = input.expectedAssignmentId === null ? current.length > 0 : !current.some((row) => row.id === input.expectedAssignmentId);
+      if (stale) throw new ConflictError({ message: "The job's assignment changed since you loaded it. Reload and decide again.", field: "expectedAssignmentId" });
+    }
     const alreadyAssigned = current.some((row) => ("employeeId" in target ? row.employeeId === target.employeeId : row.teamOrgUnitId === target.teamOrgUnitId));
     if (alreadyAssigned) throw new ConflictError({ message: "The job is already assigned to this employee or team." });
 
     let method: AssignmentMethod = "MANUAL";
-    const failures = await eligibilityFailures(tx, actor, job, target);
+    const { failures, overridable } = await eligibilityFailures(tx, actor, job, target);
     if (failures.length > 0) {
       const field = "employeeId" in target ? "employeeId" : "teamOrgUnitId";
       if (!input.override) {
@@ -142,7 +162,7 @@ export async function assignJob(actor: Actor, ctx: RequestContext, jobId: string
           details: failureIssues(field, failures),
         });
       }
-      if (failures.some((failure) => NOT_OVERRIDABLE.includes(failure.code))) {
+      if (!overridable) {
         throw new ConflictError({ message: "An inactive or terminated employee cannot be assigned, even with an override.", field, details: failureIssues(field, failures) });
       }
       if (!(await canInTx(tx, actor, "jobs.approve", ref)).allowed) {
@@ -224,6 +244,9 @@ export async function unassignJob(actor: Actor, ctx: RequestContext, jobId: stri
   const notificationIds: string[] = [];
   const result = await withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "jobs.assign");
+    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+    // concurrent assignment or status change cannot make this check stale (TOCTOU).
+    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     const ref = await jobResourceRef(tx, actor.tenantId, jobId);
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "jobs.assign", ref);

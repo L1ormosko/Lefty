@@ -1,3 +1,4 @@
+import "@/server/notification-targets"; // registers the lead/job resolvers the redaction check needs
 import { authenticateRequest } from "@/server/auth";
 import { requirePermission } from "@/server/authz";
 import { actorOf, defineRoute, respond } from "@/server/core";

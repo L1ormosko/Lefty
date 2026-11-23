@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import {
+  ASSIGNMENT_ENDING_STATUSES,
   JOB_TRANSITIONS,
   REASON_REQUIRED_STATUSES,
   TECHNICIAN_TARGET_STATUSES,
@@ -122,7 +123,7 @@ export async function changeJobStatus(
   }
 
   const now = new Date();
-  const releases = to === "PENDING_ASSIGNMENT" || to === "CLOSED" || to === "CANCELLED";
+  const releases = to === "PENDING_ASSIGNMENT" || ASSIGNMENT_ENDING_STATUSES.includes(to);
   const releasedEmployeeIds =
     releases && activeAssignments > 0 ? ((await loadJobAccessFacts(tx, tenantId, [job.id], now)).get(job.id)?.assignedEmployeeIds ?? []) : [];
 
@@ -131,7 +132,9 @@ export async function changeJobStatus(
   if (to === "COMPLETED") data.completedAt = now;
   if (to === "CLOSED") data.closedAt = now;
   if (to === "CANCELLED") data.cancelledAt = now;
-  if (to === "PENDING_ASSIGNMENT") {
+  // Status/slot invariant: a job without a responsible assignee, or waiting to be rescheduled, or released from hold
+  // (ON_HOLD > ASSIGNED), holds no scheduled slot. SCHEDULED is only entered with a (new) slot.
+  if (to === "PENDING_ASSIGNMENT" || to === "RESCHEDULED" || (job.status === "ON_HOLD" && to === "ASSIGNED")) {
     data.scheduledStartAt = null;
     data.scheduledEndAt = null;
   }
@@ -172,6 +175,9 @@ export async function transitionJob(actor: Actor, ctx: RequestContext, jobId: st
   const notificationIds: string[] = [];
   const result = await withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "jobs.edit");
+    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+    // concurrent assignment or status change cannot make this check stale (TOCTOU).
+    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     const ref = await jobResourceRef(tx, actor.tenantId, jobId);
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "jobs.edit", ref);
@@ -183,7 +189,10 @@ export async function transitionJob(actor: Actor, ctx: RequestContext, jobId: st
       throw new ForbiddenError({ message: `Your access only lets you move a job to: ${TECHNICIAN_TARGET_STATUSES.join(", ")}.` });
     }
     if (rule?.permission) await enforceInTx(tx, actor, rule.permission, ref);
-    if (input.toStatus === "PENDING_ASSIGNMENT" && (await tx.jobAssignment.count({ where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" } })) > 0) {
+    // Every move that ENDS the assignments (back to the pool, or closing/cancelling the job) takes the job away from its
+    // assignees, so it needs the same authority as unassigning: jobs.assign over the job.
+    const endsAssignments = input.toStatus === "PENDING_ASSIGNMENT" || ASSIGNMENT_ENDING_STATUSES.includes(input.toStatus);
+    if (endsAssignments && (await tx.jobAssignment.count({ where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" } })) > 0) {
       await enforceInTx(tx, actor, "jobs.assign", ref);
     }
 
