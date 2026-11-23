@@ -18,6 +18,9 @@ export type { LocationSettings } from "./settings";
 export { runFieldEvent } from "./field-events";
 export type { FieldEventRequest, FieldEventEntity, FieldEventHandlers, FieldEventOutcome } from "./field-events";
 
+// Guard for audit values written by modules that handle locations
+export { withoutCoordinates } from "./audit-values";
+
 // API services
 export { recordLocationEvent } from "./service";
 export type { RecordedEventResult } from "./service";

@@ -210,6 +210,16 @@ describe("runFieldEvent (the offline gate)", () => {
     expect(row).toMatchObject({ result: "REJECTED", resultCode: "INVALID_STATE_TRANSITION" });
   });
 
+  it("keys idempotency per employee: the same clientEventId from two employees is two separate events", async () => {
+    const id = randomUUID();
+    const work = counting();
+    const other: FieldEventRequest = { ...request(id), employeeId: w.techA1Other.employeeId as string, actorUserId: w.techA1Other.userId };
+    const [mine, theirs] = await Promise.all([runFieldEvent(request(id), work.handlers), runFieldEvent(other, work.handlers)]);
+    expect([mine.replayed, theirs.replayed]).toEqual([false, false]);
+    expect(work.applied()).toBe(2);
+    expect(await withTenant(w.tenantId, (tx) => tx.fieldEvent.count({ where: { tenantId: w.tenantId, clientEventId: id } }))).toBe(2);
+  });
+
   it("rolls the claim back on an unexpected failure so a retry can succeed", async () => {
     const id = randomUUID();
     await expect(runFieldEvent(request(id), { apply: async () => Promise.reject(new Error("boom")), replay: async () => "x" })).rejects.toThrow("boom");

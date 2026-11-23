@@ -115,14 +115,6 @@ describe("offline idempotency (clientEventId)", () => {
     expect(await storedEvents(w.tenantId, { jobId, kind: "DEPARTURE" })).toHaveLength(1);
   });
 
-  it("keys idempotency per employee: another technician's identical id is a separate event", async () => {
-    const jobId = await assignedJobFor(w);
-    const clientEventId = randomUUID();
-    expect((await record(w.cookie.techA1, { kind: "NAVIGATION_OPENED", jobId, clientEventId })).status).toBe(201);
-    // techA1Other cannot see the job (404) - the id of another employee never collides or leaks.
-    expect((await record(w.cookie.techA1Other, { kind: "NAVIGATION_OPENED", jobId, clientEventId })).status).toBe(404);
-  });
-
   it("keeps the device time of a manual event (occurredAt) and refuses occurredAt that disagrees with the position's device time", async () => {
     const jobId = await assignedJobFor(w);
     const happened = new Date(Date.now() - 2 * 3_600_000);

@@ -4,7 +4,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { loadLocationSettings, recordLocationEventInTx, runFieldEvent } from "@/server/location";
+import { loadLocationSettings, recordLocationEventInTx, runFieldEvent, withoutCoordinates } from "@/server/location";
 import { assessBoundary, boundaryTime, lockEmployee } from "./boundary";
 import { shiftResourceRef, shiftSelect } from "./fields";
 import { readShiftInTx } from "./read";
@@ -120,7 +120,7 @@ export async function endShift(actor: Actor, ctx: RequestContext, shiftId: strin
       targetType: "Shift",
       targetId: shift.id,
       previousValue: { status: "ACTIVE" },
-      newValue: { status: "ENDED", endedAt: endedAt.toISOString(), source: event.source, accuracyM: event.accuracyM, exception: assessment?.exception?.code ?? null },
+      newValue: withoutCoordinates({ status: "ENDED", endedAt: endedAt.toISOString(), source: event.source, accuracyM: event.accuracyM, exception: assessment?.exception?.code ?? null }),
       reason: byOther ? input.reason : undefined,
     });
     const { view } = await readShiftInTx(tx, actor, shift.id);

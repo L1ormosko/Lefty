@@ -5,7 +5,7 @@ import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { orgUnitAtInTx } from "@/server/employees";
-import { loadLocationSettings, recordLocationEventInTx, runFieldEvent } from "@/server/location";
+import { loadLocationSettings, recordLocationEventInTx, runFieldEvent, withoutCoordinates } from "@/server/location";
 import { assessBoundary, boundaryTime, lockEmployee } from "./boundary";
 import { readShiftInTx } from "./read";
 import type { StartShiftInput } from "./schemas";
@@ -100,7 +100,7 @@ export async function startShift(actor: Actor, ctx: RequestContext, input: Start
       targetType: "Shift",
       targetId: shift.id,
       // §22.2: ids, codes and accuracy only; coordinates stay in LocationEvent.
-      newValue: { employeeId, orgUnitId, startedAt: startedAt.toISOString(), source: event.source, accuracyM: event.accuracyM, exception: assessment.exception?.code ?? null },
+      newValue: withoutCoordinates({ employeeId, orgUnitId, startedAt: startedAt.toISOString(), source: event.source, accuracyM: event.accuracyM, exception: assessment.exception?.code ?? null }),
     });
     const { view } = await readShiftInTx(tx, actor, shift.id);
     return { result: { shift: view, alreadyActive: false, replayed: false }, shiftId: shift.id };

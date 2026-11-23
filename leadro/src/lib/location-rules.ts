@@ -29,12 +29,6 @@ export function isAccurateEnough(accuracyM: number | null | undefined, maxAccura
   return typeof accuracyM === "number" && accuracyM >= 0 && accuracyM <= maxAccuracyM;
 }
 
-/** Is an event recent enough to say where someone is NOW (presence, spec 26.5)? */
-export function isFreshEnough(serverTime: Date, now: Date, maxAgeMinutes: number): boolean {
-  const ageMs = now.getTime() - serverTime.getTime();
-  return ageMs >= -MAX_CLOCK_SKEW_MS && ageMs <= maxAgeMinutes * 60_000;
-}
-
 /** Object keys that look like raw coordinates. They never belong in JSON columns or audit values (ERD "Contracts for JSON"). */
 const COORDINATE_KEY = /^(lat|lng|lon|long|latitude|longitude|coords?|coordinates?|position|gps)$/i;
 

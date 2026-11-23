@@ -2,6 +2,7 @@ import type { FieldEvent, Prisma } from "@prisma/client";
 import { findCoordinateKey } from "@/lib/location-rules";
 import { ConflictError, InvalidStateTransitionError, ValidationError, type AppError } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
+import { logger } from "@/server/logging";
 
 /**
  * The offline gate for field writes (spec 8.7, 25.3). A device may send the same event twice (retry, flaky network,
@@ -142,8 +143,16 @@ const isReusedIdConflict = (error: AppError): boolean => error.details?.some((de
 /** Stores the refusal in its own transaction; a failure here must not hide the original error. */
 async function rememberRefusal(request: FieldEventRequest, code: StoredRefusal): Promise<void> {
   try {
-    await withTenant(request.tenantId, (tx) => claim(tx, request, "REJECTED", code));
-  } catch {
-    // The caller gets the original refusal either way; a retry will simply be refused again.
+    await withTenant(request.tenantId, async (tx) => {
+      // A row already exists when this refusal is itself a replay (or a concurrent copy stored it): nothing to add.
+      const existing = await tx.fieldEvent.findFirst({
+        where: { tenantId: request.tenantId, employeeId: request.employeeId, clientEventId: request.clientEventId },
+        select: { id: true },
+      });
+      if (!existing) await claim(tx, request, "REJECTED", code);
+    });
+  } catch (error) {
+    // The caller still gets the original refusal; without the stored row a retry is judged afresh. Never swallow silently.
+    logger.error("could not store a refused field event", { tenantId: request.tenantId, type: request.type, code, error: String(error) });
   }
 }

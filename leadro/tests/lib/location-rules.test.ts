@@ -6,7 +6,6 @@ import {
   findCoordinateKey,
   hashFieldEventContent,
   isAccurateEnough,
-  isFreshEnough,
 } from "@/lib/location-rules";
 
 const now = new Date("2026-11-23T12:00:00.000Z");
@@ -31,17 +30,6 @@ describe("isAccurateEnough", () => {
     expect(isAccurateEnough(101, 100)).toBe(false);
     expect(isAccurateEnough(null, 100)).toBe(false);
     expect(isAccurateEnough(undefined, 100)).toBe(false);
-  });
-});
-
-describe("isFreshEnough", () => {
-  it("is true inside the window and false after it", () => {
-    expect(isFreshEnough(minutesAgo(10), now, 30)).toBe(true);
-    expect(isFreshEnough(minutesAgo(30), now, 30)).toBe(true);
-    expect(isFreshEnough(minutesAgo(31), now, 30)).toBe(false);
-  });
-  it("does not trust a timestamp from the far future", () => {
-    expect(isFreshEnough(new Date(now.getTime() + 3_600_000), now, 30)).toBe(false);
   });
 });
 

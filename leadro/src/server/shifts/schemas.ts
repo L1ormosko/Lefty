@@ -40,7 +40,7 @@ export const listShiftsQuerySchema = pageQuerySchema.extend({
   employeeId: id.optional(),
   orgUnitId: id.optional(),
   status: z.enum(["ACTIVE", "ENDED"]).optional(),
-  /** `true`: only shifts with an exception; or one review state. */
+  /** Only shifts in this review state (`PENDING` is the manager's queue); shifts without an exception have no state. */
   exceptionReview: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
   from: instant.optional(),
   to: instant.optional(),

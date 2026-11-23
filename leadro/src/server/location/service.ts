@@ -4,6 +4,7 @@ import { enforceInTx, LOCATION_EVENT_FIELD_MAP, projectFields, type AccessDecisi
 import { ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { jobResourceRef } from "@/server/jobs";
+import { withoutCoordinates } from "./audit-values";
 import { runFieldEvent } from "./field-events";
 import { recordLocationEventInTx } from "./record";
 import type { RecordLocationEventInput } from "./schemas";
@@ -92,7 +93,7 @@ export async function recordLocationEvent(actor: Actor, ctx: RequestContext, inp
       targetType: "LocationEvent",
       targetId: recorded.id,
       // §22.2: audit values never hold coordinates; accuracy, kind and source are enough to reconstruct what happened.
-      newValue: { kind: recorded.kind, source: recorded.source, jobId: input.jobId, hasPosition: recorded.hasPosition, accuracyM: recorded.accuracyM, exception: input.exception?.code ?? null },
+      newValue: withoutCoordinates({ kind: recorded.kind, source: recorded.source, jobId: input.jobId, hasPosition: recorded.hasPosition, accuracyM: recorded.accuracyM, exception: input.exception?.code ?? null }),
     });
     return { event: await viewStored(tx, actor, recorded.id, decision), id: recorded.id };
   };
