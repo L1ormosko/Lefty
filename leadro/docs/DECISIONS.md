@@ -727,3 +727,10 @@ Code: `src/server/shifts`, `src/server/location`, `src/lib/{location-rules,shift
 - **Accuracy** is stored rounded UP to whole meters (never better than reported); coordinates rounded to 6 decimals (the column's precision).
 - **Notifications not built.** A "shift exception awaiting review" notification would need a new notification event type in the shared `notifications/events.ts` and a target resolver; with parallel tasks editing those files it is left for the integration step. Managers have the review queue (`GET /shifts?exceptionReview=PENDING`).
 - **Follow-ups for the manager.** (1) After merge, `registerNotificationTargets` needs nothing from this task. (2) Task 3 / 6 should call `latestValidLocation` with the tenant's `loadLocationSettings` values. (3) The sync endpoint (batch, per-event results) can call `startShift` / `endShift` / `recordLocationEvent` with each event's `clientEventId`; `FieldEvent.batchId` is supported by `runFieldEvent` but not yet exposed.
+
+### Phase 3 Task 2, fix round 1
+
+- **Presence uses both clocks**: `latestValidLocation` requires `serverTime` AND (when present) `deviceTime` inside `presenceMaxAgeMinutes`; an old offline fix synced now is not "here now" (§26.5). `isFreshEnough` was dropped.
+- **Manual events keep the device time**: for an event without a position, `occurredAt` is stored as `deviceTime`; `occurredAt` and a position's `deviceTime` must agree within 5 minutes (else 400).
+- **Late boundaries are exceptions**: a shift start/end reported more than 15 minutes (`DELAYED_BOUNDARY_THRESHOLD_MS`, a future `OperationsSettings` field; no schema change now) after it happened gets `DELAYED` (review PENDING) unless the technician stated another reason or the position is vague (`POOR_SIGNAL`).
+- Retry window of the id-less end counts from `endRecordedAt` (server time). Employee lock is `FOR NO KEY UPDATE`. ESLint forbids importing `latestValidLocation` / `recordLocationEventInTx` under `src/app/**` (extend the list for any new coordinate-returning internal). Audit values built by shifts/location pass through `withoutCoordinates`. A refusal that cannot be stored is logged.
