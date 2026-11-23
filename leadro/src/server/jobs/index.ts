@@ -19,6 +19,8 @@ export { getJobEligibilityInputs } from "./eligibility-inputs";
 export { assignedEmployeeIdsByJob, jobResourceRef, teamMembers } from "./job-access";
 export { registerJobNotificationTarget } from "./notify";
 export { assignJobInTx, lockJob } from "./dispatch-port";
+export { changeJobStatus, loadJobForChange, recordJobEvent } from "./field-port";
+export type { JobForChange, StatusChangeOptions, StatusChangeResult } from "./field-port";
 export type { AssignmentProvenance } from "./dispatch-port";
 
 export {

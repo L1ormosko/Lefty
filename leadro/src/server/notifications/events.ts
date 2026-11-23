@@ -17,6 +17,7 @@ export const NOTIFICATION_EVENTS = {
   "job.reassigned": { templateKey: "NOTIFICATION.JOB_REASSIGNED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.rescheduled": { templateKey: "NOTIFICATION.JOB_RESCHEDULED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.cancelled": { templateKey: "NOTIFICATION.JOB_CANCELLED", critical: true, targetType: "job", params: ["jobNumber"] },
+  "job.not_converted": { templateKey: "NOTIFICATION.JOB_NOT_CONVERTED", critical: false, targetType: "job_outcome", params: ["jobNumber"] },
   "qualification.expiring": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRING", critical: false, targetType: "employee_qualification", params: ["daysRemaining"] },
   "qualification.expired": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRED", critical: true, targetType: "employee_qualification", params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
