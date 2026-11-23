@@ -38,10 +38,10 @@ function view(mode: DispatchMode): DispatchSettingsView {
   return { mode, modes: DISPATCH_MODES.map((entry) => ({ mode: entry, available: isAvailable(entry) })) };
 }
 
-/** The current mode and which modes can be chosen. Needs a tenant-wide `dispatch.view`. */
+/** The current mode and which modes can be chosen. Needs `dispatch.view` at any scope: the mode is not sensitive and every dispatcher's screen depends on it. */
 export async function getDispatchSettings(actor: Actor): Promise<DispatchSettingsView> {
   return withTenant(actor.tenantId, async (tx) => {
-    await enforceInTx(tx, actor, "dispatch.view", {});
+    await enforceInTx(tx, actor, "dispatch.view");
     return view(await loadDispatchMode(tx, actor.tenantId));
   });
 }
