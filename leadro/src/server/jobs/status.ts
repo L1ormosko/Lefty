@@ -38,6 +38,8 @@ export interface JobForChange {
   appointmentWindowEnd: Date | null;
   estimatedDurationMinutes: number;
   startedAt: Date | null;
+  /** The visit outcomes and completions of this job refer to (docs/ERD.md Phase 3). */
+  currentVisitNumber: number;
   requiresReview: boolean;
 }
 
@@ -60,6 +62,7 @@ export async function loadJobForChange(tx: TenantTx, tenantId: string, jobId: st
       appointmentWindowEnd: true,
       estimatedDurationMinutes: true,
       startedAt: true,
+      currentVisitNumber: true,
       archivedAt: true,
       jobType: { select: { requiresReview: true } },
     },
@@ -69,6 +72,13 @@ export async function loadJobForChange(tx: TenantTx, tenantId: string, jobId: st
   const { jobType, archivedAt: _archivedAt, ...job } = row;
   return { ...job, requiresReview: jobType.requiresReview };
 }
+
+/**
+ * A job in one of these statuses has had a visit reported and is waiting for another; moving it on to
+ * work that can start a new visit (back to the pool, assigned, or scheduled) opens the next visit number.
+ */
+const NEW_VISIT_SOURCE_STATUSES: readonly JobStatusValue[] = ["REQUIRES_RETURN_VISIT", "RESCHEDULED", "CUSTOMER_UNAVAILABLE", "FAILED"];
+const NEW_VISIT_TARGET_STATUSES: readonly JobStatusValue[] = ["PENDING_ASSIGNMENT", "ASSIGNED", "SCHEDULED"];
 
 export interface StatusChangeOptions {
   reason?: string | null;
@@ -117,6 +127,17 @@ export async function changeJobStatus(
   });
   if (problem) throw new InvalidStateTransitionError({ message: problem.message });
 
+  // §9.1: a job cannot close without the outcome of its current visit (the visit was reported or it never happened).
+  const startsNextVisit = NEW_VISIT_SOURCE_STATUSES.includes(job.status) && NEW_VISIT_TARGET_STATUSES.includes(to);
+  const currentVisitHasOutcome =
+    (to === "CLOSED" || startsNextVisit) && (await tx.jobOutcome.count({ where: { tenantId, jobId: job.id, visitNumber: job.currentVisitNumber } })) > 0;
+  if (to === "CLOSED" && !currentVisitHasOutcome) {
+    throw new InvalidStateTransitionError({
+      message: "Record the outcome of the visit before closing the job.",
+      details: [{ field: "status", code: "job.outcome_required", message: "A job cannot close without an outcome for its current visit." }],
+    });
+  }
+
   const reason = options.reason?.trim() || null;
   if (REASON_REQUIRED_STATUSES.includes(to) && !reason) {
     throw new ValidationError({ message: `A reason is required to move a job to ${to}.`, field: "reason" });
@@ -137,6 +158,11 @@ export async function changeJobStatus(
   if (to === "PENDING_ASSIGNMENT" || to === "RESCHEDULED" || (job.status === "ON_HOLD" && to === "ASSIGNED")) {
     data.scheduledStartAt = null;
     data.scheduledEndAt = null;
+  }
+  // A job that leaves a reported visit toward new work starts its next visit: the old outcome stays with visit N,
+  // the next outcome is visit N + 1 (unique per job and visit). Done here so no other path can forget it.
+  if (startsNextVisit && currentVisitHasOutcome) {
+    data.currentVisitNumber = { increment: 1 };
   }
   await tx.job.update({ where: { id: job.id }, data });
   if (releases && activeAssignments > 0) {
