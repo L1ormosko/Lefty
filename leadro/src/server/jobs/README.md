@@ -35,3 +35,8 @@ Invariants:
   rule; `tests/jobs/access.test.ts` pins that they agree. Customers' `assignedEmployeeIdsByCustomer` is the customer-level union.
 - Notifications (in the transaction, delivered after commit): `job.assigned` and `job.rescheduled` link to the job;
   `job.reassigned` (also on unassign) and `job.cancelled` carry the number only, because their recipients just lost access.
+- Phase 3 (outcomes): `changeJobStatus` refuses CLOSED until the current visit (`Job.currentVisitNumber`) has a `JobOutcome` (409, detail code
+  `job.outcome_required`) and advances `currentVisitNumber` when a job with a reported visit leaves REQUIRES_RETURN_VISIT / RESCHEDULED /
+  CUSTOMER_UNAVAILABLE / FAILED for PENDING_ASSIGNMENT, ASSIGNED or SCHEDULED. `field-port.ts` (`changeJobStatus`, `loadJobForChange`,
+  `recordJobEvent`) is what field-execution modules use; the `job-outcomes` module applies a visit outcome's status change through it
+  (outcome > status mapping: `src/lib/job-outcome-rules.ts`). Technicians do not call `transition` for these steps.
