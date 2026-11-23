@@ -450,6 +450,8 @@
     "DISPATCH.CONFLICT.HEAVY_WORKLOAD": "This technician already has a heavy workload.",
     "DISPATCH.CONFLICT.DISTANCE_UNKNOWN": "Distance could not be estimated: missing coordinates.",
     "DISPATCH.CONFLICT.FAR_FROM_JOB": "This technician is far from the job.",
+    "DISPATCH.EVALUATION_INCOMPLETE": "Evaluation incomplete: too many employees to judge in one pass. Narrow the search or assign by hand.",
+    "DISPATCH.STALE_RECOMMENDATION": "The job's assignment changed after this recommendation. Generate a new one.",
     "SHELL.HOME_WELCOME": "Welcome, {name}",
     "SHELL.HOME_EMPTY_TITLE": "No dashboards yet",
     "SHELL.HOME_EMPTY_DESCRIPTION": "Operational modules such as jobs, dispatch and reports arrive in later phases. Until then, use the account menu to manage your sessions and security.",

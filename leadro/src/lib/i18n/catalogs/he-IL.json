@@ -450,6 +450,8 @@
     "DISPATCH.CONFLICT.HEAVY_WORKLOAD": "לטכנאי זה כבר עומס עבודה כבד.",
     "DISPATCH.CONFLICT.DISTANCE_UNKNOWN": "לא ניתן להעריך מרחק: חסרות קואורדינטות.",
     "DISPATCH.CONFLICT.FAR_FROM_JOB": "טכנאי זה רחוק מהעבודה.",
+    "DISPATCH.EVALUATION_INCOMPLETE": "ההערכה לא הושלמה: יש יותר מדי עובדים להערכה במעבר אחד. צמצם את החיפוש או הקצה ידנית.",
+    "DISPATCH.STALE_RECOMMENDATION": "ההקצאה של העבודה השתנתה לאחר ההמלצה. צור המלצה חדשה.",
     "SHELL.HOME_WELCOME": "ברוך הבא, {name}",
     "SHELL.HOME_EMPTY_TITLE": "אין עדיין לוחות מחוונים",
     "SHELL.HOME_EMPTY_DESCRIPTION": "מודולים תפעוליים כגון עבודות, שיבוץ ודוחות יגיעו בשלבים הבאים. בינתיים אפשר להשתמש בתפריט החשבון לניהול ההתחברויות והאבטחה.",

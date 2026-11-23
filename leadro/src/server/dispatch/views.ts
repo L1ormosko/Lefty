@@ -22,10 +22,14 @@ export type BlockingReasons = Record<string, EligibilityFailure[]>;
 /** The `DispatchRecommendation.candidates` column: the ranking plus what was and was not evaluated. */
 export interface StoredCandidates {
   scoringVersion: number;
+  /** Every assignment row of the job when this was generated (ids) and which were ACTIVE: the clock-free staleness baseline. */
+  assignmentSnapshot?: { all: string[]; active: string[] };
   /** Employees judged for the generator (the pool after the SQL pre-filter and the generator's scope). */
   evaluatedCount: number;
   /** Relevant employees outside the generator's scope: counted, never listed. */
   outOfScopeCount: number;
+  /** Visible employees with neither a territory covering the job's area nor a permission for its type (not candidates). */
+  notRelevantCount: number;
   /** True when the evaluation ceiling stopped the pass: the ranking may be incomplete and "nobody eligible" is not proven. */
   poolTruncated: boolean;
   ranked: RankedCandidate[];
@@ -44,6 +48,7 @@ export interface RecommendationView {
   evaluatedCount: number;
   /** Relevant employees outside the generator's scope that were not evaluated for them. */
   outOfScopeCount: number;
+  notRelevantCount: number;
   /** Candidates and blocked employees dropped from this view because the viewer may not see them. */
   hiddenCandidateCount: number;
   poolTruncated: boolean;
@@ -58,7 +63,11 @@ export interface RecommendationView {
 
 /** The stored column, tolerant of a missing envelope. */
 export function storedCandidates(row: Pick<DispatchRecommendation, "candidates">): StoredCandidates {
-  return row.candidates as unknown as StoredCandidates;
+  const raw = row.candidates as unknown;
+  // Rows written before the envelope existed hold the bare ranked array.
+  if (Array.isArray(raw)) return { scoringVersion: 0, evaluatedCount: raw.length, outOfScopeCount: 0, notRelevantCount: 0, poolTruncated: false, ranked: raw as RankedCandidate[] };
+  const stored = raw as StoredCandidates;
+  return { ...stored, notRelevantCount: stored.notRelevantCount ?? 0 };
 }
 
 export function recommendationView(row: DispatchRecommendation, visibleEmployeeIds: ReadonlySet<string>): RecommendationView {
@@ -77,12 +86,14 @@ export function recommendationView(row: DispatchRecommendation, visibleEmployeeI
     blockingReasons: visibleBlocking,
     evaluatedCount: stored.evaluatedCount,
     outOfScopeCount: stored.outOfScopeCount,
+    notRelevantCount: stored.notRelevantCount,
     hiddenCandidateCount: stored.ranked.length - candidates.length + (blockingTotal - Object.keys(visibleBlocking ?? {}).length),
     poolTruncated: stored.poolTruncated,
     distanceBasis: DISTANCE_BASIS,
     generatedAt: row.generatedAt,
     generatedById: row.generatedById,
-    chosenEmployeeId: row.chosenEmployeeId,
+    // Re-checked like every other id: a narrower viewer is not told who was chosen if they may not see that person.
+    chosenEmployeeId: row.chosenEmployeeId && visibleEmployeeIds.has(row.chosenEmployeeId) ? row.chosenEmployeeId : null,
     decidedAt: row.decidedAt,
     decidedById: row.decidedById,
     decisionReason: row.decisionReason,

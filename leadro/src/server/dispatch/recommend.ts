@@ -5,6 +5,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { InvalidStateTransitionError, NotFoundError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
+import { lockJob } from "@/server/jobs";
 import { buildEligibilityPicture, loadCandidateFacts, MAX_EVALUATED } from "./picture";
 import type { ListRecommendationsQuery } from "./schemas";
 import { assertRecommendationsAvailable, loadDispatchMode } from "./settings";
@@ -37,13 +38,19 @@ const toBlockingReasons = (blocked: Array<{ employeeId: string; failures: Eligib
  */
 export async function generateRecommendation(actor: Actor, ctx: RequestContext, jobId: string): Promise<RecommendationView> {
   return withTenant(actor.tenantId, async (tx) => {
+    await enforceInTx(tx, actor, "dispatch.create");
+    // Job lock FIRST (the order every job-changing path uses): an assignment in flight commits before we read, a later one
+    // waits for us, so the picture and the assignment snapshot below describe one consistent moment.
+    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     await authorizeOverJob(tx, actor, "dispatch.create", jobId);
     const mode = await loadDispatchMode(tx, actor.tenantId);
     assertRecommendationsAvailable(mode);
 
     // Two dispatchers generating at once must not both leave a PENDING recommendation behind.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`dispatch-recommendation:${jobId}`}))`;
-    const now = new Date();
+    // The database clock, read after the lock: not the application's (clocks differ between hosts).
+    const [{ now }] = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+    const history = await tx.jobAssignment.findMany({ where: { tenantId: actor.tenantId, jobId }, select: { id: true, state: true } });
     const picture = await buildEligibilityPicture(tx, actor, jobId, now);
     if (!ASSIGNABLE_STATUSES.includes(picture.job.status as JobStatusValue)) {
       throw new InvalidStateTransitionError({ message: `A job in status ${picture.job.status} can no longer be assigned.` });
@@ -59,8 +66,10 @@ export async function generateRecommendation(actor: Actor, ctx: RequestContext, 
         mode: "AI_ASSISTED",
         candidates: candidatesJson({
           scoringVersion: SCORING_VERSION,
+          assignmentSnapshot: { all: history.map((row) => row.id), active: history.filter((row) => row.state === "ACTIVE").map((row) => row.id) },
           evaluatedCount: picture.evaluatedCount,
           outOfScopeCount: picture.outOfScopeCount,
+          notRelevantCount: picture.notRelevantCount,
           poolTruncated: picture.poolTruncated,
           ranked,
         }),
@@ -82,6 +91,7 @@ export async function generateRecommendation(actor: Actor, ctx: RequestContext, 
         eligibleCount: ranked.length,
         evaluatedCount: picture.evaluatedCount,
         outOfScopeCount: picture.outOfScopeCount,
+        notRelevantCount: picture.notRelevantCount,
         poolTruncated: picture.poolTruncated,
         evaluationLimit: MAX_EVALUATED,
         supersededCount: superseded.count,
@@ -101,6 +111,8 @@ export interface EligibilityOverview {
   evaluatedCount: number;
   /** Relevant employees outside the caller's scope: not evaluated for them, never named. */
   outOfScopeCount: number;
+  /** Visible employees with neither a territory covering the job's area nor a permission for its type: not candidates. */
+  notRelevantCount: number;
   /** True when the evaluation ceiling stopped the pass: the lists may be incomplete. */
   poolTruncated: boolean;
 }
@@ -120,6 +132,7 @@ export async function getEligibilityOverview(actor: Actor, jobId: string): Promi
       blocked: picture.blocked,
       evaluatedCount: picture.evaluatedCount,
       outOfScopeCount: picture.outOfScopeCount,
+      notRelevantCount: picture.notRelevantCount,
       poolTruncated: picture.poolTruncated,
     };
   });

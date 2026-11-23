@@ -49,6 +49,8 @@ export interface EligibilityPicture {
   evaluatedCount: number;
   /** Relevant employees (territory or permission match) the caller may not see: counted, never named, never judged for the caller. */
   outOfScopeCount: number;
+  /** Employees the caller may see (not terminated, not on the job) with NEITHER a territory covering the job's area NOR a permission for its type: not candidates, counted so an empty result explains itself. */
+  notRelevantCount: number;
   /** True when `MAX_EVALUATED` stopped the pass: the lists may be incomplete. */
   poolTruncated: boolean;
 }
@@ -132,7 +134,12 @@ export async function buildEligibilityPicture(
     ],
   };
   const visible = await scopeFilterInTx(tx, actor, "employees.view", employeeScopeColumns);
-  const outOfScopeCount = await tx.employee.count({ where: { AND: [relevant, { NOT: visible }] } });
+  // relevant minus visible-and-relevant: a tenant-wide scope is the empty filter `{}`, so `NOT: visible` would match nobody-or-everybody.
+  const relevantInScope = await tx.employee.count({ where: { AND: [relevant, visible] } });
+  const outOfScopeCount = (await tx.employee.count({ where: relevant })) - relevantInScope;
+  const notRelevantCount = await tx.employee.count({
+    where: { AND: [visible, { tenantId, status: { not: "TERMINATED" }, id: { notIn: alreadyAssignedEmployeeIds }, NOT: { OR: relevant.OR as Prisma.EmployeeWhereInput[] } }] },
+  });
 
   const { requirements, timeZone } = await requirementsFromInputs(tx, tenantId, await getJobEligibilityInputs(tx, tenantId, jobId));
   const eligibleEmployeeIds: string[] = [];
@@ -169,7 +176,7 @@ export async function buildEligibilityPicture(
       break;
     }
   }
-  return { job, eligibleEmployeeIds, blocked, alreadyAssignedEmployeeIds, evaluatedCount, outOfScopeCount, poolTruncated };
+  return { job, eligibleEmployeeIds, blocked, alreadyAssignedEmployeeIds, evaluatedCount, outOfScopeCount, notRelevantCount, poolTruncated };
 }
 
 /** Where each employee starts from: their own start point, else the coordinates of their current primary unit. */

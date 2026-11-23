@@ -40,11 +40,24 @@ async function claimPending(tx: TenantTx, actor: Actor, recommendationId: string
   return row;
 }
 
-/** Any assignment of the job created or ended since the recommendation was generated makes it stale. */
+/**
+ * The job's assignments differ from what they were when the recommendation was generated: a row that did not exist, or one
+ * that was ACTIVE and no longer is. Compared by ids against the snapshot taken under the job lock (no clocks involved);
+ * recommendations stored before snapshots existed fall back to comparing timestamps.
+ */
 async function assertNotStale(tx: TenantTx, tenantId: string, row: DispatchRecommendation): Promise<void> {
-  const changed = await tx.jobAssignment.count({
-    where: { tenantId, jobId: row.jobId, OR: [{ assignedAt: { gt: row.generatedAt } }, { endedAt: { gt: row.generatedAt } }] },
-  });
+  const snapshot = storedCandidates(row).assignmentSnapshot;
+  let changed: number;
+  if (snapshot) {
+    const rows = await tx.jobAssignment.findMany({ where: { tenantId, jobId: row.jobId }, select: { id: true, state: true } });
+    const known = new Set(snapshot.all);
+    const wasActive = new Set(snapshot.active);
+    changed = rows.filter((entry) => !known.has(entry.id) || (wasActive.has(entry.id) && entry.state !== "ACTIVE")).length;
+  } else {
+    changed = await tx.jobAssignment.count({
+      where: { tenantId, jobId: row.jobId, OR: [{ assignedAt: { gt: row.generatedAt } }, { endedAt: { gt: row.generatedAt } }] },
+    });
+  }
   if (changed > 0) {
     throw new ConflictError({
       message: "The job's assignment changed after this recommendation was generated. Generate a new recommendation and decide again.",
@@ -118,7 +131,15 @@ async function accept(
  */
 export async function approveRecommendation(actor: Actor, ctx: RequestContext, recommendationId: string, input: ApproveRecommendationInput): Promise<RecommendationView> {
   return accept(actor, ctx, recommendationId, { decision: "APPROVED", reason: input.reason, override: undefined }, (row, visible) => {
-    const top = storedCandidates(row).ranked[0];
+    const stored = storedCandidates(row);
+    const top = stored.ranked[0];
+    if (!top && stored.poolTruncated) {
+      throw new ConflictError({
+        message: "The evaluation was incomplete (too many employees to judge in one pass), so nobody could be recommended. Narrow the search or assign by hand.",
+        field: "recommendation",
+        details: [{ field: "recommendation", code: "EVALUATION_INCOMPLETE", message: "Evaluation incomplete." }],
+      });
+    }
     if (!top) throw new ConflictError({ message: "There is no eligible technician to approve. Fix the blocking reasons or assign by hand." });
     if (!visible.has(top.employeeId)) {
       throw new ConflictError({ message: "The recommended employee is outside your scope. Choose someone you can see, or generate a new recommendation." });

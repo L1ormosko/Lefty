@@ -450,6 +450,8 @@
     "DISPATCH.CONFLICT.HEAVY_WORKLOAD": "Este técnico ya tiene mucha carga de trabajo.",
     "DISPATCH.CONFLICT.DISTANCE_UNKNOWN": "No se pudo estimar la distancia: faltan coordenadas.",
     "DISPATCH.CONFLICT.FAR_FROM_JOB": "Este técnico está lejos del trabajo.",
+    "DISPATCH.EVALUATION_INCOMPLETE": "Evaluación incompleta: hay demasiados empleados para evaluar de una vez. Acote la búsqueda o asigne manualmente.",
+    "DISPATCH.STALE_RECOMMENDATION": "La asignación del trabajo cambió después de esta recomendación. Genere una nueva.",
     "SHELL.HOME_WELCOME": "Bienvenido, {name}",
     "SHELL.HOME_EMPTY_TITLE": "Aún no hay paneles",
     "SHELL.HOME_EMPTY_DESCRIPTION": "Los módulos operativos, como trabajos, despacho e informes, llegarán en fases posteriores. Mientras tanto, usa el menú de la cuenta para gestionar tus sesiones y tu seguridad.",

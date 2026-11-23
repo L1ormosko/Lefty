@@ -110,6 +110,13 @@ async function validateTarget(tx: TenantTx, actor: Actor, job: JobForChange, inp
   if (team.id !== job.orgUnitId && !(await orgUnitAncestry(tx, tenantId, team.id)).includes(job.orgUnitId)) {
     throw new ValidationError({ message: "The team is outside the job's service area.", field: "teamOrgUnitId" });
   }
+  // Every current member must be someone the caller may see (same rule as a single employee): assigning a team hands work to
+  // all of them. Out-of-scope members make the team indistinguishable from an unknown one (404).
+  const members = (await teamMembers(tx, tenantId, [team.id])).get(team.id) ?? [];
+  if (members.length > 0) {
+    const visible = await scopeFilterInTx(tx, actor, "employees.view", employeeScopeColumns);
+    if ((await tx.employee.count({ where: { AND: [visible, { tenantId, id: { in: members } }] } })) !== members.length) throw new NotFoundError();
+  }
   return { teamOrgUnitId: team.id };
 }
 
