@@ -10,7 +10,9 @@ Public API (`index.ts`):
 - **`recordOutcomeInTx(tx, actor, audit, jobId, input)`**: the domain work inside the caller's transaction, for the offline sync
   (Task 4), which wraps it in its own `FieldEvent` handling. Locks the job, checks `job_outcomes.create` over it, validates, stores the
   outcome, applies the job status through jobs' `changeJobStatus`, writes events + audit, publishes the domain event, notifies.
-- `correctJobOutcome` (`job_outcomes.edit`), `getJobOutcome`, `listJobOutcomes` (scope through the job).
+- `correctJobOutcome` (`job_outcomes.edit`; audits full previous/new values), `getOutcomeCorrections` (history; edit + financial set), `getJobOutcome`, `listJobOutcomes` (scope through the job).
+- Retroactive outcome: a job already past its visit (COMPLETED, FAILED, REQUIRES_RETURN_VISIT, AWAITING_REVIEW, CUSTOMER_UNAVAILABLE) takes one from a create OR edit holder with no status change, so it can close.
+- Amounts, currency and payment are the `financial` field set (`JOB_OUTCOME_FIELD_MAP`); the currency is always the job's.
 - Lost reasons: `listLostReasons`, `getLostReason`, `createLostReason`, `updateLostReason` (`job_outcomes.configure`, tenant-wide).
 - **Recovery contract** (Task 6): `onJobOutcomeRecorded(name, handler)` subscribes to `OutcomeRecordedEvent` (ids, enums, flags: outcome,
   `lostReasonId`, `lostReasonRecoverable`, `notConverted`, `customerRequestedFollowUp`, `jobStatus`); handlers run INSIDE the recording

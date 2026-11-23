@@ -9,6 +9,7 @@ import { POST as rescheduleRoute } from "@/app/api/v1/jobs/[id]/reschedule/route
 import { GET as getJobRoute } from "@/app/api/v1/jobs/[id]/route";
 import { POST as transitionRoute } from "@/app/api/v1/jobs/[id]/transition/route";
 import { PUT as workflowPut } from "@/app/api/v1/jobs/workflow-settings/route";
+import { GET as correctionsRoute } from "@/app/api/v1/job-outcomes/[id]/corrections/route";
 import { GET as getOutcomeRoute, PATCH as patchOutcomeRoute } from "@/app/api/v1/job-outcomes/[id]/route";
 import { GET as listOutcomesRoute } from "@/app/api/v1/job-outcomes/route";
 import { GET as getLostReasonRoute, PATCH as patchLostReasonRoute } from "@/app/api/v1/lost-reasons/[id]/route";
@@ -512,5 +513,99 @@ describe("lost reasons admin (§9.2)", () => {
     const outcome = await call(getOutcomeRoute, "GET", "/x", { cookie: w.cookie.cityManagerA, params: { id: outcomeId } });
     expect(outcome.json.data.lostReasonId).toBe(reasons.noNeed);
     await call(patchLostReasonRoute, "PATCH", "/x", { cookie: w.cookie.ceo, params: { id: reasons.noNeed }, body: { active: true } });
+  });
+});
+
+describe("fix round 1: money, corrections, currency, idempotency details", () => {
+  const getOutcome = (cookie: string, outcomeId: string) => call(getOutcomeRoute, "GET", "/x", { cookie, params: { id: outcomeId } });
+  const patchOutcome = (cookie: string, outcomeId: string, body: Record<string, unknown>) => call(patchOutcomeRoute, "PATCH", "/x", { cookie, params: { id: outcomeId }, body });
+
+  it("shows amounts and payment only with the financial set: Dispatcher sees the outcome, not the money", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const recorded = await record(w.cookie.techA1, job.id, { outcome: "SOLD", chargedAmountMinor: 7000, paymentMethod: "CASH", paymentStatus: "PENDING" });
+    expect(recorded.json.data.outcome).toMatchObject({ chargedAmountMinor: 7000, paymentStatus: "PENDING", currency: "USD" }); // the technician holds the set
+    const id = recorded.json.data.outcome.id;
+
+    const dispatcher = (await getOutcome(w.cookie.dispatcher, id)).json.data;
+    expect(dispatcher).toMatchObject({ id, outcome: "SOLD", visitNumber: 1 });
+    for (const field of ["chargedAmountMinor", "quotedAmountMinor", "approvedAmountMinor", "collectedAmountMinor", "currency", "paymentMethod", "paymentStatus"]) {
+      expect(dispatcher, field).not.toHaveProperty(field);
+    }
+    const listed = (await call(jobOutcomesRoute, "GET", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id } })).json.data[0];
+    expect(listed).not.toHaveProperty("chargedAmountMinor");
+    expect((await getOutcome(w.cookie.cityManagerA, id)).json.data.chargedAmountMinor).toBe(7000);
+    expect((await getOutcome(w.cookie.finance, id)).json.data).toMatchObject({ chargedAmountMinor: 7000 });
+  });
+
+  it("keeps the original amount retrievable after a correction (history in the audit row, financial set required)", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const id = (await record(w.cookie.techA1, job.id, { outcome: "SOLD", chargedAmountMinor: 45000, paymentMethod: "CARD", paymentStatus: "PENDING" })).json.data.outcome.id;
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Wrong total", chargedAmountMinor: 54000 })).json.data.chargedAmountMinor).toBe(54000);
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Paid in full", chargedAmountMinor: 54000, collectedAmountMinor: 54000, paymentStatus: "PAID" })).status).toBe(200);
+
+    const history = await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.cityManagerA, params: { id } });
+    expect(history.status).toBe(200);
+    expect(history.json.data).toHaveLength(2);
+    expect(history.json.data[0]).toMatchObject({ reason: "Wrong total", changedFields: ["chargedAmountMinor"], previous: { chargedAmountMinor: 45000 }, next: { chargedAmountMinor: 54000 } });
+    expect(history.json.data[1]).toMatchObject({ reason: "Paid in full", previous: { collectedAmountMinor: null, paymentStatus: "PENDING" }, next: { collectedAmountMinor: 54000, paymentStatus: "PAID" } });
+
+    expect((await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.techA1, params: { id } })).status).toBe(403); // no edit
+    expect((await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.dispatcher, params: { id } })).status).toBe(403);
+    expect((await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.cityManagerB, params: { id } })).status).toBe(404);
+  });
+
+  it("holds the outcome currency to the job's currency, on recording and on correction", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const refused = await record(w.cookie.techA1, job.id, { outcome: "SOLD", currency: "EUR", chargedAmountMinor: 100 });
+    expect(refused.status).toBe(400);
+    expect(refused.json.error.details[0].code).toBe("job_outcome.currency_mismatch");
+    const id = (await record(w.cookie.techA1, job.id, { outcome: "SOLD", currency: "USD", chargedAmountMinor: 100 })).json.data.outcome.id;
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "EUR", chargedAmountMinor: 200 })).json.error.details[0].code).toBe("job_outcome.currency_mismatch");
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "USD" })).json.error.details[0].code).toBe("job_outcome.currency_alone");
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "USD", chargedAmountMinor: 200 })).json.data.chargedAmountMinor).toBe(200);
+  });
+
+  it("treats an omitted default and the same value sent explicitly as the same submission", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const clientEventId = randomUUID();
+    const first = await record(w.cookie.techA1, job.id, { outcome: "SOLD", clientEventId });
+    const again = await record(w.cookie.techA1, job.id, { outcome: "SOLD", clientEventId, currency: "usd", paymentStatus: "NOT_APPLICABLE", customerRequestedFollowUp: false });
+    expect(first.status).toBe(201);
+    expect(again.status).toBe(200);
+    expect(again.json.data.replayed).toBe(true);
+  });
+
+  it("re-checks permission on a replay: after the job closed the technician no longer reaches it", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const body = { outcome: "SOLD", clientEventId: randomUUID() };
+    expect((await record(w.cookie.techA1, job.id, body)).status).toBe(201);
+    expect((await move(w.cookie.dispatcher, job.id, "CLOSED")).status).toBe(200);
+    expect([403, 404]).toContain((await record(w.cookie.techA1, job.id, body)).status);
+  });
+
+  it("refuses a time before the visit started", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const response = await record(w.cookie.techA1, job.id, { outcome: "SOLD", occurredAt: new Date(Date.now() - 30 * 86_400_000).toISOString() });
+    expect(response.status).toBe(400);
+    expect(response.json.error.details[0].code).toBe("job_outcome.occurred_too_early");
+  });
+
+  it("serializes two copies of one submission arriving together (one 201, one replay) and answers 409, not 500, when one id hits two jobs at once", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const body = { outcome: "SOLD", clientEventId: randomUUID() };
+    const pair = await Promise.all([record(w.cookie.techA1, job.id, body), record(w.cookie.techA1, job.id, body)]);
+    expect(pair.map((response) => response.status).sort()).toEqual([200, 201]);
+    expect(await withTenant(w.tenantId, (tx) => tx.jobOutcome.count({ where: { jobId: job.id } }))).toBe(1);
+
+    const jobOne = await jobAt("IN_PROGRESS");
+    const jobTwo = await jobAt("IN_PROGRESS");
+    const sharedId = randomUUID();
+    const race = await Promise.all([
+      record(w.cookie.techA1, jobOne.id, { outcome: "SOLD", clientEventId: sharedId }),
+      record(w.cookie.techA1, jobTwo.id, { outcome: "SOLD", clientEventId: sharedId }),
+    ]);
+    expect(race.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(await withTenant(w.tenantId, (tx) => tx.fieldEvent.count({ where: { clientEventId: sharedId } }))).toBe(1);
+    expect(race.find((response) => response.status === 409)?.json.error.code).toBe("CONFLICT");
   });
 });

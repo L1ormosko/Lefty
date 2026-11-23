@@ -1914,7 +1914,7 @@ Permissions are checked over the job's service area; a job outside the caller's 
 Code: `src/server/job-outcomes` (README there), pure rules `src/lib/job-outcome-rules.ts`, routes `src/app/api/v1/{job-outcomes,lost-reasons}/**`
 and `src/app/api/v1/jobs/{id}/outcome(s)`. Spec 9.1, 9.2. Design decisions: `DECISIONS.md` "Phase 3 Task 5".
 
-Outcome fields (all `base`; outcomes have no sensitive set): `id, jobId, visitNumber, employeeId, outcome (SOLD | NOT_SOLD |
+Outcome fields: `base` = `id, jobId, visitNumber, employeeId, outcome, lostReasonId, notes, customerRequestedFollowUp, preferredFollowUpAt, occurredAt, recordedAt, recordedById, clientEventId`; the opt-in `financial` set (`job_outcomes.financial_fields`: Owner, COO, State/Regional/City managers, the Technician, Finance Director) = `quotedAmountMinor, approvedAmountMinor, chargedAmountMinor, collectedAmountMinor, currency, paymentMethod, paymentStatus` (Dispatcher, Team Leader and Lead Operations see the outcome without them). Complete list: `id, jobId, visitNumber, employeeId, outcome (SOLD | NOT_SOLD |
 CUSTOMER_UNAVAILABLE | RESCHEDULE_REQUIRED | WORK_NOT_POSSIBLE | ADDITIONAL_APPROVAL_REQUIRED; labels OUTCOME.TYPE.<value>), lostReasonId,
 notes, quotedAmountMinor, approvedAmountMinor, chargedAmountMinor, collectedAmountMinor (integer minor units, never floats), currency,
 paymentMethod (CASH | CARD | CHECK | BANK_TRANSFER | FINANCING | OTHER), paymentStatus (NOT_APPLICABLE | PENDING | PARTIAL | PAID | WAIVED |
@@ -1925,7 +1925,9 @@ Outcome > job status (always a direct lifecycle edge; a refused one is `409 INVA
 from ARRIVED or IN_PROGRESS > FAILED; `CUSTOMER_UNAVAILABLE` from EN_ROUTE or ARRIVED > CUSTOMER_UNAVAILABLE; `RESCHEDULE_REQUIRED` from EN_ROUTE
 or ARRIVED > RESCHEDULED. A job cannot move to CLOSED until the outcome of its current visit exists (`409`, detail code `job.outcome_required`;
 this applies to `POST /jobs/{id}/transition` too). `Job.currentVisitNumber` (returned with the job) moves to the next number when a job whose
-current visit has an outcome leaves REQUIRES_RETURN_VISIT / RESCHEDULED / CUSTOMER_UNAVAILABLE / FAILED for PENDING_ASSIGNMENT, ASSIGNED or SCHEDULED.
+current visit already has an outcome goes EN_ROUTE (or ARRIVED / IN_PROGRESS directly), whatever path it took there (holds, back to the pool...). A reviewer sending work back (AWAITING_REVIEW > IN_PROGRESS) is the same visit.
+
+**Retroactive outcomes**: a job already past its visit (COMPLETED, FAILED, REQUIRES_RETURN_VISIT, AWAITING_REVIEW, CUSTOMER_UNAVAILABLE, e.g. moved by hand) whose current visit has no outcome takes one without any status change, from a holder of `job_outcomes.create` OR `job_outcomes.edit` over the job (managers). It is audited and evented as `retroactive`. Reporting a LIVE visit stays with `create` holders (edit-only = `403`). The outcome currency must equal the job's (`job_outcome.currency_mismatch`); `occurredAt` cannot predate the visit start (`job_outcome.occurred_too_early`).
 
 Validation failures are `400 VALIDATION_FAILED` with `details[{ field, code, message }]`; clients translate by `code` (`OUTCOME.ERROR.*`):
 `job_outcome.lost_reason_required` (NOT_SOLD, WORK_NOT_POSSIBLE), `.lost_reason_not_allowed` (SOLD), `.lost_reason_unknown` (missing, other tenant or
@@ -1936,7 +1938,7 @@ collected amounts and a payment belong to SOLD; the quote may accompany any outc
 ### POST /api/v1/jobs/{id}/outcome
 
 - **Purpose**: report the outcome of the job's current visit; the job follows it through its lifecycle in the same transaction.
-- **Auth**: session. **Permission**: `job_outcomes.create` over the job (Technician: ASSIGNED; Owner / COO tenant-wide). No capability = `403`; out of scope = `404`.
+- **Auth**: session. **Permission**: `job_outcomes.create` over the job (Technician: ASSIGNED; Owner / COO tenant-wide), or `job_outcomes.edit` for a retroactive outcome. Out of scope = `404`, neither held = `403`. Sending amounts or payment needs the `financial` set (`403` otherwise); the response shows only the fields the caller's sets cover.
 - **Request body** (strict): `outcome` required; `lostReasonId`, `notes` (<= 4000), `quotedAmountMinor`, `approvedAmountMinor`, `chargedAmountMinor`,
   `collectedAmountMinor`, `currency` (default the job's), `paymentMethod`, `paymentStatus`, `customerRequestedFollowUp`, `preferredFollowUpAt`;
   offline envelope `clientEventId` (UUID) and `occurredAt` (device time, ISO).
@@ -1969,7 +1971,12 @@ collected amounts and a payment belong to SOLD; the quote may accompany any outc
 - **Permission**: `job_outcomes.edit` over the job (managers; the technician who reported it cannot correct: `403`).
 - **Request body** (strict): `reason` (required, kept in the audit trail) plus at least one field; `null` clears a nullable value. The reason / money / payment rules
   of recording apply to the result.
-- **Response**: `200 { data: outcome }`. **Audit**: `job_outcome.correct` (changed field names + reason); job event `job.outcome_corrected`.
+- **Response**: `200 { data: outcome }`. Changing amounts or payment needs the `financial` set (`403`); the currency must be the job's and cannot be corrected alone (`400`). **Audit**: `job_outcome.correct` with the FULL previous and new value of every changed field + reason (financial history, §25.4); job event `job.outcome_corrected`.
+
+### GET /api/v1/job-outcomes/{id}/corrections
+
+- **Purpose**: the correction history of an outcome, oldest first: `[{ at, byUserId, reason, changedFields, previous, next }]` (previous / new values of the changed fields), so an overwritten amount stays retrievable.
+- **Permission**: `job_outcomes.edit` over the job AND the `financial` set (`403` without either; `404` outside scope). **Response**: `200 { data: [correction] }`.
 
 ### GET /api/v1/lost-reasons
 
