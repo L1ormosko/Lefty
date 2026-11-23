@@ -7,6 +7,7 @@ import {
   transitionProblem,
   type JobStatusValue,
 } from "@/lib/job-lifecycle";
+import { VISIT_START_STATUSES } from "@/lib/job-outcome-rules";
 import { auditContextFields, recordAudit, type AuditContextFields } from "@/server/audit";
 import { JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS, assertWritableFields, enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
@@ -73,13 +74,6 @@ export async function loadJobForChange(tx: TenantTx, tenantId: string, jobId: st
   return { ...job, requiresReview: jobType.requiresReview };
 }
 
-/**
- * A job in one of these statuses has had a visit reported and is waiting for another; moving it on to
- * work that can start a new visit (back to the pool, assigned, or scheduled) opens the next visit number.
- */
-const NEW_VISIT_SOURCE_STATUSES: readonly JobStatusValue[] = ["REQUIRES_RETURN_VISIT", "RESCHEDULED", "CUSTOMER_UNAVAILABLE", "FAILED"];
-const NEW_VISIT_TARGET_STATUSES: readonly JobStatusValue[] = ["PENDING_ASSIGNMENT", "ASSIGNED", "SCHEDULED"];
-
 export interface StatusChangeOptions {
   reason?: string | null;
   /** The change is an automatic consequence (no person decided it): the trail records the system as actor. */
@@ -128,7 +122,9 @@ export async function changeJobStatus(
   if (problem) throw new InvalidStateTransitionError({ message: problem.message });
 
   // §9.1: a job cannot close without the outcome of its current visit (the visit was reported or it never happened).
-  const startsNextVisit = NEW_VISIT_SOURCE_STATUSES.includes(job.status) && NEW_VISIT_TARGET_STATUSES.includes(to);
+  // One rule for every path (reschedule, hold, back to the pool...): a visit starts when the technician is on the way again.
+  // A reviewer sending finished work back (AWAITING_REVIEW > IN_PROGRESS) is rework of the SAME visit, not a new one.
+  const startsNextVisit = VISIT_START_STATUSES.includes(to) && job.status !== "AWAITING_REVIEW" && !VISIT_START_STATUSES.includes(job.status);
   const currentVisitHasOutcome =
     (to === "CLOSED" || startsNextVisit) && (await tx.jobOutcome.count({ where: { tenantId, jobId: job.id, visitNumber: job.currentVisitNumber } })) > 0;
   if (to === "CLOSED" && !currentVisitHasOutcome) {
@@ -159,8 +155,7 @@ export async function changeJobStatus(
     data.scheduledStartAt = null;
     data.scheduledEndAt = null;
   }
-  // A job that leaves a reported visit toward new work starts its next visit: the old outcome stays with visit N,
-  // the next outcome is visit N + 1 (unique per job and visit). Done here so no other path can forget it.
+  // The old outcome stays with visit N, the next one is visit N + 1 (unique per job and visit).
   if (startsNextVisit && currentVisitHasOutcome) {
     data.currentVisitNumber = { increment: 1 };
   }

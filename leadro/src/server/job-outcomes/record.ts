@@ -1,11 +1,21 @@
-import { NOT_CONVERTED_OUTCOMES, outcomeProblem, outcomeTargetStatus, type JobOutcomeTypeValue } from "@/lib/job-outcome-rules";
+import { NOT_CONVERTED_OUTCOMES, RETROACTIVE_OUTCOME_STATUSES, outcomeProblem, outcomeTargetStatus, type JobOutcomeTypeValue } from "@/lib/job-outcome-rules";
 import { auditContextFields, recordAudit, type AuditContextFields } from "@/server/audit";
-import { enforceInTx, projectFields } from "@/server/authz";
-import { ConflictError, InvalidStateTransitionError, NotFoundError, ValidationError, hashIdempotentRequest, type Actor, type RequestContext } from "@/server/core";
+import { canInTx, enforceInTx, projectFields, type AccessDecision, type ResourceRef } from "@/server/authz";
+import {
+  ConflictError,
+  ForbiddenError,
+  InvalidStateTransitionError,
+  NotFoundError,
+  ValidationError,
+  conflictOnUniqueViolation,
+  hashIdempotentRequest,
+  type Actor,
+  type RequestContext,
+} from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { changeJobStatus, jobResourceRef, loadJobForChange, recordJobEvent } from "@/server/jobs";
 import { deliverAfterCommit } from "@/server/notifications";
-import { OUTCOME_FIELD_MAP, outcomeRowSelect, type OutcomeRow } from "./fields";
+import { OUTCOME_FIELD_MAP, OUTCOME_FINANCIAL_KEYS, outcomeRowSelect, type OutcomeRow } from "./fields";
 import { publishOutcomeRecorded } from "./events";
 import { notifyNotConverted } from "./notify";
 import type { RecordOutcomeInput } from "./schemas";
@@ -15,6 +25,9 @@ import type { RecordOutcomeInput } from "./schemas";
  * job along the lifecycle (`OUTCOME_STATUS_RULES`), writes the job's events (`job.outcome_recorded`, plus
  * `job.not_converted` for unsuccessful visits), an audit row, tells the managers about a lost visit and
  * publishes the domain event the recovery engine subscribes to. All of it is one transaction.
+ *
+ * A job already past its visit (completed or failed by hand, awaiting review...) takes a RETROACTIVE outcome:
+ * same record, audited as retroactive, no status change; otherwise such a job could never close.
  */
 
 /** How far into the future a device clock may be before `occurredAt` is refused (clock drift, not a time machine). */
@@ -27,16 +40,20 @@ export interface RecordedOutcome {
   replayed: boolean;
 }
 
-interface InTxResult {
+export interface RecordOutcomeInTxResult {
   outcomeId: string;
   replayed: boolean;
+  /** Stored after the fact (the job was already past its visit): the job status did not change. */
+  retroactive: boolean;
+  /** The caller's `job_outcomes` decision over the job: which field sets a response may show. */
+  decision: AccessDecision;
   notificationIds: string[];
 }
 
 const refusal = (field: string, code: string, message: string): ValidationError =>
   new ValidationError({ message, field, details: [{ field, code, message }] });
 
-/** The lost reason must exist, be active and apply to the outcome. Returns its `recoverable` flag. */
+/** The lost reason must exist, be active and apply to the outcome. */
 async function checkLostReason(tx: TenantTx, tenantId: string, lostReasonId: string, outcome: JobOutcomeTypeValue): Promise<{ id: string; code: string; recoverable: boolean }> {
   const reason = await tx.lostReason.findFirst({ where: { id: lostReasonId, tenantId }, select: { id: true, code: true, recoverable: true, active: true, appliesTo: true } });
   if (!reason || !reason.active) throw refusal("lostReasonId", "job_outcome.lost_reason_unknown", "Choose an active lost reason.");
@@ -60,28 +77,58 @@ function assertConsistent(input: RecordOutcomeInput): void {
 }
 
 /**
+ * Who may record: `job_outcomes.create` over the job (the technician, tenant-wide Owner / COO). Holders of only
+ * `job_outcomes.edit` (managers) may record a RETROACTIVE outcome, so a hand-moved job can still close; `mayCreate`
+ * tells the caller which of the two it got. Throws the usual 403 / 404 when neither is held.
+ */
+async function authorizeRecording(tx: TenantTx, actor: Actor, resource: ResourceRef): Promise<{ decision: AccessDecision; mayCreate: boolean }> {
+  const create = await canInTx(tx, actor, "job_outcomes.create", resource);
+  if (create.allowed) return { decision: create, mayCreate: true };
+  const edit = await canInTx(tx, actor, "job_outcomes.edit", resource);
+  if (edit.allowed) return { decision: edit, mayCreate: false };
+  await enforceInTx(tx, actor, "job_outcomes.create", resource); // throws, and audits the denial
+  throw new ForbiddenError();
+}
+
+/** Sending money or payment needs the `financial` field set (like `jobs.financial_fields`). */
+function assertMayWriteMoney(decision: AccessDecision, input: RecordOutcomeInput): void {
+  const sent = Object.entries(input)
+    .filter(([key, value]) => value !== undefined && OUTCOME_FINANCIAL_KEYS.includes(key))
+    .map(([key]) => key);
+  if (sent.length > 0 && !decision.fieldSets.includes("financial")) {
+    throw new ForbiddenError({ message: "Your access does not include outcome amounts or payment.", field: sent[0] });
+  }
+}
+
+/**
  * The domain work of recording an outcome, inside the caller's transaction (the API and the offline
  * sync both call it). The caller has NOT locked anything: this locks the job first. Authorization is
- * `job_outcomes.create` over the job.
+ * `job_outcomes.create` over the job (`edit` alone suffices for a retroactive outcome).
  *
  * Replays: when `input.clientEventId` already recorded an outcome for this job, that outcome is returned
  * (`replayed: true`) and nothing is written. A second, different outcome for the same visit is a 409.
  *
- * @returns the outcome id, whether it was a replay, and the notification ids to deliver after commit.
+ * @returns the outcome id, flags, the caller's decision (for projecting the response) and the notification ids to deliver after commit.
  */
-export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: AuditContextFields, jobId: string, input: RecordOutcomeInput): Promise<InTxResult> {
+export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: AuditContextFields, jobId: string, input: RecordOutcomeInput): Promise<RecordOutcomeInTxResult> {
   const tenantId = actor.tenantId;
   const job = await loadJobForChange(tx, tenantId, jobId); // locks the row: concurrent submissions queue up here
   const resource = await jobResourceRef(tx, tenantId, jobId);
   if (!resource) throw new NotFoundError();
-  await enforceInTx(tx, actor, "job_outcomes.create", resource);
+  const { decision, mayCreate } = await authorizeRecording(tx, actor, resource);
+  assertMayWriteMoney(decision, input);
 
   if (input.clientEventId) {
     const replay = await tx.jobOutcome.findFirst({ where: { tenantId, jobId, clientEventId: input.clientEventId }, select: { id: true } });
-    if (replay) return { outcomeId: replay.id, replayed: true, notificationIds: [] };
+    if (replay) return { outcomeId: replay.id, replayed: true, retroactive: false, decision, notificationIds: [] };
   }
+  const jobFacts = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId }, select: { currency: true, number: true, createdAt: true } });
   const occurredAt = input.occurredAt ?? new Date();
   if (occurredAt.getTime() > Date.now() + MAX_CLOCK_SKEW_MS) throw refusal("occurredAt", "job_outcome.occurred_in_future", "The time of the outcome cannot be in the future.");
+  // The outcome cannot predate the visit it reports: the work start when there was one, else the job itself.
+  const earliest = job.startedAt ?? jobFacts.createdAt;
+  if (occurredAt.getTime() < earliest.getTime()) throw refusal("occurredAt", "job_outcome.occurred_too_early", "The time of the outcome cannot be before the visit started.");
+  if (input.currency && input.currency !== jobFacts.currency) throw refusal("currency", "job_outcome.currency_mismatch", "The outcome currency must be the job's currency.");
 
   const existing = await tx.jobOutcome.findFirst({ where: { tenantId, jobId, visitNumber: job.currentVisitNumber }, select: { id: true } });
   if (existing) {
@@ -90,17 +137,19 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
       details: [{ field: "outcome", code: "job_outcome.already_recorded", message: "An outcome was already recorded for this visit." }],
     });
   }
-  const targetStatus = outcomeTargetStatus(input.outcome, job.status);
-  if (!targetStatus) {
+  const normalTarget = outcomeTargetStatus(input.outcome, job.status);
+  const retroactive = normalTarget === null && RETROACTIVE_OUTCOME_STATUSES.includes(job.status);
+  if (!normalTarget && !retroactive) {
     throw new InvalidStateTransitionError({
       message: `The outcome ${input.outcome} cannot be reported while the job is ${job.status}.`,
       details: [{ field: "outcome", code: "job_outcome.not_reportable", message: `The outcome ${input.outcome} cannot be reported while the job is ${job.status}.` }],
     });
   }
+  // Edit-only holders (managers) record after the fact; reporting a live visit is the technician's / `create` holder's act.
+  if (normalTarget && !mayCreate) throw new ForbiddenError({ message: "Only the person who works the visit can report its outcome." });
 
   assertConsistent(input);
   const lostReason = input.lostReasonId ? await checkLostReason(tx, tenantId, input.lostReasonId, input.outcome) : null;
-  const jobFacts = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId }, select: { currency: true, number: true } });
 
   const created = await tx.jobOutcome.create({
     data: {
@@ -115,7 +164,7 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
       approvedAmountMinor: input.approvedAmountMinor ?? null,
       chargedAmountMinor: input.chargedAmountMinor ?? null,
       collectedAmountMinor: input.collectedAmountMinor ?? null,
-      currency: input.currency ?? jobFacts.currency,
+      currency: jobFacts.currency,
       paymentMethod: input.paymentMethod ?? null,
       paymentStatus: input.paymentStatus ?? "NOT_APPLICABLE",
       customerRequestedFollowUp: input.customerRequestedFollowUp ?? false,
@@ -127,22 +176,27 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
     select: { id: true },
   });
 
-  // The job follows the outcome through its own lifecycle (guards, tenant narrowing, history). The status reason names the outcome, not free text.
+  // The job follows the outcome through its own lifecycle (guards, tenant narrowing, history); the status reason names the outcome, not free text.
+  // Retroactive: the job is already where it should be (or a reviewer holds it); only the missing record is added.
   const statusReason = `Outcome ${input.outcome}${lostReason ? ` (${lostReason.code})` : ""}`;
-  const change = await changeJobStatus(tx, actor, audit, job, targetStatus, { reason: statusReason });
+  const change = normalTarget ? await changeJobStatus(tx, actor, audit, job, normalTarget, { reason: statusReason }) : { from: job.status, to: job.status };
 
   const notConverted = NOT_CONVERTED_OUTCOMES.includes(input.outcome);
   const customerRequestedFollowUp = input.customerRequestedFollowUp ?? false;
-  const eventPayload = {
-    outcomeId: created.id,
-    outcome: input.outcome,
-    visitNumber: job.currentVisitNumber,
-    lostReasonId: lostReason?.id ?? null,
-    customerRequestedFollowUp,
-    fromStatus: change.from,
-    toStatus: change.to,
-  };
-  await recordJobEvent(tx, tenantId, jobId, { type: "job.outcome_recorded", actor, payload: eventPayload });
+  await recordJobEvent(tx, tenantId, jobId, {
+    type: "job.outcome_recorded",
+    actor,
+    payload: {
+      outcomeId: created.id,
+      outcome: input.outcome,
+      visitNumber: job.currentVisitNumber,
+      lostReasonId: lostReason?.id ?? null,
+      customerRequestedFollowUp,
+      fromStatus: change.from,
+      toStatus: change.to,
+      retroactive,
+    },
+  });
   if (notConverted) {
     await recordJobEvent(tx, tenantId, jobId, {
       type: "job.not_converted",
@@ -150,14 +204,15 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
       payload: { outcomeId: created.id, outcome: input.outcome, lostReasonId: lostReason?.id ?? null, recoverable: lostReason?.recoverable ?? null },
     });
   }
-  // Money is audited by field NAME only (the amounts live in the outcome row, readable by those who may view it).
+  // Money is audited by field NAME only (the amounts live in the outcome row, readable by those who may view them).
   const moneyFields = (["quotedAmountMinor", "approvedAmountMinor", "chargedAmountMinor", "collectedAmountMinor"] as const).filter((field) => input[field] !== undefined);
   await recordAudit(tx, {
     ...audit,
     action: "job_outcome.record",
     targetType: "JobOutcome",
     targetId: created.id,
-    newValue: { jobId, outcome: input.outcome, visitNumber: job.currentVisitNumber, lostReasonId: lostReason?.id ?? null, moneyFields },
+    newValue: { jobId, outcome: input.outcome, visitNumber: job.currentVisitNumber, lostReasonId: lostReason?.id ?? null, moneyFields, retroactive },
+    reason: retroactive ? "Retroactive outcome: the job was already past its visit" : undefined,
   });
 
   await publishOutcomeRecorded(tx, {
@@ -170,17 +225,40 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
     lostReasonRecoverable: lostReason?.recoverable ?? null,
     notConverted,
     customerRequestedFollowUp,
+    retroactive,
     jobStatus: change.to,
   });
   const notificationIds = notConverted ? await notifyNotConverted(tx, actor, { id: jobId, number: jobFacts.number, orgUnitId: job.orgUnitId }, created.id) : [];
-  return { outcomeId: created.id, replayed: false, notificationIds };
+  return { outcomeId: created.id, replayed: false, retroactive, decision, notificationIds };
 }
 
-async function viewRecorded(tx: TenantTx, actor: Actor, outcomeId: string, replayed: boolean): Promise<RecordedOutcome> {
+async function viewRecorded(tx: TenantTx, actor: Actor, outcomeId: string, decision: AccessDecision, replayed: boolean): Promise<RecordedOutcome> {
   const row: OutcomeRow = await tx.jobOutcome.findFirstOrThrow({ where: { id: outcomeId, tenantId: actor.tenantId }, select: outcomeRowSelect });
   const job = await tx.job.findFirstOrThrow({ where: { id: row.jobId, tenantId: actor.tenantId }, select: { id: true, status: true, currentVisitNumber: true } });
-  // The caller just proved `job_outcomes.create` over the job; the response shows the base fields they wrote.
-  return { outcome: projectFields(row, { allowed: true, fieldSets: ["base"] }, OUTCOME_FIELD_MAP), job, replayed };
+  // Money shows only when the caller's grant names the financial set.
+  return { outcome: projectFields(row, decision, OUTCOME_FIELD_MAP), job, replayed };
+}
+
+/**
+ * The submission as it will be stored (defaults applied), so a client that omits a default and one that sends it explicitly hash the same.
+ * `occurredAt` stays out when omitted (it defaults to "now", which differs per call).
+ */
+function normalizedSubmission(input: RecordOutcomeInput, jobCurrency: string): Record<string, unknown> {
+  return {
+    outcome: input.outcome,
+    lostReasonId: input.lostReasonId ?? null,
+    notes: input.notes ?? null,
+    quotedAmountMinor: input.quotedAmountMinor ?? null,
+    approvedAmountMinor: input.approvedAmountMinor ?? null,
+    chargedAmountMinor: input.chargedAmountMinor ?? null,
+    collectedAmountMinor: input.collectedAmountMinor ?? null,
+    currency: input.currency ?? jobCurrency,
+    paymentMethod: input.paymentMethod ?? null,
+    paymentStatus: input.paymentStatus ?? "NOT_APPLICABLE",
+    customerRequestedFollowUp: input.customerRequestedFollowUp ?? false,
+    preferredFollowUpAt: input.preferredFollowUpAt?.toISOString() ?? null,
+    occurredAt: input.occurredAt?.toISOString() ?? null,
+  };
 }
 
 /**
@@ -189,55 +267,63 @@ async function viewRecorded(tx: TenantTx, actor: Actor, outcomeId: string, repla
  * Offline envelope (§8.7, §25.3): with a `clientEventId` and an employee actor, the submission is stored as a
  * `FieldEvent` (idempotent per tenant, employee and id). Sending the same id with the same content again returns
  * the original result with `replayed: true`; the same id with DIFFERENT content is a 409 (the device is confused,
- * and silently picking one would hide data).
+ * and silently picking one would hide data). Two copies arriving at once are serialized by the job lock; the same
+ * id used on two different jobs at once loses at the unique key and also answers 409.
  */
 export async function recordJobOutcome(actor: Actor, ctx: RequestContext, jobId: string, input: RecordOutcomeInput): Promise<RecordedOutcome> {
   const notificationIds: string[] = [];
-  const result = await withTenant(actor.tenantId, async (tx) => {
-    const gate = input.clientEventId && actor.employeeId ? { clientEventId: input.clientEventId, employeeId: actor.employeeId } : null;
-    // The payload hash covers the whole submission, so a different body under the same id is detectable.
-    const payloadHash = hashIdempotentRequest({ actorUserId: gate?.employeeId ?? actor.userId, method: "JOB_OUTCOME", path: jobId, body: JSON.parse(JSON.stringify(input)) });
+  const result = await conflictOnUniqueViolation("This clientEventId was already used for a different submission.", () =>
+    withTenant(actor.tenantId, async (tx) => {
+      const gate = input.clientEventId && actor.employeeId ? { clientEventId: input.clientEventId, employeeId: actor.employeeId } : null;
 
-    if (gate) {
-      // Lock the job first so two copies of one submission arriving together are serialized, then judge by the stored event.
-      await loadJobForChange(tx, actor.tenantId, jobId);
-      const earlier = await tx.fieldEvent.findFirst({
-        where: { tenantId: actor.tenantId, employeeId: gate.employeeId, clientEventId: gate.clientEventId },
-        select: { payloadHash: true, entityId: true, result: true },
-      });
-      if (earlier) {
-        if (earlier.payloadHash !== payloadHash || earlier.result !== "ACCEPTED" || !earlier.entityId) {
-          throw new ConflictError({
-            message: "This clientEventId was already used for a different submission.",
-            details: [{ field: "clientEventId", code: "field_event.payload_mismatch", message: "This clientEventId was already used for a different submission." }],
-          });
+      if (gate) {
+        // Lock the job first so two copies of one submission arriving together are serialized, then judge by the stored event.
+        await loadJobForChange(tx, actor.tenantId, jobId);
+        const earlier = await tx.fieldEvent.findFirst({
+          where: { tenantId: actor.tenantId, employeeId: gate.employeeId, clientEventId: gate.clientEventId },
+          select: { payloadHash: true, entityId: true, result: true, jobId: true },
+        });
+        if (earlier) {
+          // A replay is still a read of the outcome: the caller must hold the permission over the job NOW.
+          const resource = await jobResourceRef(tx, actor.tenantId, jobId);
+          if (!resource) throw new NotFoundError();
+          const { decision } = await authorizeRecording(tx, actor, resource);
+          const jobCurrency = (await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } })).currency;
+          const payloadHash = hashIdempotentRequest({ actorUserId: gate.employeeId, method: "JOB_OUTCOME", path: jobId, body: normalizedSubmission(input, jobCurrency) });
+          if (earlier.payloadHash !== payloadHash || earlier.result !== "ACCEPTED" || !earlier.entityId || earlier.jobId !== jobId) {
+            throw new ConflictError({
+              message: "This clientEventId was already used for a different submission.",
+              details: [{ field: "clientEventId", code: "field_event.payload_mismatch", message: "This clientEventId was already used for a different submission." }],
+            });
+          }
+          return viewRecorded(tx, actor, earlier.entityId, decision, true);
         }
-        return viewRecorded(tx, actor, earlier.entityId, true);
       }
-    }
 
-    const recorded = await recordOutcomeInTx(tx, actor, auditContextFields(ctx), jobId, input);
-    if (gate && !recorded.replayed) {
-      await tx.fieldEvent.create({
-        data: {
-          tenantId: actor.tenantId,
-          employeeId: gate.employeeId,
-          actorUserId: actor.userId,
-          clientEventId: gate.clientEventId,
-          type: "job.outcome",
-          jobId,
-          occurredAt: input.occurredAt ?? new Date(),
-          payload: { outcomeId: recorded.outcomeId, outcome: input.outcome },
-          payloadHash,
-          result: "ACCEPTED",
-          entityType: "JobOutcome",
-          entityId: recorded.outcomeId,
-        },
-      });
-    }
-    notificationIds.push(...recorded.notificationIds);
-    return viewRecorded(tx, actor, recorded.outcomeId, recorded.replayed);
-  });
+      const recorded = await recordOutcomeInTx(tx, actor, auditContextFields(ctx), jobId, input);
+      if (gate && !recorded.replayed) {
+        const jobCurrency = (await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } })).currency;
+        await tx.fieldEvent.create({
+          data: {
+            tenantId: actor.tenantId,
+            employeeId: gate.employeeId,
+            actorUserId: actor.userId,
+            clientEventId: gate.clientEventId,
+            type: "job.outcome",
+            jobId,
+            occurredAt: input.occurredAt ?? new Date(),
+            payload: { outcomeId: recorded.outcomeId, outcome: input.outcome },
+            payloadHash: hashIdempotentRequest({ actorUserId: gate.employeeId, method: "JOB_OUTCOME", path: jobId, body: normalizedSubmission(input, jobCurrency) }),
+            result: "ACCEPTED",
+            entityType: "JobOutcome",
+            entityId: recorded.outcomeId,
+          },
+        });
+      }
+      notificationIds.push(...recorded.notificationIds);
+      return viewRecorded(tx, actor, recorded.outcomeId, recorded.decision, recorded.replayed);
+    }),
+  );
   await deliverAfterCommit(actor.tenantId, notificationIds);
   return result;
 }

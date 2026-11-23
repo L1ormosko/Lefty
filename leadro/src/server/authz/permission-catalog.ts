@@ -113,6 +113,12 @@ export const SENSITIVE_FIELD_CATEGORIES = [
     description: "Prices, margins and other financial fields of jobs",
   },
   {
+    key: "job_outcomes.financial_fields",
+    module: "job_outcomes",
+    tag: "financial",
+    description: "Amounts, currency and payment of visit outcomes (spec 9.1); a plain job_outcomes.view grant never reveals them",
+  },
+  {
     key: "location.coordinate_fields",
     module: "location",
     tag: "coordinates",

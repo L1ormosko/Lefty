@@ -11,7 +11,8 @@ import { resolveJob } from "../../_lib/resolve-job";
 export const POST = defineRoute({
   schemas: { params: jobIdParams, body: recordOutcomeSchema },
   authenticate: authenticateRequest,
-  authorize: requirePermission("job_outcomes.create", resolveJob),
+  // Scope gate only (404 outside it): the service decides create vs. retroactive edit and the money field set.
+  authorize: requirePermission("job_outcomes.view", resolveJob),
   idempotent: true,
   handler: async ({ ctx, input }) => {
     const result = await recordJobOutcome(actorOf(ctx), ctx, input.params.id, input.body);

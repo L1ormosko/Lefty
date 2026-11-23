@@ -21,6 +21,8 @@ export interface OutcomeRecordedEvent {
   /** NOT_SOLD / WORK_NOT_POSSIBLE: the visit did not convert (`job.not_converted`). */
   notConverted: boolean;
   customerRequestedFollowUp: boolean;
+  /** Recorded after the fact for a job already past its visit (its status did not change). */
+  retroactive: boolean;
   /** The job's status right after the outcome was applied. */
   jobStatus: string;
 }

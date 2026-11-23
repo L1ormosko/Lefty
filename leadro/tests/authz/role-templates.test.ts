@@ -61,10 +61,23 @@ describe("role template definitions", () => {
   });
 
   it("hands out sensitive field sets only to Owner/CEO and Finance Director (opt-in)", () => {
+    // Visit-outcome money (job_outcomes.financial_fields) has its own, wider audience: see the next test.
     const naming = ROLE_TEMPLATES.filter((t) =>
-      t.grants.some((g) => g.conditions?.includeFields?.length || ["financial", "billing"].includes(g.conditions?.fields ?? "")),
+      t.grants.some(
+        (g) => !g.permission.startsWith("job_outcomes.") && (g.conditions?.includeFields?.length || ["financial", "billing"].includes(g.conditions?.fields ?? "")),
+      ),
     ).map((t) => t.key);
     expect(naming.sort()).toEqual(["FINANCE_DIRECTOR", "OWNER_CEO"]);
+  });
+
+  it("names the job_outcomes financial set only for those who report or correct visit money (not Dispatcher, Team Leader, Lead Ops)", () => {
+    const naming = ROLE_TEMPLATES.filter((t) =>
+      t.grants.some(
+        (g) => g.permission.startsWith("job_outcomes.") && (g.conditions?.includeFields?.includes("financial") || g.conditions?.fields === "financial"),
+      ),
+    ).map((t) => t.key);
+    expect(naming.sort()).toEqual(["CITY_MANAGER", "COO", "FINANCE_DIRECTOR", "OWNER_CEO", "REGIONAL_MANAGER", "STATE_MANAGER", "TECHNICIAN"]);
+    for (const key of ["DISPATCHER", "TEAM_LEADER", "LEAD_OPERATIONS_MANAGER"]) expect(holds(key, "job_outcomes.view"), key).toBe(true);
   });
 
   it("gives the Technician no financial_reports permission", () => {
@@ -119,7 +132,8 @@ describe("Phase 2 matrix rows (Customers, Leads, Dispatch, Jobs) and the new mod
       expect(holds("TECHNICIAN", permission), permission).toBe(false);
     }
     // Plain grants never include the opt-in financial / billing sets.
-    expect(template("TECHNICIAN").grants.some((g) => g.conditions?.includeFields?.length)).toBe(false);
+    // (The one exception: the outcome money the technician reports themselves, job_outcomes.financial_fields.)
+    expect(template("TECHNICIAN").grants.some((g) => !g.permission.startsWith("job_outcomes.") && g.conditions?.includeFields?.length)).toBe(false);
   });
 
   it("Customer Relations manages customers in scope and reads job history only through the customer history set", () => {

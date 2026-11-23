@@ -186,6 +186,40 @@ export const LOCATION_EVENT_FIELD_MAP: FieldMap = buildFieldMap(
 );
 
 /**
+ * Job outcome fields (every stored `JobOutcome` column except `tenantId`). Amounts, currency and payment are the
+ * `financial` set (`job_outcomes.financial_fields`): the outcome itself, its reason, notes and follow-up request
+ * are `base`, so a Dispatcher sees what happened at a visit but not the money.
+ */
+export const JOB_OUTCOME_FIELD_MAP: FieldMap = buildFieldMap(
+  [
+    "id",
+    "jobId",
+    "visitNumber",
+    "employeeId",
+    "outcome",
+    "lostReasonId",
+    "notes",
+    "customerRequestedFollowUp",
+    "preferredFollowUpAt",
+    "occurredAt",
+    "recordedAt",
+    "recordedById",
+    "clientEventId",
+  ],
+  {
+    financial: [
+      "quotedAmountMinor",
+      "approvedAmountMinor",
+      "chargedAmountMinor",
+      "collectedAmountMinor",
+      "currency",
+      "paymentMethod",
+      "paymentStatus",
+    ],
+  },
+);
+
+/**
  * Field map for records that have no sensitive field sets (users, org units, roles, ...): every
  * listed field is `base`. Unlisted fields stay hidden, so a new column must be added here on purpose.
  */

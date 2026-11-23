@@ -199,21 +199,27 @@ describe("a job cannot close without an outcome (§9.1)", () => {
 });
 
 describe("later visits", () => {
-  it("starts visit 2 when a rescheduled job is scheduled again, and takes a second outcome", async () => {
+  const scheduleAgain = (jobId: string, daysAhead = 5) => {
+    const start = Date.now() + daysAhead * 86_400_000;
+    return call(rescheduleRoute, "POST", "/x", {
+      cookie: w.cookie.dispatcher,
+      params: { id: jobId },
+      body: { scheduledSlot: { start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() } },
+    });
+  };
+
+  it("starts visit 2 when the technician is on the way again, and takes a second outcome", async () => {
     const job = await jobAt("EN_ROUTE");
     const first = await record(w.cookie.techA1, job.id, { outcome: "CUSTOMER_UNAVAILABLE", notes: "Nobody home" });
     expect(first.json.data.job).toMatchObject({ status: "CUSTOMER_UNAVAILABLE", currentVisitNumber: 1 });
     expect((await move(w.cookie.dispatcher, job.id, "RESCHEDULED", "Customer asked for next week")).status).toBe(200);
-    const start = Date.now() + 5 * 86_400_000;
-    const scheduled = await call(rescheduleRoute, "POST", "/x", {
-      cookie: w.cookie.dispatcher,
-      params: { id: job.id },
-      body: { scheduledSlot: { start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() } },
-    });
-    expect(scheduled.json.data.status).toBe("SCHEDULED");
-    expect((await getJob(job.id)).currentVisitNumber).toBe(2);
+    expect((await scheduleAgain(job.id)).json.data.status).toBe("SCHEDULED");
+    expect((await getJob(job.id)).currentVisitNumber).toBe(1); // still waiting: the visit has not started
 
-    for (const status of ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"]) await move(w.cookie.dispatcher, job.id, status);
+    expect((await move(w.cookie.dispatcher, job.id, "EN_ROUTE")).status).toBe(200);
+    expect((await getJob(job.id)).currentVisitNumber).toBe(2);
+    for (const status of ["ARRIVED", "IN_PROGRESS"]) await move(w.cookie.dispatcher, job.id, status);
+    expect((await getJob(job.id)).currentVisitNumber).toBe(2); // moving on inside the visit never advances it again
     const second = await record(w.cookie.techA1, job.id, { outcome: "SOLD" });
     expect(second.status).toBe(201);
     expect(second.json.data.outcome.visitNumber).toBe(2);
@@ -222,11 +228,78 @@ describe("later visits", () => {
     expect(list.json.data.map((row: { visitNumber: number }) => row.visitNumber)).toEqual([2, 1]);
   });
 
-  it("opens the next visit when the job goes back to the pool and is scheduled later", async () => {
-    const job = await jobAt("IN_PROGRESS");
-    await record(w.cookie.techA1, job.id, { outcome: "ADDITIONAL_APPROVAL_REQUIRED" });
+  it("counts the next visit across a hold and a trip back to the pool (RESCHEDULE_REQUIRED > ON_HOLD > PENDING_ASSIGNMENT > ... > visit 2)", async () => {
+    const job = await jobAt("ARRIVED");
+    expect((await record(w.cookie.techA1, job.id, { outcome: "RESCHEDULE_REQUIRED" })).json.data.job.status).toBe("RESCHEDULED");
+    expect((await move(w.cookie.dispatcher, job.id, "ON_HOLD", "Waiting for the customer")).status).toBe(200);
     expect((await move(w.cookie.dispatcher, job.id, "PENDING_ASSIGNMENT")).status).toBe(200);
+    expect((await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, body: { employeeId: w.techA1.employeeId } })).status).toBe(200);
+    expect((await scheduleAgain(job.id)).json.data.status).toBe("SCHEDULED");
+    expect((await getJob(job.id)).currentVisitNumber).toBe(1);
+    for (const status of ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"]) expect((await move(w.cookie.dispatcher, job.id, status)).status).toBe(200);
     expect((await getJob(job.id)).currentVisitNumber).toBe(2);
+    expect((await record(w.cookie.techA1, job.id, { outcome: "SOLD" })).json.data.outcome.visitNumber).toBe(2);
+  });
+
+  it("does not advance while the current visit has no outcome (wrong job started, then back on the way)", async () => {
+    const job = await jobAt("EN_ROUTE");
+    expect((await move(w.cookie.dispatcher, job.id, "SCHEDULED")).status).toBe(200); // started the wrong job
+    expect((await move(w.cookie.dispatcher, job.id, "EN_ROUTE")).status).toBe(200);
+    expect((await getJob(job.id)).currentVisitNumber).toBe(1);
+  });
+
+  it("does not open a new visit when a reviewer sends finished work back", async () => {
+    const job = await jobAt("IN_PROGRESS", { jobTypeId: w.ids.reviewType });
+    await record(w.cookie.techA1, job.id, { outcome: "SOLD" });
+    expect((await move(w.cookie.dispatcher, job.id, "AWAITING_REVIEW")).status).toBe(200);
+    expect((await move(w.cookie.ceo, job.id, "IN_PROGRESS")).status).toBe(200);
+    expect((await getJob(job.id)).currentVisitNumber).toBe(1);
+  });
+});
+
+describe("retroactive outcomes for jobs already past their visit", () => {
+  it.each(["COMPLETED", "FAILED", "REQUIRES_RETURN_VISIT"])("lets a manager record the missing outcome of a hand-%s job, then the job closes", async (status) => {
+    const job = await jobAt("IN_PROGRESS");
+    expect((await move(w.cookie.dispatcher, job.id, status, status === "COMPLETED" ? undefined : "Moved by hand")).status).toBe(200);
+    expect((await move(w.cookie.dispatcher, job.id, "CLOSED")).json.error.details[0].code).toBe("job.outcome_required");
+
+    const body = status === "FAILED" ? { outcome: "WORK_NOT_POSSIBLE", lostReasonId: reasons.outsideScope } : status === "COMPLETED" ? { outcome: "SOLD", chargedAmountMinor: 100 } : { outcome: "ADDITIONAL_APPROVAL_REQUIRED" };
+    const recorded = await record(w.cookie.cityManagerA, job.id, body);
+    expect(recorded.status).toBe(201);
+    expect(recorded.json.data.job.status).toBe(status); // no status change
+    const outcomeId = recorded.json.data.outcome.id;
+    const audit = (await auditEvents(w.tenantId, "job_outcome.record", outcomeId))[0];
+    expect(audit.newValue).toMatchObject({ retroactive: true });
+    expect(audit.reason).toMatch(/Retroactive/);
+    const events = await call(eventsRoute, "GET", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, query: { limit: "50" } });
+    expect(events.json.data.find((row: { type: string }) => row.type === "job.outcome_recorded").payload).toMatchObject({ retroactive: true, fromStatus: status, toStatus: status });
+
+    expect((await move(w.cookie.dispatcher, job.id, "CLOSED")).json.data.status).toBe("CLOSED");
+  });
+
+  it("lets a manager record it for a job awaiting review and for a customer-unavailable job", async () => {
+    const review = await jobAt("IN_PROGRESS", { jobTypeId: w.ids.reviewType });
+    await move(w.cookie.dispatcher, review.id, "COMPLETED");
+    await move(w.cookie.dispatcher, review.id, "AWAITING_REVIEW");
+    expect((await record(w.cookie.cityManagerA, review.id, { outcome: "SOLD" })).status).toBe(201);
+    expect((await move(w.cookie.ceo, review.id, "CLOSED")).json.data.status).toBe("CLOSED");
+
+    const away = await jobAt("EN_ROUTE");
+    await move(w.cookie.dispatcher, away.id, "CUSTOMER_UNAVAILABLE", "Nobody home");
+    expect((await record(w.cookie.cityManagerA, away.id, { outcome: "CUSTOMER_UNAVAILABLE" })).json.data.job.status).toBe("CUSTOMER_UNAVAILABLE");
+  });
+
+  it("keeps live visits to the technician and refuses anyone without create or edit; a second outcome for the visit is still a 409", async () => {
+    const live = await jobAt("IN_PROGRESS");
+    expect((await record(w.cookie.cityManagerA, live.id, { outcome: "SOLD" })).status).toBe(403); // edit-only: not their visit to report
+    expect((await getJob(live.id)).status).toBe("IN_PROGRESS");
+
+    const done = await jobAt("IN_PROGRESS");
+    await move(w.cookie.dispatcher, done.id, "COMPLETED");
+    expect((await record(w.cookie.dispatcher, done.id, { outcome: "SOLD" })).status).toBe(403); // view only
+    expect((await record(w.cookie.cityManagerB, done.id, { outcome: "SOLD" })).status).toBe(404); // other city
+    expect((await record(w.cookie.cityManagerA, done.id, { outcome: "SOLD" })).status).toBe(201);
+    expect((await record(w.cookie.cityManagerA, done.id, { outcome: "NOT_SOLD", lostReasonId: reasons.price })).status).toBe(409);
   });
 });
 
@@ -234,7 +307,7 @@ describe("offline replay (§8.7, §25.3)", () => {
   it("returns the first result for the same clientEventId and content, and stores nothing twice", async () => {
     const job = await jobAt("IN_PROGRESS");
     const clientEventId = randomUUID();
-    const occurredAt = new Date(Date.now() - 60_000).toISOString();
+    const occurredAt = new Date(Date.now() + 1_000).toISOString();
     const body = { outcome: "SOLD", chargedAmountMinor: 5000, clientEventId, occurredAt };
     const first = await record(w.cookie.techA1, job.id, body);
     const second = await record(w.cookie.techA1, job.id, body);

@@ -1,7 +1,8 @@
 // Recording and correcting visit outcomes (§9.1)
 export { recordJobOutcome, recordOutcomeInTx } from "./record";
-export type { RecordedOutcome } from "./record";
-export { correctJobOutcome } from "./correct";
+export type { RecordedOutcome, RecordOutcomeInTxResult } from "./record";
+export { correctJobOutcome, getOutcomeCorrections } from "./correct";
+export type { OutcomeCorrectionView } from "./correct";
 export { getJobOutcome, listJobOutcomes } from "./read";
 
 // Lost reasons (§9.2)

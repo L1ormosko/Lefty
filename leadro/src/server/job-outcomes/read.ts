@@ -46,6 +46,7 @@ export async function listJobOutcomes(actor: Actor, query: ListOutcomesQuery): P
     if (query.occurredFrom) filters.push({ occurredAt: { gte: query.occurredFrom } });
     if (query.occurredTo) filters.push({ occurredAt: { lt: query.occurredTo } });
 
+    const filtered = filters.length > 0;
     const rows = await tx.jobOutcome.findMany({
       where: withinScope<Prisma.JobOutcomeWhereInput>({ job: jobScope }, { tenantId: actor.tenantId, AND: filters }),
       select: { ...outcomeRowSelect, job: { select: { orgUnitId: true, orgUnit: { select: { legalEntityId: true } } } } },
@@ -61,7 +62,9 @@ export async function listJobOutcomes(actor: Actor, query: ListOutcomesQuery): P
         legalEntityIds: job.orgUnit.legalEntityId ? [job.orgUnit.legalEntityId] : [],
         assignedEmployeeIds: assigned.get(row.jobId) ?? [],
       });
-      return fieldSets.length === 0 ? [] : [projectFields(row, { allowed: true, fieldSets }, OUTCOME_FIELD_MAP)];
+      // Filters match BASE columns: a row seen only through a financial-only grant (Finance) must not be findable by them (oracle).
+      if (fieldSets.length === 0 || (filtered && !fieldSets.includes("base"))) return [];
+      return [projectFields(row, { allowed: true, fieldSets }, OUTCOME_FIELD_MAP)];
     });
     return { data, page: page.page };
   });

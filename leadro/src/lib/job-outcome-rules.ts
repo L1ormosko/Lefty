@@ -47,6 +47,16 @@ export const OUTCOME_REPORTABLE_STATUSES: readonly JobStatusValue[] = [
   ...new Set(Object.values(OUTCOME_STATUS_RULES).flatMap((rule) => rule.from)),
 ];
 
+/**
+ * A job moved past its visit by hand (a dispatcher completed or failed it, a reviewer holds it) has no outcome and could never
+ * close (§9.1). In these statuses an outcome may be recorded RETROACTIVELY: it is stored and audited as such and the job status
+ * does not change (it already is where it should be). Only while the current visit still has no outcome.
+ */
+export const RETROACTIVE_OUTCOME_STATUSES: readonly JobStatusValue[] = ["COMPLETED", "FAILED", "REQUIRES_RETURN_VISIT", "AWAITING_REVIEW", "CUSTOMER_UNAVAILABLE"];
+
+/** Statuses that open a new visit when the previous visit already has its outcome (the technician is on the way again). */
+export const VISIT_START_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"];
+
 /** §9.1: an unsuccessful outcome needs a lost reason. */
 export const OUTCOMES_REQUIRING_LOST_REASON: readonly JobOutcomeTypeValue[] = ["NOT_SOLD", "WORK_NOT_POSSIBLE"];
 /** A successful sale has no lost reason (the database agrees). */
