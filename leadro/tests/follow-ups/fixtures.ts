@@ -46,10 +46,9 @@ export const hoursFromNow = (hours: number): Date => new Date(Date.now() + hours
 /** Creates a follow-up through the service as `person`; returns its id. */
 export async function makeFollowUp(
   person: Person,
-  target: { targetType: "LEAD" | "CUSTOMER" | "JOB" | "RECOVERY_CASE"; targetId: string },
-  fields: Record<string, unknown> = {},
+  fields: { targetType: "LEAD" | "CUSTOMER" | "JOB" | "RECOVERY_CASE"; targetId: string } & Record<string, unknown>,
 ): Promise<string> {
-  const input = createFollowUpSchema.parse({ title: "Call the customer back", dueAt: hoursFromNow(24), ...target, ...fields });
+  const input = createFollowUpSchema.parse({ title: "Call the customer back", dueAt: hoursFromNow(24), ...fields });
   const view = await createFollowUp(person.actor, contextFor(person.actor), input);
   return String(view.id);
 }

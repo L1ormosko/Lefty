@@ -3,6 +3,7 @@ import type { FieldEvent, Prisma } from "@prisma/client";
 import {
   AppError,
   ConflictError,
+  InvalidStateTransitionError,
   ValidationError,
   isUniqueViolation,
   type Actor,
@@ -54,6 +55,14 @@ const FUTURE_SKEW_MS = 60_000;
 /** Errors that are a verdict on the event, not on the caller's rights: stored as REJECTED. */
 const STORED_REJECTIONS: readonly ErrorCode[] = ["VALIDATION_FAILED", "CONFLICT", "INVALID_STATE_TRANSITION"];
 
+/** The error a stored REJECTED verdict is answered with on replay (same class and code as the first answer). */
+function rejectionError(code: string | null): AppError {
+  const options = { message: "This event was rejected when it was first received." };
+  if (code === "VALIDATION_FAILED") return new ValidationError(options);
+  if (code === "INVALID_STATE_TRANSITION") return new InvalidStateTransitionError(options);
+  return new ConflictError(options);
+}
+
 /** JSON with sorted keys, so the same content always hashes the same. Dates become ISO strings. */
 function canonicalJson(value: unknown): string {
   if (value instanceof Date) return JSON.stringify(value.toISOString());
@@ -67,7 +76,8 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-export const hashFieldEvent = (spec: FieldWriteSpec, occurredAt: Date): string =>
+/** `occurredAt` is the CLIENT's time (undefined when it sent none: "now" differs on every retry and must not enter the hash). */
+export const hashFieldEvent = (spec: FieldWriteSpec, occurredAt: Date | undefined): string =>
   createHash("sha256").update(canonicalJson({ type: spec.type, content: spec.content, occurredAt })).digest("hex");
 
 /**
@@ -96,7 +106,7 @@ export async function runFieldWrite<T>(
     throw new ValidationError({ message: "Offline events need an employee record.", field: "clientEventId" });
   }
   const identity = { tenantId: actor.tenantId, employeeId: actor.employeeId, clientEventId: offline.clientEventId };
-  const payloadHash = hashFieldEvent(spec, occurredAt);
+  const payloadHash = hashFieldEvent(spec, offline.occurredAt);
 
   // A concurrent twin can win the unique (tenant, employee, clientEventId) between our lookup and insert: it aborts this
   // transaction, and the second attempt then finds the twin's row and replays it.
@@ -132,7 +142,11 @@ export async function runFieldWrite<T>(
         });
       });
     } catch (error) {
-      if (error instanceof AppError && STORED_REJECTIONS.includes(error.code)) await storeRejection(error.code);
+      if (error instanceof AppError && STORED_REJECTIONS.includes(error.code)) {
+        // A twin of this event may have committed while we waited on its row lock: its verdict stands, ours is moot.
+        const twin = await storeRejection(error.code);
+        if (twin) return answerReplay(twin);
+      }
       throw error;
     }
     if (state.outcome) {
@@ -142,16 +156,18 @@ export async function runFieldWrite<T>(
     return answerReplay(state.existing);
   }
 
-  async function storeRejection(code: ErrorCode): Promise<void> {
+  /** Stores the verdict; returns the event that already exists when a twin got there first, else null. */
+  async function storeRejection(code: ErrorCode): Promise<FieldEvent | null> {
     try {
       await withTenant(actor.tenantId, (tx) =>
         tx.fieldEvent.create({
           data: { ...identity, actorUserId: actor.userId, type: spec.type, occurredAt, payload: spec.payload as Prisma.InputJsonObject, payloadHash, result: "REJECTED", resultCode: code },
         }),
       );
+      return null;
     } catch (error) {
-      // A twin stored the same verdict first: nothing to add.
       if (!isUniqueViolation(error)) throw error;
+      return withTenant(actor.tenantId, (tx) => tx.fieldEvent.findFirst({ where: identity }));
     }
   }
 
@@ -164,6 +180,6 @@ export async function runFieldWrite<T>(
       const entityId = event.entityId;
       return withTenant(actor.tenantId, (tx) => replay(tx, entityId));
     }
-    throw new AppError((event.resultCode as ErrorCode | null) ?? "CONFLICT", "This event was rejected when it was first received.");
+    throw rejectionError(event.resultCode);
   }
 }
