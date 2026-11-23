@@ -7,6 +7,7 @@ import { POST as transitionRoute } from "@/app/api/v1/jobs/[id]/transition/route
 import { GET as settingsGet, PUT as settingsPut } from "@/app/api/v1/jobs/workflow-settings/route";
 import { withTenant } from "@/server/db";
 import { disconnect } from "../authz/fixtures";
+import { storeSoldOutcome } from "../job-outcomes/fixtures";
 import { auditEvents, call } from "../org/org-helpers";
 import { buildJobsWorld, createJobViaApi, type JobsWorld } from "./fixtures";
 
@@ -46,6 +47,7 @@ describe("walking the default path", () => {
     expect(started.startedAt).toBeTruthy();
     const completed = (await move(w.cookie.dispatcher, job.id, "COMPLETED")).json.data;
     expect(completed.completedAt).toBeTruthy();
+    await storeSoldOutcome(w.tenantId, job.id); // §9.1: closing needs the visit outcome
     const closed = (await move(w.cookie.dispatcher, job.id, "CLOSED")).json.data;
     expect(closed).toMatchObject({ status: "CLOSED", assignments: [] }); // the assignment ended with the work
     expect(closed.closedAt).toBeTruthy();
@@ -66,6 +68,7 @@ describe("walking the default path", () => {
     expect(skipped.status).toBe(409);
     expect(skipped.json.error.message).toMatch(/review/);
     expect((await move(w.cookie.dispatcher, job.id, "AWAITING_REVIEW")).json.data.status).toBe("AWAITING_REVIEW");
+    await storeSoldOutcome(w.tenantId, job.id);
     expect((await move(w.cookie.dispatcher, job.id, "CLOSED")).status).toBe(403); // approving is not a dispatcher's call
     expect((await move(w.cookie.ceo, job.id, "CLOSED")).json.data.status).toBe("CLOSED");
   });
@@ -158,6 +161,7 @@ describe("exceptional statuses", () => {
     const job = await scheduledJob();
     for (const status of ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"]) await move(w.cookie.dispatcher, job.id, status);
     expect((await move(w.cookie.dispatcher, job.id, "REQUIRES_RETURN_VISIT", "Part not on the truck")).json.data.status).toBe("REQUIRES_RETURN_VISIT");
+    await storeSoldOutcome(w.tenantId, job.id);
     expect((await move(w.cookie.dispatcher, job.id, "CLOSED")).json.data.status).toBe("CLOSED");
   });
 });

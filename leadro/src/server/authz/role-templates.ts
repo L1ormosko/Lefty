@@ -128,7 +128,8 @@ const unitManagerGrants = (): TemplateGrant[] => [
   // Location history is read without coordinates (the `coordinates` set is opt-in).
   ...grantActions("shifts", ["VIEW", "EDIT", "APPROVE"]),
   ...grantActions("location", ["VIEW", "APPROVE"]),
-  ...grantActions("job_outcomes", ["VIEW", "EDIT"]),
+  // Managers see and correct outcome money: the financial set is named explicitly (opt-in, like jobs.financial_fields).
+  ...grantActions("job_outcomes", ["VIEW", "EDIT"], { includeFields: ["financial"] }),
   ...view("completion_forms"),
   ...view("recovery"),
   ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
@@ -166,7 +167,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // No location coordinates: only the Owner's template opts into that set.
       ...full("shifts"),
       ...grantActions("location", ["VIEW", "APPROVE"]),
-      ...full("job_outcomes"),
+      ...full("job_outcomes", { includeFields: ["financial"] }),
       ...full("completion_forms"),
       ...full("recovery"),
       ...full("follow_ups"),
@@ -190,6 +191,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("employees", { fields: "financial" }),
       ...view("customers", { fields: "billing" }),
       ...view("jobs", { fields: "financial" }),
+      ...view("job_outcomes", { fields: "financial" }),
       ...own("notifications"),
       ...full("compensation"),
       ...full("financial_reports"),
@@ -345,7 +347,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // outcomes of assigned jobs, the completion form to fill in, follow-ups assigned to them.
       ...grantActions("shifts", ["VIEW", "CREATE", "EDIT"]),
       ...grantActions("location", ["CREATE"]),
-      ...grantActions("job_outcomes", ["VIEW", "CREATE"]),
+      // The technician reports amounts and payment, so they hold the financial set on the outcomes of their own jobs.
+      ...grantActions("job_outcomes", ["VIEW", "CREATE"], { includeFields: ["financial"] }),
       ...view("completion_forms"),
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
     ],

@@ -1656,7 +1656,7 @@ Design decisions: `DECISIONS.md` "Phase 2 Task 6".
 Job fields: `id, number, customerId, serviceAddressId, jobTypeId, orgUnitId, leadId, parentJobId, origin (LEAD_CONVERSION |
 RECURRING_AGREEMENT | MANUAL | INTEGRATION | CUSTOMER_FOLLOW_UP), status, statusChangedAt, priority (LOW | NORMAL | HIGH | URGENT),
 title, description, instructions, appointmentWindowStart/End (customer arrival window), scheduledStartAt/EndAt (the dispatcher's
-slot), timeZone, estimatedDurationMinutes, startedAt, completedAt, closedAt, cancelledAt, statusReason, archivedAt, createdById,
+slot), timeZone, estimatedDurationMinutes, currentVisitNumber, startedAt, completedAt, closedAt, cancelledAt, statusReason, archivedAt, createdById,
 createdAt, updatedAt` are `base`; `quotedAmountMinor, currency` are the opt-in `financial` set (`jobs.financial_fields`: a grant
 must name it, Owner/CEO, COO and Finance do; Dispatcher and Technician do not). Reads add `assignments` (ACTIVE assignments:
 `{ id, employeeId | teamOrgUnitId, role, method, assignedAt }`) and, on a single job, `requirements` (the job's own rows:
@@ -2106,3 +2106,94 @@ retention period (tenant `locationRetentionDays`, default 90) the coordinates ar
 - **Response**: `201 { data: event }`, `200` for a repeated `clientEventId` (same event). The event is projected to the caller's grant: never coordinates.
 - **Errors**: `400` (no accuracy, bad range, blank departure, time in the future); `403`; `404`; `409 CONFLICT` reused `clientEventId` with different content.
 - **Audit**: `location.record` (kind, source, accuracy, job; never coordinates).
+## Job outcomes and lost reasons (`/api/v1/jobs/{id}/outcome`, `/api/v1/job-outcomes`, `/api/v1/lost-reasons`) - Phase 3
+
+Code: `src/server/job-outcomes` (README there), pure rules `src/lib/job-outcome-rules.ts`, routes `src/app/api/v1/{job-outcomes,lost-reasons}/**`
+and `src/app/api/v1/jobs/{id}/outcome(s)`. Spec 9.1, 9.2. Design decisions: `DECISIONS.md` "Phase 3 Task 5".
+
+Outcome fields: `base` = `id, jobId, visitNumber, employeeId, outcome, lostReasonId, notes, customerRequestedFollowUp, preferredFollowUpAt, occurredAt, recordedAt, recordedById, clientEventId`; the opt-in `financial` set (`job_outcomes.financial_fields`: Owner, COO, State/Regional/City managers, the Technician, Finance Director) = `quotedAmountMinor, approvedAmountMinor, chargedAmountMinor, collectedAmountMinor, currency, paymentMethod, paymentStatus` (Dispatcher, Team Leader and Lead Operations see the outcome without them). Complete list: `id, jobId, visitNumber, employeeId, outcome (SOLD | NOT_SOLD |
+CUSTOMER_UNAVAILABLE | RESCHEDULE_REQUIRED | WORK_NOT_POSSIBLE | ADDITIONAL_APPROVAL_REQUIRED; labels OUTCOME.TYPE.<value>), lostReasonId,
+notes, quotedAmountMinor, approvedAmountMinor, chargedAmountMinor, collectedAmountMinor (integer minor units, never floats), currency,
+paymentMethod (CASH | CARD | CHECK | BANK_TRANSFER | FINANCING | OTHER), paymentStatus (NOT_APPLICABLE | PENDING | PARTIAL | PAID | WAIVED |
+REFUSED), customerRequestedFollowUp, preferredFollowUpAt, occurredAt, recordedAt, recordedById, clientEventId`. No commission math.
+
+Outcome > job status (always a direct lifecycle edge; a refused one is `409 INVALID_STATE_TRANSITION`, code `job_outcome.not_reportable`):
+`SOLD` / `NOT_SOLD` from IN_PROGRESS > COMPLETED; `ADDITIONAL_APPROVAL_REQUIRED` from IN_PROGRESS > REQUIRES_RETURN_VISIT; `WORK_NOT_POSSIBLE`
+from ARRIVED or IN_PROGRESS > FAILED; `CUSTOMER_UNAVAILABLE` from EN_ROUTE or ARRIVED > CUSTOMER_UNAVAILABLE; `RESCHEDULE_REQUIRED` from EN_ROUTE
+or ARRIVED > RESCHEDULED. A job cannot move to CLOSED until the outcome of its current visit exists (`409`, detail code `job.outcome_required`;
+this applies to `POST /jobs/{id}/transition` too). `Job.currentVisitNumber` (returned with the job) moves to the next number when a job whose
+current visit already has an outcome goes EN_ROUTE (or ARRIVED / IN_PROGRESS directly), whatever path it took there (holds, back to the pool...). A reviewer sending work back (AWAITING_REVIEW > IN_PROGRESS) is the same visit.
+
+**Retroactive outcomes**: a job already past its visit (COMPLETED, FAILED, REQUIRES_RETURN_VISIT, AWAITING_REVIEW, CUSTOMER_UNAVAILABLE, e.g. moved by hand) whose current visit has no outcome takes one without any status change, from a holder of `job_outcomes.create` OR `job_outcomes.edit` over the job (managers). It is audited and evented as `retroactive`. Reporting a LIVE visit stays with `create` holders (edit-only = `403`). The outcome currency must equal the job's (`job_outcome.currency_mismatch`); `occurredAt` cannot predate the visit start (`job_outcome.occurred_too_early`).
+
+Validation failures are `400 VALIDATION_FAILED` with `details[{ field, code, message }]`; clients translate by `code` (`OUTCOME.ERROR.*`):
+`job_outcome.lost_reason_required` (NOT_SOLD, WORK_NOT_POSSIBLE), `.lost_reason_not_allowed` (SOLD), `.lost_reason_unknown` (missing, other tenant or
+inactive), `.lost_reason_not_applicable` (reason does not list the outcome), `.amounts_not_applicable` / `.payment_not_applicable` (approved, charged,
+collected amounts and a payment belong to SOLD; the quote may accompany any outcome), `.payment_needs_collected_amount` (PARTIAL / PAID need
+`collectedAmountMinor` and `paymentMethod`), `.occurred_in_future` (more than 5 minutes ahead).
+
+### POST /api/v1/jobs/{id}/outcome
+
+- **Purpose**: report the outcome of the job's current visit; the job follows it through its lifecycle in the same transaction.
+- **Auth**: session. **Permission**: `job_outcomes.create` over the job (Technician: ASSIGNED; Owner / COO tenant-wide), or `job_outcomes.edit` for a retroactive outcome. Out of scope = `404`, neither held = `403`. Sending amounts or payment needs the `financial` set (`403` otherwise); the response shows only the fields the caller's sets cover.
+- **Request body** (strict): `outcome` required; `lostReasonId`, `notes` (<= 4000), `quotedAmountMinor`, `approvedAmountMinor`, `chargedAmountMinor`,
+  `collectedAmountMinor`, `currency` (default the job's), `paymentMethod`, `paymentStatus`, `customerRequestedFollowUp`, `preferredFollowUpAt`;
+  offline envelope `clientEventId` (UUID) and `occurredAt` (device time, ISO).
+- **Idempotency**: `Idempotency-Key` supported. With `clientEventId` and an employee caller the submission is a `FieldEvent` (per tenant, employee,
+  clientEventId): the same id and content again returns `200` with `replayed: true` and the original outcome; the same id with different content is
+  `409 CONFLICT` (detail code `field_event.payload_mismatch`).
+- **Response**: `201 { data: { outcome, job: { id, status, currentVisitNumber }, replayed: false } }`. **Errors**: `400` (above), `403`, `404`, `409`
+  (`job_outcome.already_recorded` when the visit already has one; not reportable from this status; the company switched the needed edge off).
+- **Audit**: `job_outcome.record` (money by field name only). **Events**: job events `job.outcome_recorded` and, for NOT_SOLD / WORK_NOT_POSSIBLE,
+  `job.not_converted` (ids and enums only). Managers with `job_outcomes.edit` over the job's unit get the notification `job.not_converted` (not the reporter).
+
+### GET /api/v1/jobs/{id}/outcomes
+
+- **Purpose**: the outcomes recorded for one job (one per visit), newest first. **Permission**: `job_outcomes.view` over the job (`404` outside scope).
+- **Request query**: as `GET /job-outcomes` without `jobId`. **Response**: `200 { data: [outcome], page }`.
+
+### GET /api/v1/job-outcomes
+
+- **Purpose**: outcomes the caller may see; the scope of `job_outcomes.view` applies through the outcome's job. Newest first (`occurredAt desc, id desc`).
+- **Request query**: `cursor`, `limit`; `jobId`, `outcome`, `lostReasonId`, `employeeId`, `customerRequestedFollowUp` (`true` | `false`), `occurredFrom`, `occurredTo`.
+- **Response**: `200 { data: [outcome], page }`.
+
+### GET /api/v1/job-outcomes/{id}
+
+- **Permission**: `job_outcomes.view` over the outcome's job (`404` otherwise, also across tenants). **Response**: `200 { data: outcome }`.
+
+### PATCH /api/v1/job-outcomes/{id}
+
+- **Purpose**: correct a recorded outcome: `lostReasonId`, `notes`, the amounts, `currency`, payment fields, follow-up request. The outcome type never changes.
+- **Permission**: `job_outcomes.edit` over the job (managers; the technician who reported it cannot correct: `403`).
+- **Request body** (strict): `reason` (required, kept in the audit trail) plus at least one field; `null` clears a nullable value. The reason / money / payment rules
+  of recording apply to the result.
+- **Response**: `200 { data: outcome }`. Changing amounts or payment needs the `financial` set (`403`); the currency must be the job's and cannot be corrected alone (`400`). **Audit**: `job_outcome.correct` with the FULL previous and new value of every changed field + reason (financial history, §25.4); job event `job.outcome_corrected`.
+
+### GET /api/v1/job-outcomes/{id}/corrections
+
+- **Purpose**: the correction history of an outcome, oldest first: `[{ at, byUserId, reason, changedFields, previous, next }]` (previous / new values of the changed fields), so an overwritten amount stays retrievable.
+- **Permission**: `job_outcomes.edit` over the job AND the `financial` set (`403` without either; `404` outside scope). **Response**: `200 { data: [correction] }`.
+
+### GET /api/v1/lost-reasons
+
+- **Purpose**: the tenant's lost reasons in display order (`sortOrder`, `name`). Fields `id, code, name, description, appliesTo (outcomes), recoverable, active, sortOrder, createdAt, updatedAt`.
+- **Permission**: `job_outcomes.view` (technicians read the list to choose). **Request query**: `includeInactive` (`true`; default hides retired reasons), `outcome` (only reasons applying to it).
+- **Response**: `200 { data: [lostReason] }`.
+
+### POST /api/v1/lost-reasons
+
+- **Purpose**: add a lost reason. **Permission**: tenant-wide `job_outcomes.configure` (`403` otherwise; the role requires MFA).
+- **Request body** (strict): `code` (lower-case letters, digits, `-`, `_`; unique per tenant), `name`; `description`, `appliesTo` (default NOT_SOLD, WORK_NOT_POSSIBLE),
+  `recoverable` (default true; false = recovery can do nothing about it), `sortOrder`. **Idempotency**: supported.
+- **Response**: `201 { data: lostReason }`. **Errors**: `400`, `403`, `409` duplicate code. **Audit**: `lost_reason.create`.
+
+### GET /api/v1/lost-reasons/{id}
+
+- **Permission**: `job_outcomes.view`. **Response**: `200 { data: lostReason }`; `404` for another tenant's id.
+
+### PATCH /api/v1/lost-reasons/{id}
+
+- **Purpose**: edit `name`, `description`, `appliesTo`, `recoverable`, `sortOrder` or retire / restore with `active`. Reasons are never deleted and the `code` never changes;
+  outcomes keep a retired reason.
+- **Permission**: tenant-wide `job_outcomes.configure`. **Response**: `200 { data: lostReason }`. **Audit**: `lost_reason.update`.

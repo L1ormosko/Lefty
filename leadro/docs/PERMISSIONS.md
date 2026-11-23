@@ -87,6 +87,7 @@ the `base` (non-sensitive) fields only; a sensitive set is visible only to a gra
 | `employees.financial_fields` | employees | `financial` |
 | `customers.billing_fields` | customers | `billing` |
 | `jobs.financial_fields` | jobs | `financial` |
+| `job_outcomes.financial_fields` | job_outcomes | `financial` |
 | `location.coordinate_fields` | location | `coordinates` |
 
 `location.coordinate_fields` (spec 22.2): `LocationEvent.latitude` / `longitude` (`LOCATION_EVENT_FIELD_MAP`). A plain `location.view` grant reads when, what
@@ -244,7 +245,7 @@ requires MFA; shipped operational templates stay MFA-free unless they hold a `*.
 |---|---|---|---|---|---|---|---|
 | `shifts` | `*` | view, edit, approve | view | view | - | - | view, create, edit (own shift) |
 | `location` | view, approve (no coordinates) | view, approve (no coordinates) | - | - | - | - | create (record own events; no history, no verification) |
-| `job_outcomes` | `*` (incl. configure: lost reasons) | view, edit | view | view | view | - | view, create |
+| `job_outcomes` | `*` (incl. configure: lost reasons) + financial | view, edit + financial | view | view | view | - | view, create + financial |
 | `completion_forms` | `*` (incl. configure) | view | view | view | - | - | view |
 | `recovery` | `*` (incl. approve) | view | - | - | view, create, edit, assign, manage (no approve) | - | - |
 | `follow_ups` | `*` | view, create, edit, assign | view, create, edit | view, create, edit | `*` | `*` | view, create, edit |
@@ -254,7 +255,7 @@ recovery case (AT_LOCATION / LEFT_LOCATION / UNKNOWN), never as coordinates or h
 the COO and Owner only, so Lead Ops authors rules (`recovery.manage`) but a second person activates them; the database also refuses a high-impact rule that
 is ACTIVE without an approver other than its author. (3) `job_outcomes.configure` and `completion_forms.configure` make a role require MFA (every
 `*.configure` does), which is why only Owner and COO hold them. (4) Technicians record outcomes (`job_outcomes.create`) but cannot correct them
-(`edit` is a manager's action); they hold no approve / manage / configure.
+(`edit` is a manager's action); they hold no approve / manage / configure. (5) Outcome amounts, currency and payment status / method are the opt-in `financial` set (`job_outcomes.financial_fields`): held by Owner, COO, State / Regional / City managers and the Technician (who reports them), and by the Finance Director as a financial-only view. Team Leader, Dispatcher and Lead Operations see the outcome (type, reason, notes, follow-up request) but not the money.
 
 Additional 4.4 role templates not in the 4.5 table are derived by analogy and flagged for
 confirmation in `DECISIONS.md`:
