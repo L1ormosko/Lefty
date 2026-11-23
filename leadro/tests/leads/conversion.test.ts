@@ -20,6 +20,7 @@ vi.mock("@/server/leads/job-conversion-port", () => ({
     tx: import("@/server/db").TenantTx,
     actor: { tenantId: string; userId: string },
     input: CreateJobFromLeadInput,
+    _ctx?: unknown,
   ) => {
     port.calls.push(input);
     if (port.failWith) throw port.failWith;
@@ -41,7 +42,7 @@ vi.mock("@/server/leads/job-conversion-port", () => ({
         createdById: actor.userId,
       },
     });
-    return { id: job.id, number: job.number };
+    return { id: job.id, number: job.number, created: true, warnings: [] };
   },
 }));
 
