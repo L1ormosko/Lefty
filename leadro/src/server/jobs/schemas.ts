@@ -81,6 +81,11 @@ export const assignJobSchema = z
     employeeId: id.optional(),
     teamOrgUnitId: id.optional(),
     reason: reason.optional(),
+    /**
+     * Optimistic precondition: the id of the ACTIVE assignment the caller saw (`null` = it saw none). A different current
+     * assignment answers 409 instead of silently replacing a colleague's decision. Omit to skip the check.
+     */
+    expectedAssignmentId: id.nullable().optional(),
     /** Assign although the hard eligibility check failed. Needs `jobs.approve`; the reason is recorded. */
     override: z.object({ reason }).strict().optional(),
   })
@@ -131,12 +136,11 @@ export const listJobsQuerySchema = pageQuerySchema.extend({
 });
 export type ListJobsQuery = z.infer<typeof listJobsQuerySchema>;
 
-/** "My jobs": the caller's own assignments. Closed and cancelled work is hidden unless asked for. */
+/** "My jobs": the caller's own assignments. Closed and cancelled work is hidden unless a `status` filter names it. */
 export const listMyJobsQuerySchema = pageQuerySchema.extend({
   status: statusList.optional(),
   scheduledFrom: instant.optional(),
   scheduledTo: instant.optional(),
-  includeFinished: booleanText.default("false"),
 });
 export type ListMyJobsQuery = z.infer<typeof listMyJobsQuerySchema>;
 

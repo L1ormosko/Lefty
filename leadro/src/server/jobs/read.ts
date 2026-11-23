@@ -144,7 +144,7 @@ export async function listJobs(actor: Actor, query: ListJobsQuery): Promise<Page
 /**
  * The caller's own jobs (technician view, §5.10): jobs assigned to their employee directly or through a
  * team they currently belong to, within the scope their `jobs.view` grant covers. Soonest appointment first;
- * unscheduled work last. Closed and cancelled jobs are hidden unless `includeFinished` or an explicit
+ * unscheduled work last. Closed and cancelled jobs are hidden unless an explicit
  * `status` filter asks for them. A user with no employee record has no jobs.
  */
 export async function listMyJobs(actor: Actor, query: ListMyJobsQuery): Promise<Page<Record<string, unknown>>> {
@@ -154,7 +154,7 @@ export async function listMyJobs(actor: Actor, query: ListMyJobsQuery): Promise<
     const now = new Date();
     const conditions: Prisma.JobWhereInput[] = [jobAssignedToWhere(actor.employeeId, now)];
     if (query.status) conditions.push({ status: { in: query.status } });
-    else if (!query.includeFinished) conditions.push({ status: { notIn: [...TERMINAL_JOB_STATUSES] } });
+    else conditions.push({ status: { notIn: [...TERMINAL_JOB_STATUSES] } });
     if (query.scheduledFrom) conditions.push({ scheduledStartAt: { gte: query.scheduledFrom } });
     if (query.scheduledTo) conditions.push({ scheduledStartAt: { lt: query.scheduledTo } });
     return listJobsInternal(

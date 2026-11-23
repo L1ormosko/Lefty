@@ -14,7 +14,14 @@ interface RegisteredTarget {
   resolve: TargetResolver;
 }
 
-const resolvers = new Map<string, RegisteredTarget>();
+/**
+ * The registry lives on `globalThis` (same pattern as the Prisma client in `db/client.ts`). Next.js bundles
+ * `instrumentation.ts` and each route separately, so a module-level Map would exist once per bundle and a
+ * registration made at server start would be invisible to the notifications route. One shared Map means every
+ * bundle that registers or reads sees the same entries. Always on, also in production (unlike the Prisma client).
+ */
+const globalForTargets = globalThis as unknown as { leadroNotificationTargets?: Map<string, RegisteredTarget> };
+const resolvers: Map<string, RegisteredTarget> = (globalForTargets.leadroNotificationTargets ??= new Map<string, RegisteredTarget>());
 
 /**
  * Registers how to authorize the viewer of a notification that links to `targetType` (e.g. "lead",
