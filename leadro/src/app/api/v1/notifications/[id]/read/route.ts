@@ -1,3 +1,4 @@
+import "@/server/notification-targets"; // registers the lead/job resolvers the redaction check needs
 import { idParams } from "@/app/api/v1/_lib/params";
 import { authenticateRequest } from "@/server/auth";
 import { requirePermission } from "@/server/authz";
