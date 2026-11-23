@@ -1778,7 +1778,7 @@ or unassigned.
 - **Auth**: session. **Permission**: `jobs.assign` over the job with the base field set.
 - **Request body** (strict): exactly one of `employeeId`, `teamOrgUnitId` (an active TEAM unit inside the job's service area);
   `reason`; `override { reason }`.
-- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `400` unknown employee or team; `409 CONFLICT` already assigned to
+- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `404` unknown employee or one outside the caller's employee scope; `400` unknown team; `409 CONFLICT` already assigned to
   this target or not eligible; `409 INVALID_STATE_TRANSITION` job already on its way or finished.
 - **Audit**: `job.assign` or `job.reassign`. Events `job.assigned` / `job.reassigned`. Notifications: `job.assigned` to the new
   assignee (every current member of a team) and `job.reassigned` to people who lost the job, after commit.
@@ -1823,3 +1823,88 @@ or unassigned.
 - **Purpose**: every assignment the job has had, ACTIVE first: `{ id, employeeId, teamOrgUnitId, role, state (ACTIVE | ENDED), method,
   overrideReason, assignedAt, assignedById, reason, endedAt, endedReason }`.
 - **Auth**: session. **Permission**: as `/history`. Paged. **Audit**: none.
+
+## Dispatch (`/api/v1/dispatch`) - Phase 2
+
+Code: `src/server/dispatch` (README there), pure ranking `src/lib/dispatch-scoring.ts`, routes `src/app/api/v1/dispatch/**`.
+Design decisions, factors and weights: `DECISIONS.md` "Phase 2 Task 7". Rule-based and explainable, no LLM; a person always decides.
+
+A **recommendation** is `{ id, jobId, mode, status (PENDING | APPROVED | MODIFIED | REJECTED | SUPERSEDED), candidates, blockingReasons,
+distanceBasis ("STRAIGHT_LINE_ESTIMATE"), generatedAt, generatedById, chosenEmployeeId, decidedAt, decidedById, decisionReason }`.
+`candidates` is ranked best first: `{ employeeId, rank, score, factors: [{ key (DISTANCE | WORKLOAD | EXPERIENCE | PREFERENCE), value,
+contribution, maxContribution, explanationKey, explanationParams }], conflicts: [{ code, messageKey }] }`. Only ids and codes are returned:
+translate `DISPATCH.FACTOR.*`, `DISPATCH.CONFLICT.*`, `DISPATCH.STATUS.*`, `QUALIFICATION.FAILURE.<code>` and resolve employee ids with the
+employees API. Distances are straight-line estimates from stored coordinates, never travel time. `blockingReasons` is
+`{ employeeId: [{ code, params }] }` and is set only when nobody was eligible AND the evaluation was complete (then `candidates` is `[]`).
+Everything is limited to employees the CALLER may see (`employees.view`): `outOfScopeCount` says how many relevant employees were not
+evaluated for them (no ids), `hiddenCandidateCount` how many entries of a stored recommendation were dropped for this viewer,
+`evaluatedCount` how many were judged, `poolTruncated` that the evaluation ceiling (5000) stopped the pass, `scoringVersion` which rules ranked.
+
+Permissions are checked over the job's service area; a job outside the caller's scope is `404`.
+
+### GET /api/v1/dispatch/settings
+
+- **Purpose**: the dispatch mode `{ mode, modes: [{ mode, available }] }`. MANUAL and AI_ASSISTED (default) are available;
+  RULE_BASED_AUTO and OPTIMIZATION are listed with `available: false` ("not available in this phase").
+- **Auth**: session. **Permission**: `dispatch.view` (any scope).
+
+### PUT /api/v1/dispatch/settings
+
+- **Purpose**: change the mode. **Request body** (strict): `mode`. **Permission**: tenant-wide `dispatch.manage`.
+- **Errors**: `403`; `400` for an unknown mode, or for RULE_BASED_AUTO / OPTIMIZATION (`details: [{ field: "mode", code: "NOT_AVAILABLE" }]`).
+- **Audit**: `dispatch.mode_update`.
+
+### GET /api/v1/dispatch/jobs/{id}/candidates
+
+- **Purpose**: who passes the HARD eligibility rules for this job right now, unranked, and why everybody else does not:
+  `{ jobId, distanceBasis, eligibleEmployeeIds, blocked: [{ employeeId, failures: [{ code, params }] }] }` (every failed rule per
+  employee). plus `evaluatedCount`, `outOfScopeCount`, `poolTruncated`. Works in every mode (manual dispatch uses it); stores nothing.
+  Candidates are non-terminated employees in the caller's scope with a territory covering the job's area or a permission for its type/category.
+- **Auth**: session. **Permission**: `dispatch.view` over the job.
+
+### POST /api/v1/dispatch/jobs/{id}/recommendations
+
+- **Purpose**: generate and store a recommendation: eligibility filter, then ranking of the eligible by distance, workload, experience
+  with the job type and customer preference. Nothing is assigned. Pending recommendations of the job become SUPERSEDED. When nobody is
+  eligible the recommendation has no candidates and carries the blocking reasons; the job stays PENDING_ASSIGNMENT.
+- **Auth**: session. **Permission**: `dispatch.create` over the job. No body.
+- **Response**: `201 { data: recommendation }`. **Errors**: `403`; `404`; `409 CONFLICT` in MANUAL mode or for a stored mode this phase cannot run;
+  `409 INVALID_STATE_TRANSITION` when the job can no longer be assigned.
+- **Audit**: `dispatch.recommend`.
+
+### GET /api/v1/dispatch/jobs/{id}/recommendations
+
+- **Purpose**: the job's recommendations, newest first. **Permission**: `dispatch.view` over the job. Paged (`cursor`, `limit`).
+
+### GET /api/v1/dispatch/recommendations/{id}
+
+- **Purpose**: one recommendation. **Permission**: `dispatch.view` over its job. **Errors**: `404` (unknown, other company, out of scope).
+
+### POST /api/v1/dispatch/recommendations/{id}/approve
+
+- **Purpose**: assign the top-ranked candidate. Goes through the jobs module's assignment, so hard eligibility is re-checked now (a
+  candidate who became ineligible is refused with the reasons) and notifications are sent. The assignment is method
+  `RECOMMENDATION_APPROVED` with `recommendationId`; the recommendation becomes APPROVED with who, when and the reason.
+- **Auth**: session. **Permission**: `dispatch.assign` over the job, plus `jobs.assign`. **Request body** (strict): `reason` (optional).
+- **Response**: `200 { data: recommendation }`. **Errors**: `403`; `404`; `409 CONFLICT` no candidates, the top candidate is outside your scope, the top candidate is no longer
+  eligible (`error.details` as for `/jobs/{id}/assign`), or the job's assignments changed since generation (`details[0].code`
+  `STALE_RECOMMENDATION`: generate a new one); `409 INVALID_STATE_TRANSITION` already decided or superseded (a manual assignment supersedes it).
+  The decision is one atomic step: on any error nothing is assigned and the recommendation stays pending.
+- **Audit**: `dispatch.recommendation_approve` (chosen employee and rank, method), plus the jobs module's `job.assign`.
+
+### POST /api/v1/dispatch/recommendations/{id}/modify
+
+- **Purpose**: assign someone else (any employee, listed or not). Method `RECOMMENDATION_MODIFIED`; the recommendation becomes MODIFIED.
+  If the choice fails the hard rules the request must carry an `override`; it is then honoured only for a `jobs.approve` holder
+  (Owner/CEO, COO by default; `403` otherwise), never for employment failures, and the assignment is method `OVERRIDE` with
+  `overrideReason`, a `dispatch.override` job event and the audit trail.
+- **Auth**: session. **Permission**: `dispatch.assign` over the job, plus `jobs.assign`. **Request body** (strict): `employeeId`,
+  `reason` (both required), `override { reason }`. An employee outside your employee scope is `404`.
+- **Errors**: `400` missing reason, or the employee is the recommended one (approve instead); `403`; `404`; `409` not eligible and no
+  override (with reasons), or already decided. **Audit**: `dispatch.recommendation_modify` (chosen rank, `overrideUsed`, reason).
+
+### POST /api/v1/dispatch/recommendations/{id}/reject
+
+- **Purpose**: decline the recommendation; the job stays pending and nobody is assigned. The reason is kept.
+- **Auth**: session. **Permission**: `dispatch.assign` over the job. **Request body** (strict): `reason` (required).
+- **Errors**: `400`; `403`; `404`; `409 INVALID_STATE_TRANSITION`. **Audit**: `dispatch.recommendation_reject`.
