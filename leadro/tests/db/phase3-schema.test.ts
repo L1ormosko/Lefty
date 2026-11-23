@@ -31,6 +31,9 @@ interface Graph {
   outcomeId: string;
   recoveryCaseId: string;
   ruleId: string;
+  attachmentId: string;
+  completionId: string;
+  arrivalId: string;
 }
 
 const suffix = Math.random().toString(36).slice(2, 7);
@@ -74,7 +77,7 @@ async function buildGraph(label: string): Promise<Graph> {
       },
     });
     await tx.shift.update({ where: { id: shift.id }, data: { startLocationEventId: locationEvent.id } });
-    await tx.arrivalVerification.create({
+    const arrival = await tx.arrivalVerification.create({
       data: { tenantId, jobId: job.id, employeeId: employee.id, shiftId: shift.id, method: "GEOFENCE", arrivedAt: new Date(), locationEventId: locationEvent.id, accuracyM: 12, distanceToJobM: 15, geofenceRadiusM: 200, fieldEventId: fieldEvent.id },
     });
     const form = await tx.jobCompletionFormDefinition.create({
@@ -96,8 +99,11 @@ async function buildGraph(label: string): Promise<Graph> {
     const recoveryCase = await tx.leadRecoveryCase.create({
       data: {
         tenantId, number: 1, jobOutcomeId: outcome.id, jobId: job.id, customerId: customer.id, leadId: lead.id, technicianId: employee.id, orgUnitId: orgUnit.id,
-        lostReasonId: lostReason.id, outcomeAt: new Date(), ruleId: rule.id, ruleVersion: 1, initialValueMinor: 450000,
+        lostReasonId: lostReason.id, outcomeAt: new Date(), ruleId: rule.id, ruleVersion: 1, initialValueMinor: 450000, presenceReason: "not_evaluated",
       },
+    });
+    await tx.recoveryRuleRun.create({
+      data: { tenantId, ruleId: rule.id, ruleVersion: 1, jobOutcomeId: outcome.id, customerId: customer.id, matched: true, actionsTaken: ["create_case"], recoveryCaseId: recoveryCase.id },
     });
     await tx.recoveryCaseStatusHistory.create({ data: { tenantId, caseId: recoveryCase.id, toStatus: "NEW", actorUserId: user.id } });
     await tx.recoveryAttempt.create({ data: { tenantId, caseId: recoveryCase.id, employeeId: employee.id, channel: "PHONE", outcome: "NO_ANSWER", recordedById: user.id } });
@@ -108,7 +114,7 @@ async function buildGraph(label: string): Promise<Graph> {
       tenantId, userId: user.id, otherUserId: otherUser.id, employeeId: employee.id, otherEmployeeId: otherEmployee.id, orgUnitId: orgUnit.id,
       customerId: customer.id, otherCustomerId: otherCustomer.id, leadId: lead.id, jobTypeId: jobType.id, jobId: job.id, otherJobId: otherJob.id,
       shiftId: shift.id, locationEventId: locationEvent.id, fieldEventId: fieldEvent.id, formId: form.id, lostReasonId: lostReason.id,
-      outcomeId: outcome.id, recoveryCaseId: recoveryCase.id, ruleId: rule.id,
+      outcomeId: outcome.id, recoveryCaseId: recoveryCase.id, ruleId: rule.id, attachmentId: attachment.id, completionId: completion.id, arrivalId: arrival.id,
     };
   });
 }
@@ -130,7 +136,7 @@ describe("tenant isolation of every Phase 3 table", () => {
   const TABLES = [
     "Shift", "LocationEvent", "ArrivalVerification", "FieldEvent", "JobCompletionFormDefinition", "JobCompletion",
     "JobMaterialUsage", "JobFieldNote", "JobAttachment", "LostReason", "JobOutcome", "RecoveryRule", "LeadRecoveryCase",
-    "RecoveryCaseStatusHistory", "RecoveryAttempt", "FollowUpTask",
+    "RecoveryCaseStatusHistory", "RecoveryAttempt", "FollowUpTask", "RecoveryRuleRun",
   ];
 
   it.each(TABLES)("%s: each tenant sees only its own rows, and nothing without a tenant context", async (table) => {
@@ -339,8 +345,8 @@ describe("CHECK constraints", () => {
     await rejects(A, /shift_state_ended/, shift({ endedAt: new Date("2026-12-01T20:00:00Z") }));
     await rejects(A, /shift_dates/, shift({ status: "ENDED", endedAt: new Date("2026-12-01T11:00:00Z"), endRecordedAt: new Date() }));
     await rejects(A, /shift_end_by_other_needs_reason/, shift({ endedByUserId: A.userId, status: "ENDED", endedAt: new Date("2026-12-01T20:00:00Z"), endRecordedAt: new Date() }));
-    await rejects(A, /shift_other_exception_needs_note/, shift({ startException: "OTHER" }));
-    await expect(withTenant(A.tenantId, shift({ startException: "GPS_DISABLED", startExceptionNote: "phone GPS off" }))).resolves.toBeDefined();
+    await rejects(A, /shift_other_exception_needs_note/, shift({ startException: "OTHER", exceptionReviewStatus: "PENDING" }));
+    await expect(withTenant(A.tenantId, shift({ startException: "GPS_DISABLED", startExceptionNote: "phone GPS off", exceptionReviewStatus: "PENDING" }))).resolves.toBeDefined();
   });
 
   it("arrival verification: geofence needs its event, manager methods and decisions record who and why, exceptions are explained", async () => {
@@ -433,7 +439,8 @@ describe("CHECK constraints", () => {
     await rejects(A, /recovery_rule_pending_submitted/, rule({ status: "PENDING_APPROVAL" }));
     await rejects(A, /recovery_rule_active_activated/, rule({ status: "ACTIVE" }));
     // High-impact + ACTIVE needs an approver who is not the author.
-    await rejects(A, /recovery_rule_high_impact_approval/, rule({ status: "ACTIVE", activatedAt: new Date(), highImpact: true }));
+    await rejects(A, /recovery_rule_high_impact_needs_author/, rule({ highImpact: true }));
+    await rejects(A, /recovery_rule_high_impact_approval/, rule({ status: "ACTIVE", activatedAt: new Date(), highImpact: true, createdById: A.userId }));
     await rejects(A, /recovery_rule_high_impact_approval/, rule({ status: "ACTIVE", activatedAt: new Date(), highImpact: true, createdById: A.userId, approvedById: A.userId, approvedAt: new Date() }));
     await expect(
       withTenant(A.tenantId, rule({ status: "ACTIVE", activatedAt: new Date(), highImpact: true, createdById: A.userId, approvedById: A.otherUserId, approvedAt: new Date() })),
@@ -450,7 +457,7 @@ describe("CHECK constraints", () => {
     const makeCase = async (data: Partial<Prisma.LeadRecoveryCaseUncheckedCreateInput>) => {
       const o = await outcomeFor();
       return (tx: TenantTx) =>
-        tx.leadRecoveryCase.create({ data: { tenantId: A.tenantId, number: number++, jobOutcomeId: o.id, jobId: A.otherJobId, customerId: A.otherCustomerId, outcomeAt: new Date(), ...data } });
+        tx.leadRecoveryCase.create({ data: { tenantId: A.tenantId, number: number++, jobOutcomeId: o.id, jobId: A.otherJobId, customerId: A.otherCustomerId, outcomeAt: new Date(), presenceReason: "not_evaluated", ...data } });
     };
     await rejects(A, /lead_recovery_case_confirmed_needs_time/, await makeCase({ recoveredAmountMinor: 1000 }));
     await rejects(A, /lead_recovery_case_recovered_has_time/, await makeCase({ status: "RECOVERED" }));
@@ -465,7 +472,7 @@ describe("CHECK constraints", () => {
       withTenant(A.tenantId, await makeCase({ status: "RECOVERED", recoveredAt: new Date(), recoveredAmountMinor: 380000, collectedAmountMinor: 380000, estimatedValueMinor: 450000 })),
     ).resolves.toBeDefined();
     await expect(
-      withTenant(A.tenantId, await makeCase({ presenceStatus: "AT_LOCATION", presenceLocationEventId: A.locationEventId, presenceAccuracyM: 12, presenceEvaluatedAt: new Date() })),
+      withTenant(A.tenantId, await makeCase({ presenceStatus: "AT_LOCATION", presenceReason: null, technicianId: A.employeeId, presenceLocationEventId: A.locationEventId, presenceAccuracyM: 12, presenceEvaluatedAt: new Date() })),
     ).resolves.toBeDefined();
   });
 
@@ -536,7 +543,8 @@ describe("indexes the Phase 3 queries rely on", () => {
       "JobOutcome_tenantId_jobId_visitNumber_key", "RecoveryRule_one_active_per_key",
       "LeadRecoveryCase_tenantId_jobOutcomeId_key", "LeadRecoveryCase_tenantId_status_priority_outcomeAt_idx",
       "FollowUpTask_open_due_idx", "FollowUpTask_tenantId_assigneeId_status_dueAt_idx", "FollowUpTask_tenantId_dedupeKey_key",
-      "Job_id_customerId_tenantId_key",
+      "Job_id_customerId_tenantId_key", "LocationEvent_id_employeeId_tenantId_key", "RecoveryRuleRun_tenantId_ruleId_jobOutcomeId_key",
+      "RecoveryRule_id_version_tenantId_key",
     ];
     for (const name of expected) expect(names.has(name), name).toBe(true);
   });
@@ -557,5 +565,147 @@ describe("field maps classify every stored column", () => {
   it("the new Job milestone columns are classified (operational, not financial)", () => {
     expect(JOB_FIELD_MAP.enRouteAt).toBe("base");
     expect(JOB_FIELD_MAP.arrivedAt).toBe("base");
+    expect(JOB_FIELD_MAP.currentVisitNumber).toBe("base");
+  });
+});
+
+describe("fix round 1: retention purge, rule immutability, shift review, rule runs, tighter keys", () => {
+  it("retention: coordinates can be purged (UPDATE) from events referenced by a shift, an arrival and a recovery case", async () => {
+    // A.locationEventId is the shift's start event, the evidence of a GEOFENCE arrival and (below) a case's presence evidence.
+    await withTenant(A.tenantId, async (tx) => {
+      await tx.leadRecoveryCase.update({
+        where: { id: A.recoveryCaseId },
+        data: { presenceStatus: "AT_LOCATION", presenceReason: null, presenceLocationEventId: A.locationEventId, presenceAccuracyM: 12, presenceEvaluatedAt: new Date() },
+      });
+    });
+    await rejects(A, /foreign key|violates/i, (tx) => tx.locationEvent.delete({ where: { id: A.locationEventId } })); // deleting is not the strategy
+    const purged = await withTenant(A.tenantId, (tx) =>
+      tx.locationEvent.update({ where: { id: A.locationEventId }, data: { latitude: null, longitude: null, coordinatesPurgedAt: new Date() } }),
+    );
+    expect(purged).toMatchObject({ latitude: null, longitude: null, verification: "WITHIN_RADIUS", accuracyM: 12, distanceToJobM: 15 });
+    // The references and the derived verdict survive the purge.
+    expect(await withTenant(A.tenantId, (tx) => tx.arrivalVerification.count({ where: { id: A.arrivalId, locationEventId: A.locationEventId } }))).toBe(1);
+    expect(await withTenant(A.tenantId, (tx) => tx.shift.count({ where: { id: A.shiftId, startLocationEventId: A.locationEventId } }))).toBe(1);
+    // A purged event cannot get coordinates back under the same stamp.
+    await rejects(A, /location_event_purged_has_no_coordinates/, (tx) =>
+      tx.locationEvent.update({ where: { id: A.locationEventId }, data: { latitude: "32.7", longitude: "-96.8" } }),
+    );
+    // Without the stamp the position-less radius verdict is still refused.
+    await rejects(A, /location_event_radius_verdict_needs_data|location_event_position_or_reason/, (tx) =>
+      tx.locationEvent.update({ where: { id: A.locationEventId }, data: { coordinatesPurgedAt: null } }),
+    );
+  });
+
+  it("same-employee and same-job composite keys", async () => {
+    // A shift's start/end event must be the shift's own employee's event.
+    const foreignEvent = await withTenant(A.tenantId, (tx) =>
+      tx.locationEvent.create({ data: { tenantId: A.tenantId, employeeId: A.otherEmployeeId, kind: "VERIFICATION", source: "MANUAL" } }),
+    );
+    await rejects(A, /foreign key/i, (tx) => tx.shift.update({ where: { id: A.shiftId }, data: { endLocationEventId: foreignEvent.id } }));
+    // An arrival's evidence must be the arriving employee's event.
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.arrivalVerification.create({ data: { tenantId: A.tenantId, jobId: A.jobId, employeeId: A.otherEmployeeId, method: "TECHNICIAN", arrivedAt: new Date(), locationEventId: A.locationEventId } }),
+    );
+    // A completion's signature and a material's completion must belong to the same job.
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.jobCompletion.create({ data: { tenantId: A.tenantId, jobId: A.otherJobId, employeeId: A.employeeId, formDefinitionId: A.formId, formVersion: 1, values: {}, signatureAttachmentId: A.attachmentId } }),
+    );
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.jobMaterialUsage.create({ data: { tenantId: A.tenantId, jobId: A.otherJobId, completionId: A.completionId, name: "x", quantity: "1" } }),
+    );
+    // A case's presence evidence must be the case technician's event.
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { technicianId: A.otherEmployeeId } }),
+    );
+    // An arrival's field event is a tenant-safe reference.
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.arrivalVerification.create({ data: { tenantId: A.tenantId, jobId: A.jobId, employeeId: A.employeeId, method: "TECHNICIAN", arrivedAt: new Date(), fieldEventId: B.fieldEventId } }),
+    );
+  });
+
+  it("recovery cases: rule version is a real (id, version) pair; recovered lead/job share the customer; UNKNOWN presence needs a reason and no event", async () => {
+    await rejects(A, /foreign key/i, (tx) => tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { ruleVersion: 9 } }));
+    await rejects(A, /foreign key/i, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { recoveredLeadId: A.leadId, recoveredAt: new Date(), customerId: A.otherCustomerId } }),
+    );
+    await rejects(A, /lead_recovery_case_confirmed_needs_time/, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { recoveredLeadId: A.leadId } }),
+    );
+    await withTenant(A.tenantId, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { recoveredLeadId: A.leadId, recoveredAt: new Date(), status: "RECOVERED" } }),
+    );
+    await rejects(A, /lead_recovery_case_presence_evidence/, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { presenceStatus: "UNKNOWN", presenceReason: null } }),
+    );
+    await rejects(A, /lead_recovery_case_presence_evidence/, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: A.recoveryCaseId }, data: { presenceStatus: "UNKNOWN", presenceReason: "stale_location" } }),
+    ); // still references the evidence event
+  });
+
+  it("recovery rules: once out of DRAFT the behavior is immutable and status moves forward only", async () => {
+    const make = (data: Partial<Prisma.RecoveryRuleUncheckedCreateInput> = {}) =>
+      withTenant(A.tenantId, (tx) =>
+        tx.recoveryRule.create({
+          data: { tenantId: A.tenantId, ruleKey: `imm-${Math.random().toString(36).slice(2, 8)}`, name: "n", trigger: "job.not_converted", conditions: { outcomes: ["NOT_SOLD"] }, actions: [{ type: "recommend", code: "call_customer" }], createdById: A.userId, ...data },
+        }),
+      );
+    const draft = await make();
+    await expect(withTenant(A.tenantId, (tx) => tx.recoveryRule.update({ where: { id: draft.id }, data: { actions: [{ type: "create_case" }], highImpact: true } }))).resolves.toBeDefined();
+    const pending = await make({ status: "PENDING_APPROVAL", submittedAt: new Date(), highImpact: true });
+    for (const data of [
+      { conditions: { outcomes: ["SOLD"] } }, { actions: [] }, { trigger: "job.other" }, { priority: 1 }, { orgUnitId: A.orgUnitId }, { highImpact: false }, { version: 2 }, { createdById: A.otherUserId },
+    ] as Prisma.RecoveryRuleUncheckedUpdateInput[]) {
+      await rejects(A, /immutable/, (tx) => tx.recoveryRule.update({ where: { id: pending.id }, data }));
+    }
+    await rejects(A, /cannot move/, (tx) => tx.recoveryRule.update({ where: { id: pending.id }, data: { status: "DRAFT" } }));
+    // The approval (a different person) and activation columns stay writable, and an approved rule activates.
+    await withTenant(A.tenantId, (tx) => tx.recoveryRule.update({ where: { id: pending.id }, data: { status: "ACTIVE", approvedById: A.otherUserId, approvedAt: new Date(), activatedAt: new Date(), name: "Renamed" } }));
+    await withTenant(A.tenantId, (tx) => tx.recoveryRule.update({ where: { id: pending.id }, data: { status: "INACTIVE" } }));
+    await withTenant(A.tenantId, (tx) => tx.recoveryRule.update({ where: { id: pending.id }, data: { status: "SUPERSEDED" } }));
+    await rejects(A, /cannot move/, (tx) => tx.recoveryRule.update({ where: { id: pending.id }, data: { status: "ACTIVE" } }));
+  });
+
+  it("shift exception review: no exception, no review; PENDING has no decision; a decision records who, when and why", async () => {
+    const fresh = await withTenant(A.tenantId, (tx) => tx.employee.create({ data: { tenantId: A.tenantId, firstName: "Fresh", lastName: "Tech" } }));
+    const shift = (data: Partial<Prisma.ShiftUncheckedCreateInput>) => (tx: TenantTx) =>
+      tx.shift.create({ data: { tenantId: A.tenantId, employeeId: fresh.id, startedAt: new Date(), ...data } });
+    await rejects(A, /shift_exception_review/, shift({ exceptionReviewStatus: "PENDING" })); // review without an exception
+    await rejects(A, /shift_exception_review/, shift({ startException: "POOR_SIGNAL" })); // exception without a review state
+    await rejects(A, /shift_exception_review/, shift({ startException: "POOR_SIGNAL", exceptionReviewStatus: "APPROVED" }));
+    await rejects(A, /shift_exception_review/, shift({ startException: "POOR_SIGNAL", exceptionReviewStatus: "PENDING", reviewedById: A.userId }));
+    const created = await withTenant(A.tenantId, shift({ startException: "POOR_SIGNAL", exceptionReviewStatus: "PENDING" }));
+    await withTenant(A.tenantId, (tx) =>
+      tx.shift.update({ where: { id: created.id }, data: { exceptionReviewStatus: "APPROVED", reviewedById: A.userId, reviewedAt: new Date(), reviewNote: "Signal was poor at the depot" } }),
+    );
+  });
+
+  it("rule runs: one per (rule, outcome), composite FKs, append-only, consistent shape", async () => {
+    const run = (data: Partial<Prisma.RecoveryRuleRunUncheckedCreateInput>) => (tx: TenantTx) =>
+      tx.recoveryRuleRun.create({ data: { tenantId: A.tenantId, ruleId: A.ruleId, ruleVersion: 1, jobOutcomeId: A.outcomeId, customerId: A.customerId, matched: false, ...data } });
+    await rejects(A, /unique/i, run({}));
+    await rejects(A, /foreign key/i, (tx) => tx.recoveryRuleRun.create({ data: { tenantId: A.tenantId, ruleId: A.ruleId, ruleVersion: 5, jobOutcomeId: A.outcomeId, customerId: A.customerId, matched: false } }));
+    await rejects(A, /foreign key/i, (tx) => tx.recoveryRuleRun.create({ data: { tenantId: A.tenantId, ruleId: B.ruleId, ruleVersion: 1, jobOutcomeId: A.outcomeId, customerId: A.customerId, matched: false } }));
+    const otherOutcome = await withTenant(A.tenantId, (tx) => tx.jobOutcome.create({ data: { tenantId: A.tenantId, jobId: A.otherJobId, visitNumber: 777, outcome: "CUSTOMER_UNAVAILABLE" } }));
+    await rejects(A, /recovery_rule_run_shape/, run({ jobOutcomeId: otherOutcome.id, matched: false, actionsTaken: ["create_case"] }));
+    await rejects(A, /recovery_rule_run_shape/, run({ jobOutcomeId: otherOutcome.id, matched: true, skippedReason: "cooldown", actionsTaken: ["notify"] }));
+    await expect(withTenant(A.tenantId, run({ jobOutcomeId: otherOutcome.id, matched: true, skippedReason: "cooldown", actionsTaken: [] }))).resolves.toBeDefined();
+    await rejects(A, /append-only/, (tx) => tx.recoveryRuleRun.updateMany({ data: { skippedReason: "x" } }));
+    await rejects(A, /append-only/, (tx) => tx.recoveryRuleRun.deleteMany({}));
+  });
+
+  it("field event payload hash is sha256 hex; job visit number and REFUSED payment status exist", async () => {
+    await rejects(A, /field_event_payload_hash_format/, (tx) =>
+      tx.fieldEvent.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, clientEventId: uuid(31), type: "job.note", occurredAt: new Date(), result: "ACCEPTED", payloadHash: "abc" } }),
+    );
+    await expect(
+      withTenant(A.tenantId, (tx) =>
+        tx.fieldEvent.create({ data: { tenantId: A.tenantId, employeeId: A.employeeId, clientEventId: uuid(32), type: "job.note", occurredAt: new Date(), result: "ACCEPTED", payloadHash: "a".repeat(64) } }),
+      ),
+    ).resolves.toBeDefined();
+    expect((await withTenant(A.tenantId, (tx) => tx.job.findUniqueOrThrow({ where: { id: A.jobId } }))).currentVisitNumber).toBe(1);
+    await rejects(A, /job_current_visit_positive/, (tx) => tx.job.update({ where: { id: A.jobId }, data: { currentVisitNumber: 0 } }));
+    await expect(
+      withTenant(A.tenantId, (tx) => tx.jobOutcome.create({ data: { tenantId: A.tenantId, jobId: A.otherJobId, visitNumber: 901, outcome: "SOLD", paymentStatus: "REFUSED" } })),
+    ).resolves.toBeDefined();
   });
 });

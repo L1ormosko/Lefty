@@ -14,6 +14,9 @@ CREATE TYPE "LocationSource" AS ENUM ('DEVICE_GPS', 'GEOFENCE', 'MANUAL', 'MANAG
 CREATE TYPE "LocationVerification" AS ENUM ('UNVERIFIED', 'WITHIN_RADIUS', 'OUTSIDE_RADIUS', 'MANAGER_VERIFIED');
 
 -- CreateEnum
+CREATE TYPE "ShiftExceptionReview" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+
+-- CreateEnum
 CREATE TYPE "ArrivalMethod" AS ENUM ('TECHNICIAN', 'GEOFENCE', 'MANAGER');
 
 -- CreateEnum
@@ -32,7 +35,7 @@ CREATE TYPE "JobOutcomeType" AS ENUM ('SOLD', 'NOT_SOLD', 'CUSTOMER_UNAVAILABLE'
 CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'CARD', 'CHECK', 'BANK_TRANSFER', 'FINANCING', 'OTHER');
 
 -- CreateEnum
-CREATE TYPE "PaymentStatus" AS ENUM ('NOT_APPLICABLE', 'PENDING', 'PARTIAL', 'PAID', 'WAIVED');
+CREATE TYPE "PaymentStatus" AS ENUM ('NOT_APPLICABLE', 'PENDING', 'PARTIAL', 'PAID', 'WAIVED', 'REFUSED');
 
 -- CreateEnum
 CREATE TYPE "FieldNoteKind" AS ENUM ('NOTE', 'WORK_PERFORMED', 'ADDITIONAL_WORK_REQUESTED', 'CUSTOMER_APPROVAL');
@@ -66,6 +69,7 @@ ALTER TABLE "CustomerAddress" ADD COLUMN     "geofenceRadiusM" INTEGER;
 
 -- AlterTable
 ALTER TABLE "Job" ADD COLUMN     "arrivedAt" TIMESTAMPTZ(3),
+ADD COLUMN     "currentVisitNumber" INTEGER NOT NULL DEFAULT 1,
 ADD COLUMN     "enRouteAt" TIMESTAMPTZ(3);
 
 -- AlterTable
@@ -95,6 +99,10 @@ CREATE TABLE "Shift" (
     "endExceptionNote" TEXT,
     "endedByUserId" TEXT,
     "endReason" TEXT,
+    "exceptionReviewStatus" "ShiftExceptionReview",
+    "reviewedById" TEXT,
+    "reviewedAt" TIMESTAMPTZ(3),
+    "reviewNote" TEXT,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(3) NOT NULL,
 
@@ -122,6 +130,7 @@ CREATE TABLE "LocationEvent" (
     "deviceId" TEXT,
     "exception" "LocationException",
     "exceptionNote" TEXT,
+    "coordinatesPurgedAt" TIMESTAMPTZ(3),
     "recordedByUserId" TEXT,
     "fieldEventId" TEXT,
 
@@ -168,6 +177,7 @@ CREATE TABLE "FieldEvent" (
     "occurredAt" TIMESTAMPTZ(3) NOT NULL,
     "receivedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "payload" JSONB,
+    "payloadHash" TEXT,
     "result" "FieldEventResult" NOT NULL,
     "resultCode" TEXT,
     "entityType" TEXT,
@@ -381,6 +391,7 @@ CREATE TABLE "LeadRecoveryCase" (
     "recoveredAmountMinor" INTEGER,
     "collectedAmountMinor" INTEGER,
     "recoveredJobId" TEXT,
+    "recoveredLeadId" TEXT,
     "recoveredById" TEXT,
     "attemptCount" INTEGER NOT NULL DEFAULT 0,
     "lastAttemptAt" TIMESTAMPTZ(3),
@@ -458,6 +469,23 @@ CREATE TABLE "FollowUpTask" (
     CONSTRAINT "FollowUpTask_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "RecoveryRuleRun" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "ruleId" TEXT NOT NULL,
+    "ruleVersion" INTEGER NOT NULL,
+    "jobOutcomeId" TEXT NOT NULL,
+    "customerId" TEXT NOT NULL,
+    "matched" BOOLEAN NOT NULL,
+    "actionsTaken" JSONB NOT NULL DEFAULT '[]',
+    "skippedReason" TEXT,
+    "recoveryCaseId" TEXT,
+    "firedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RecoveryRuleRun_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE INDEX "Shift_tenantId_employeeId_startedAt_idx" ON "Shift"("tenantId", "employeeId", "startedAt");
 
@@ -489,7 +517,10 @@ CREATE INDEX "LocationEvent_tenantId_serverTime_idx" ON "LocationEvent"("tenantI
 CREATE UNIQUE INDEX "LocationEvent_id_tenantId_key" ON "LocationEvent"("id", "tenantId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "LocationEvent_id_jobId_tenantId_key" ON "LocationEvent"("id", "jobId", "tenantId");
+CREATE UNIQUE INDEX "LocationEvent_id_employeeId_tenantId_key" ON "LocationEvent"("id", "employeeId", "tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "LocationEvent_id_jobId_employeeId_tenantId_key" ON "LocationEvent"("id", "jobId", "employeeId", "tenantId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "LocationEvent_tenantId_fieldEventId_key" ON "LocationEvent"("tenantId", "fieldEventId");
@@ -549,6 +580,9 @@ CREATE INDEX "JobCompletion_tenantId_formDefinitionId_idx" ON "JobCompletion"("t
 CREATE UNIQUE INDEX "JobCompletion_id_tenantId_key" ON "JobCompletion"("id", "tenantId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "JobCompletion_id_jobId_tenantId_key" ON "JobCompletion"("id", "jobId", "tenantId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "JobCompletion_tenantId_jobId_visitNumber_key" ON "JobCompletion"("tenantId", "jobId", "visitNumber");
 
 -- CreateIndex
@@ -583,6 +617,9 @@ CREATE INDEX "JobAttachment_tenantId_jobId_capturedAt_idx" ON "JobAttachment"("t
 
 -- CreateIndex
 CREATE UNIQUE INDEX "JobAttachment_id_tenantId_key" ON "JobAttachment"("id", "tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "JobAttachment_id_jobId_tenantId_key" ON "JobAttachment"("id", "jobId", "tenantId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "JobAttachment_tenantId_jobId_clientEventId_key" ON "JobAttachment"("tenantId", "jobId", "clientEventId");
@@ -625,6 +662,9 @@ CREATE INDEX "RecoveryRule_tenantId_orgUnitId_idx" ON "RecoveryRule"("tenantId",
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RecoveryRule_id_tenantId_key" ON "RecoveryRule"("id", "tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RecoveryRule_id_version_tenantId_key" ON "RecoveryRule"("id", "version", "tenantId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RecoveryRule_tenantId_ruleKey_version_key" ON "RecoveryRule"("tenantId", "ruleKey", "version");
@@ -699,6 +739,18 @@ CREATE UNIQUE INDEX "FollowUpTask_id_tenantId_key" ON "FollowUpTask"("id", "tena
 CREATE UNIQUE INDEX "FollowUpTask_tenantId_dedupeKey_key" ON "FollowUpTask"("tenantId", "dedupeKey");
 
 -- CreateIndex
+CREATE INDEX "RecoveryRuleRun_tenantId_ruleId_customerId_firedAt_idx" ON "RecoveryRuleRun"("tenantId", "ruleId", "customerId", "firedAt");
+
+-- CreateIndex
+CREATE INDEX "RecoveryRuleRun_tenantId_jobOutcomeId_idx" ON "RecoveryRuleRun"("tenantId", "jobOutcomeId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RecoveryRuleRun_id_tenantId_key" ON "RecoveryRuleRun"("id", "tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RecoveryRuleRun_tenantId_ruleId_jobOutcomeId_key" ON "RecoveryRuleRun"("tenantId", "ruleId", "jobOutcomeId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Job_id_customerId_tenantId_key" ON "Job"("id", "customerId", "tenantId");
 
 -- AddForeignKey
@@ -711,10 +763,13 @@ ALTER TABLE "Shift" ADD CONSTRAINT "Shift_employeeId_tenantId_fkey" FOREIGN KEY 
 ALTER TABLE "Shift" ADD CONSTRAINT "Shift_orgUnitId_tenantId_fkey" FOREIGN KEY ("orgUnitId", "tenantId") REFERENCES "OrgUnit"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Shift" ADD CONSTRAINT "Shift_startLocationEventId_tenantId_fkey" FOREIGN KEY ("startLocationEventId", "tenantId") REFERENCES "LocationEvent"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Shift" ADD CONSTRAINT "Shift_startLocationEventId_employeeId_tenantId_fkey" FOREIGN KEY ("startLocationEventId", "employeeId", "tenantId") REFERENCES "LocationEvent"("id", "employeeId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Shift" ADD CONSTRAINT "Shift_endLocationEventId_tenantId_fkey" FOREIGN KEY ("endLocationEventId", "tenantId") REFERENCES "LocationEvent"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Shift" ADD CONSTRAINT "Shift_endLocationEventId_employeeId_tenantId_fkey" FOREIGN KEY ("endLocationEventId", "employeeId", "tenantId") REFERENCES "LocationEvent"("id", "employeeId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Shift" ADD CONSTRAINT "Shift_reviewedById_tenantId_fkey" FOREIGN KEY ("reviewedById", "tenantId") REFERENCES "User"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Shift" ADD CONSTRAINT "Shift_endedByUserId_tenantId_fkey" FOREIGN KEY ("endedByUserId", "tenantId") REFERENCES "User"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -753,7 +808,10 @@ ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_employeeId
 ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_shiftId_employeeId_tenantId_fkey" FOREIGN KEY ("shiftId", "employeeId", "tenantId") REFERENCES "Shift"("id", "employeeId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_locationEventId_jobId_tenantId_fkey" FOREIGN KEY ("locationEventId", "jobId", "tenantId") REFERENCES "LocationEvent"("id", "jobId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_locationEventId_jobId_employeeId_tenan_fkey" FOREIGN KEY ("locationEventId", "jobId", "employeeId", "tenantId") REFERENCES "LocationEvent"("id", "jobId", "employeeId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_fieldEventId_tenantId_fkey" FOREIGN KEY ("fieldEventId", "tenantId") REFERENCES "FieldEvent"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_verifiedByUserId_tenantId_fkey" FOREIGN KEY ("verifiedByUserId", "tenantId") REFERENCES "User"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -798,7 +856,7 @@ ALTER TABLE "JobCompletion" ADD CONSTRAINT "JobCompletion_employeeId_tenantId_fk
 ALTER TABLE "JobCompletion" ADD CONSTRAINT "JobCompletion_formDefinitionId_formVersion_tenantId_fkey" FOREIGN KEY ("formDefinitionId", "formVersion", "tenantId") REFERENCES "JobCompletionFormDefinition"("id", "version", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "JobCompletion" ADD CONSTRAINT "JobCompletion_signatureAttachmentId_tenantId_fkey" FOREIGN KEY ("signatureAttachmentId", "tenantId") REFERENCES "JobAttachment"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "JobCompletion" ADD CONSTRAINT "JobCompletion_signatureAttachmentId_jobId_tenantId_fkey" FOREIGN KEY ("signatureAttachmentId", "jobId", "tenantId") REFERENCES "JobAttachment"("id", "jobId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "JobCompletion" ADD CONSTRAINT "JobCompletion_submittedById_tenantId_fkey" FOREIGN KEY ("submittedById", "tenantId") REFERENCES "User"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -810,7 +868,7 @@ ALTER TABLE "JobMaterialUsage" ADD CONSTRAINT "JobMaterialUsage_tenantId_fkey" F
 ALTER TABLE "JobMaterialUsage" ADD CONSTRAINT "JobMaterialUsage_jobId_tenantId_fkey" FOREIGN KEY ("jobId", "tenantId") REFERENCES "Job"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "JobMaterialUsage" ADD CONSTRAINT "JobMaterialUsage_completionId_tenantId_fkey" FOREIGN KEY ("completionId", "tenantId") REFERENCES "JobCompletion"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "JobMaterialUsage" ADD CONSTRAINT "JobMaterialUsage_completionId_jobId_tenantId_fkey" FOREIGN KEY ("completionId", "jobId", "tenantId") REFERENCES "JobCompletion"("id", "jobId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "JobMaterialUsage" ADD CONSTRAINT "JobMaterialUsage_employeeId_tenantId_fkey" FOREIGN KEY ("employeeId", "tenantId") REFERENCES "Employee"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -891,10 +949,13 @@ ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_lostReasonId_ten
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_assignedToId_tenantId_fkey" FOREIGN KEY ("assignedToId", "tenantId") REFERENCES "Employee"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_ruleId_tenantId_fkey" FOREIGN KEY ("ruleId", "tenantId") REFERENCES "RecoveryRule"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_ruleId_ruleVersion_tenantId_fkey" FOREIGN KEY ("ruleId", "ruleVersion", "tenantId") REFERENCES "RecoveryRule"("id", "version", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_presenceLocationEventId_tenantId_fkey" FOREIGN KEY ("presenceLocationEventId", "tenantId") REFERENCES "LocationEvent"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_presenceLocationEventId_technicianId_tena_fkey" FOREIGN KEY ("presenceLocationEventId", "technicianId", "tenantId") REFERENCES "LocationEvent"("id", "employeeId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_recoveredLeadId_customerId_tenantId_fkey" FOREIGN KEY ("recoveredLeadId", "customerId", "tenantId") REFERENCES "Lead"("id", "customerId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT "LeadRecoveryCase_recoveredJobId_customerId_tenantId_fkey" FOREIGN KEY ("recoveredJobId", "customerId", "tenantId") REFERENCES "Job"("id", "customerId", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -950,6 +1011,21 @@ ALTER TABLE "FollowUpTask" ADD CONSTRAINT "FollowUpTask_completedById_tenantId_f
 -- AddForeignKey
 ALTER TABLE "FollowUpTask" ADD CONSTRAINT "FollowUpTask_createdById_tenantId_fkey" FOREIGN KEY ("createdById", "tenantId") REFERENCES "User"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
+-- AddForeignKey
+ALTER TABLE "RecoveryRuleRun" ADD CONSTRAINT "RecoveryRuleRun_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecoveryRuleRun" ADD CONSTRAINT "RecoveryRuleRun_ruleId_ruleVersion_tenantId_fkey" FOREIGN KEY ("ruleId", "ruleVersion", "tenantId") REFERENCES "RecoveryRule"("id", "version", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecoveryRuleRun" ADD CONSTRAINT "RecoveryRuleRun_jobOutcomeId_tenantId_fkey" FOREIGN KEY ("jobOutcomeId", "tenantId") REFERENCES "JobOutcome"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecoveryRuleRun" ADD CONSTRAINT "RecoveryRuleRun_customerId_tenantId_fkey" FOREIGN KEY ("customerId", "tenantId") REFERENCES "Customer"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecoveryRuleRun" ADD CONSTRAINT "RecoveryRuleRun_recoveryCaseId_tenantId_fkey" FOREIGN KEY ("recoveryCaseId", "tenantId") REFERENCES "LeadRecoveryCase"("id", "tenantId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════════
 -- Hand-written part (Prisma cannot express it): RLS, partial unique indexes, triggers, CHECKs.
@@ -989,6 +1065,51 @@ CREATE TRIGGER recovery_case_status_history_no_update_delete
 CREATE TRIGGER recovery_case_status_history_no_truncate
   BEFORE TRUNCATE ON "RecoveryCaseStatusHistory"
   FOR EACH STATEMENT EXECUTE FUNCTION leadro_append_only();
+
+CREATE TRIGGER recovery_rule_run_no_update_delete
+  BEFORE UPDATE OR DELETE ON "RecoveryRuleRun"
+  FOR EACH ROW EXECUTE FUNCTION leadro_append_only();
+CREATE TRIGGER recovery_rule_run_no_truncate
+  BEFORE TRUNCATE ON "RecoveryRuleRun"
+  FOR EACH STATEMENT EXECUTE FUNCTION leadro_append_only();
+
+-- ───────────── Recovery rules: an approval is bound to the approved content ─────────────
+-- Once a rule leaves DRAFT, what it does (trigger, conditions, actions, priority, scope, impact, identity, author) can never
+-- change: a different behavior is a new version (new row). Status only moves forward:
+--   PENDING_APPROVAL -> ACTIVE | INACTIVE;  ACTIVE -> INACTIVE | SUPERSEDED;  INACTIVE -> ACTIVE | SUPERSEDED;  SUPERSEDED is final.
+-- Approval columns (approvedById/At, submittedAt, activatedAt) and name/description/cooldown stay editable by the service.
+CREATE OR REPLACE FUNCTION leadro_recovery_rule_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD."status" <> 'DRAFT' THEN
+    IF NEW."conditions" IS DISTINCT FROM OLD."conditions"
+       OR NEW."actions" IS DISTINCT FROM OLD."actions"
+       OR NEW."trigger" IS DISTINCT FROM OLD."trigger"
+       OR NEW."priority" IS DISTINCT FROM OLD."priority"
+       OR NEW."orgUnitId" IS DISTINCT FROM OLD."orgUnitId"
+       OR NEW."highImpact" IS DISTINCT FROM OLD."highImpact"
+       OR NEW."ruleKey" <> OLD."ruleKey"
+       OR NEW."version" <> OLD."version"
+       OR NEW."createdById" IS DISTINCT FROM OLD."createdById" THEN
+      RAISE EXCEPTION 'a recovery rule that left DRAFT is immutable; create a new version (id %)', OLD."id"
+        USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF NEW."status" <> OLD."status" AND NOT (
+         (OLD."status" = 'PENDING_APPROVAL' AND NEW."status" IN ('ACTIVE', 'INACTIVE')) OR
+         (OLD."status" = 'ACTIVE' AND NEW."status" IN ('INACTIVE', 'SUPERSEDED')) OR
+         (OLD."status" = 'INACTIVE' AND NEW."status" IN ('ACTIVE', 'SUPERSEDED'))
+       ) THEN
+      RAISE EXCEPTION 'recovery rule status cannot move from % to %', OLD."status", NEW."status"
+        USING ERRCODE = 'restrict_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER recovery_rule_guard
+  BEFORE UPDATE ON "RecoveryRule"
+  FOR EACH ROW EXECUTE FUNCTION leadro_recovery_rule_guard();
 
 -- ───────────── Completion form definitions are immutable once published ─────────────
 -- Only a DRAFT may change its schema, version or target; status moves DRAFT -> ACTIVE -> RETIRED only.
@@ -1075,6 +1196,15 @@ ALTER TABLE "Shift" ADD CONSTRAINT shift_other_exception_needs_note CHECK (
   ("endException" IS DISTINCT FROM 'OTHER' OR length(btrim(coalesce("endExceptionNote", ''))) > 0)
 );
 
+-- Exception review (shifts.approve): no exception = no review; PENDING has no decision; APPROVED / REJECTED record who, when and why.
+ALTER TABLE "Shift" ADD CONSTRAINT shift_exception_review CHECK (
+  (("startException" IS NULL AND "endException" IS NULL) = ("exceptionReviewStatus" IS NULL)) AND
+  ("exceptionReviewStatus" IS NULL OR
+    ("exceptionReviewStatus" = 'PENDING' AND "reviewedById" IS NULL AND "reviewedAt" IS NULL) OR
+    ("exceptionReviewStatus" IN ('APPROVED', 'REJECTED') AND "reviewedById" IS NOT NULL AND "reviewedAt" IS NOT NULL
+       AND length(btrim(coalesce("reviewNote", ''))) > 0))
+);
+
 -- ───────────── Location events (sensitive, spec 17) ─────────────
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_latitude_range CHECK ("latitude" IS NULL OR ("latitude" >= -90 AND "latitude" <= 90));
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_longitude_range CHECK ("longitude" IS NULL OR ("longitude" >= -180 AND "longitude" <= 180));
@@ -1089,7 +1219,12 @@ ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_device_time_required
 -- No position needs an explanation: an exception (GPS off, denied, offline ...), a manual / manager entry, or a pure navigation event.
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_position_or_reason CHECK (
   "latitude" IS NOT NULL OR "exception" IS NOT NULL OR "source" IN ('MANUAL', 'MANAGER') OR "kind" = 'NAVIGATION_OPENED'
+  OR "coordinatesPurgedAt" IS NOT NULL
 );
+-- Retention strategy (spec 22.2): the purge NULLs latitude/longitude and stamps coordinatesPurgedAt; the row stays (it is referenced
+-- by shifts, arrivals and recovery cases). A purged event has no coordinates by definition.
+ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_purged_has_no_coordinates
+  CHECK ("coordinatesPurgedAt" IS NULL OR ("latitude" IS NULL AND "longitude" IS NULL));
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_manager_recorder
   CHECK ("source" <> 'MANAGER' OR "recordedByUserId" IS NOT NULL);
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_job_kinds_need_job
@@ -1104,6 +1239,7 @@ ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_distance_range
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_radius_verdict_needs_data CHECK (
   "verification" NOT IN ('WITHIN_RADIUS', 'OUTSIDE_RADIUS')
   OR ("latitude" IS NOT NULL AND "distanceToJobM" IS NOT NULL AND "jobId" IS NOT NULL)
+  OR ("coordinatesPurgedAt" IS NOT NULL AND "distanceToJobM" IS NOT NULL AND "jobId" IS NOT NULL)
 );
 ALTER TABLE "LocationEvent" ADD CONSTRAINT location_event_other_exception_needs_note
   CHECK ("exception" IS DISTINCT FROM 'OTHER' OR length(btrim(coalesce("exceptionNote", ''))) > 0);
@@ -1198,9 +1334,13 @@ ALTER TABLE "RecoveryRule" ADD CONSTRAINT recovery_rule_pending_submitted
 ALTER TABLE "RecoveryRule" ADD CONSTRAINT recovery_rule_active_activated
   CHECK ("status" <> 'ACTIVE' OR "activatedAt" IS NOT NULL);
 -- Separation of duties (spec 21.3): a high-impact rule is only ACTIVE after someone OTHER than its author approved it.
+-- The service derives highImpact from the actions (any action that creates urgent cases, notifies or creates tasks is high impact);
+-- the database only guarantees the author is known, so that separation of duties can be checked.
+ALTER TABLE "RecoveryRule" ADD CONSTRAINT recovery_rule_high_impact_needs_author
+  CHECK (NOT "highImpact" OR "createdById" IS NOT NULL);
 ALTER TABLE "RecoveryRule" ADD CONSTRAINT recovery_rule_high_impact_approval CHECK (
   NOT ("highImpact" AND "status" = 'ACTIVE')
-  OR ("approvedById" IS NOT NULL AND "approvedAt" IS NOT NULL AND ("createdById" IS NULL OR "approvedById" <> "createdById"))
+  OR ("approvedById" IS NOT NULL AND "approvedAt" IS NOT NULL AND "approvedById" <> "createdById")
 );
 
 -- ───────────── Recovery cases ─────────────
@@ -1217,7 +1357,7 @@ ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_amounts_non_neg
 -- Spec 9.7: confirmed revenue (recovered / collected amounts, the recovered job) exists only with a recovery time,
 -- and a RECOVERED case has one. Estimates live in their own column.
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_confirmed_needs_time CHECK (
-  ("recoveredAmountMinor" IS NULL AND "collectedAmountMinor" IS NULL AND "recoveredJobId" IS NULL AND "recoveredById" IS NULL) OR "recoveredAt" IS NOT NULL
+  ("recoveredAmountMinor" IS NULL AND "collectedAmountMinor" IS NULL AND "recoveredJobId" IS NULL AND "recoveredLeadId" IS NULL AND "recoveredById" IS NULL) OR "recoveredAt" IS NOT NULL
 );
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_recovered_has_time
   CHECK ("status" <> 'RECOVERED' OR "recoveredAt" IS NOT NULL);
@@ -1228,9 +1368,14 @@ ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_assigned_has_ow
   CHECK ("status" <> 'ASSIGNED' OR "assignedToId" IS NOT NULL);
 -- Presence (spec 26.5): AT / LEFT need the location they were derived from, its accuracy and the evaluation time.
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_presence_evidence CHECK (
-  "presenceStatus" = 'UNKNOWN'
-  OR ("presenceLocationEventId" IS NOT NULL AND "presenceAccuracyM" IS NOT NULL AND "presenceEvaluatedAt" IS NOT NULL)
+  ("presenceStatus" = 'UNKNOWN'
+     AND "presenceLocationEventId" IS NULL AND length(btrim(coalesce("presenceReason", ''))) > 0)
+  OR ("presenceStatus" <> 'UNKNOWN'
+     AND "presenceLocationEventId" IS NOT NULL AND "presenceAccuracyM" IS NOT NULL AND "presenceEvaluatedAt" IS NOT NULL)
 );
+-- The presence evidence is the technician's own event (composite FK on (event, technician)), so a technician is required with it.
+ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_presence_needs_technician
+  CHECK ("presenceLocationEventId" IS NULL OR "technicianId" IS NOT NULL);
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_not_own_recovery CHECK ("recoveredJobId" IS NULL OR "recoveredJobId" <> "jobId");
 ALTER TABLE "LeadRecoveryCase" ADD CONSTRAINT lead_recovery_case_rule_version_pair CHECK (("ruleId" IS NULL) = ("ruleVersion" IS NULL));
 
@@ -1255,3 +1400,14 @@ ALTER TABLE "FollowUpTask" ADD CONSTRAINT follow_up_task_state CHECK (
 );
 ALTER TABLE "FollowUpTask" ADD CONSTRAINT follow_up_task_title_present CHECK (length(btrim("title")) > 0);
 ALTER TABLE "FollowUpTask" ADD CONSTRAINT follow_up_task_dedupe_key_present CHECK ("dedupeKey" IS NULL OR length("dedupeKey") > 0);
+
+-- ───────────── Rule runs, field event hash, visit number ─────────────
+ALTER TABLE "RecoveryRuleRun" ADD CONSTRAINT recovery_rule_run_shape CHECK (
+  jsonb_typeof("actionsTaken") = 'array'
+  AND ("skippedReason" IS NULL OR (length(btrim("skippedReason")) > 0 AND jsonb_array_length("actionsTaken") = 0))
+  AND ("matched" OR jsonb_array_length("actionsTaken") = 0)
+  AND "ruleVersion" >= 1
+);
+ALTER TABLE "FieldEvent" ADD CONSTRAINT field_event_payload_hash_format
+  CHECK ("payloadHash" IS NULL OR "payloadHash" ~ '^[0-9a-f]{64}$');
+ALTER TABLE "Job" ADD CONSTRAINT job_current_visit_positive CHECK ("currentVisitNumber" >= 1);

@@ -189,6 +189,7 @@ model Tenant {
   recoveryCaseStatusHistory  RecoveryCaseStatusHistory[]
   recoveryAttempts           RecoveryAttempt[]
   followUpTasks              FollowUpTask[]
+  recoveryRuleRuns           RecoveryRuleRun[]
 }
 
 model LegalEntity {
@@ -438,6 +439,8 @@ model User {
   recoveryAttemptsRecorded RecoveryAttempt[]             @relation("RecoveryAttemptRecordedBy")
   followUpsCompleted       FollowUpTask[]                @relation("FollowUpCompletedBy")
   followUpsCreated         FollowUpTask[]                @relation("FollowUpCreatedBy")
+
+  shiftsReviewed Shift[] @relation("ShiftReviewedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -1049,6 +1052,8 @@ model Customer {
   recoveryCases LeadRecoveryCase[]
   followUpTasks FollowUpTask[]
 
+  recoveryRuleRuns RecoveryRuleRun[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, number])
   @@index([tenantId, archivedAt, createdAt])
@@ -1211,6 +1216,8 @@ model Lead {
   // Phase 3
   recoveryCases LeadRecoveryCase[]
   followUpTasks FollowUpTask[]
+
+  recoveredByCases LeadRecoveryCase[] @relation("RecoveredLead")
 
   @@unique([id, tenantId])
   @@unique([id, customerId, tenantId])
@@ -1594,18 +1601,23 @@ model Job {
   quotedAmountMinor        Int?
   currency                 String       @default("USD") @db.Char(3)
   /// Phase 3 execution milestones (denormalized for lists; the full trail is JobEvent).
+  /// The visit being worked: JobOutcome / JobCompletion rows of this job use it as `visitNumber`. Starts at 1 and is
+  /// incremented by the jobs lifecycle (in the same transaction as the status change) when a job whose visit already has an
+  /// outcome goes back to SCHEDULED after REQUIRES_RETURN_VISIT / RESCHEDULED / CUSTOMER_UNAVAILABLE.
+  currentVisitNumber       Int          @default(1)
   enRouteAt                DateTime?    @db.Timestamptz(3)
-  arrivedAt                DateTime?    @db.Timestamptz(3)
-  startedAt                DateTime?    @db.Timestamptz(3)
-  completedAt              DateTime?    @db.Timestamptz(3)
-  closedAt                 DateTime?    @db.Timestamptz(3)
-  cancelledAt              DateTime?    @db.Timestamptz(3)
+
+  arrivedAt    DateTime? @db.Timestamptz(3)
+  startedAt    DateTime? @db.Timestamptz(3)
+  completedAt  DateTime? @db.Timestamptz(3)
+  closedAt     DateTime? @db.Timestamptz(3)
+  cancelledAt  DateTime? @db.Timestamptz(3)
   /// Reason when CANCELLED / FAILED / ON_HOLD etc. (the full trail is in JobStatusHistory).
-  statusReason             String?
-  archivedAt               DateTime?    @db.Timestamptz(3)
-  createdById              String?
-  createdAt                DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt                DateTime     @updatedAt @db.Timestamptz(3)
+  statusReason String?
+  archivedAt   DateTime? @db.Timestamptz(3)
+  createdById  String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
 
   tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   customer        Customer                 @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
@@ -1973,6 +1985,13 @@ enum LocationVerification {
   MANAGER_VERIFIED
 }
 
+/// Review of a shift started or ended under an exception (shifts.approve).
+enum ShiftExceptionReview {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum ArrivalMethod {
   TECHNICIAN
   GEOFENCE
@@ -2023,6 +2042,7 @@ enum PaymentStatus {
   PARTIAL
   PAID
   WAIVED
+  REFUSED
 }
 
 enum FieldNoteKind {
@@ -2100,35 +2120,41 @@ enum FollowUpOrigin {
 /// index), so starting twice is idempotent. `startedAt` / `endedAt` are when it happened (device
 /// clock for offline events); `*RecordedAt` is the server clock.
 model Shift {
-  id                   String             @id @default(cuid())
-  tenantId             String
-  employeeId           String
+  id                    String                @id @default(cuid())
+  tenantId              String
+  employeeId            String
   /// The employee's placement when the shift started (snapshot): drives ORG_UNIT scope for managers.
-  orgUnitId            String?
-  status               ShiftStatus        @default(ACTIVE)
-  startedAt            DateTime           @db.Timestamptz(3)
-  startRecordedAt      DateTime           @default(now()) @db.Timestamptz(3)
-  endedAt              DateTime?          @db.Timestamptz(3)
-  endRecordedAt        DateTime?          @db.Timestamptz(3)
-  deviceId             String?
-  startLocationEventId String?
-  endLocationEventId   String?
+  orgUnitId             String?
+  status                ShiftStatus           @default(ACTIVE)
+  startedAt             DateTime              @db.Timestamptz(3)
+  startRecordedAt       DateTime              @default(now()) @db.Timestamptz(3)
+  endedAt               DateTime?             @db.Timestamptz(3)
+  endRecordedAt         DateTime?             @db.Timestamptz(3)
+  deviceId              String?
+  startLocationEventId  String?
+  endLocationEventId    String?
   /// Exceptions: GPS disabled, permission denied, offline -> manual start/end with a note (spec 8.1, 17.4).
-  startException       LocationException?
-  startExceptionNote   String?
-  endException         LocationException?
-  endExceptionNote     String?
+  startException        LocationException?
+  startExceptionNote    String?
+  endException          LocationException?
+  endExceptionNote      String?
   /// Set when someone other than the technician ended or corrected the shift.
-  endedByUserId        String?
-  endReason            String?
-  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
-  updatedAt            DateTime           @updatedAt @db.Timestamptz(3)
+  endedByUserId         String?
+  endReason             String?
+  /// Review of the start/end exception (null = no exception). PENDING until someone with shifts.approve decides.
+  exceptionReviewStatus ShiftExceptionReview?
+  reviewedById          String?
+  reviewedAt            DateTime?             @db.Timestamptz(3)
+  reviewNote            String?
+  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
 
   tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   employee           Employee              @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
   orgUnit            OrgUnit?              @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  startLocationEvent LocationEvent?        @relation("ShiftStartEvent", fields: [startLocationEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  endLocationEvent   LocationEvent?        @relation("ShiftEndEvent", fields: [endLocationEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  startLocationEvent LocationEvent?        @relation("ShiftStartEvent", fields: [startLocationEventId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  endLocationEvent   LocationEvent?        @relation("ShiftEndEvent", fields: [endLocationEventId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  reviewedBy         User?                 @relation("ShiftReviewedBy", fields: [reviewedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   endedBy            User?                 @relation("ShiftEndedBy", fields: [endedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
   locationEvents     LocationEvent[]       @relation("ShiftLocationEvents")
   arrivals           ArrivalVerification[]
@@ -2146,31 +2172,34 @@ model Shift {
 /// Coordinates may be absent when `exception` explains why (GPS off, permission denied, offline) or the
 /// event is manual / manager-entered / NAVIGATION_OPENED. Whenever coordinates exist, so does `accuracyM`.
 model LocationEvent {
-  id               String               @id @default(cuid())
-  tenantId         String
-  employeeId       String
-  shiftId          String?
-  jobId            String?
-  orgUnitId        String?
-  kind             LocationEventKind
-  source           LocationSource
-  verification     LocationVerification @default(UNVERIFIED)
-  latitude         Decimal?             @db.Decimal(9, 6)
-  longitude        Decimal?             @db.Decimal(9, 6)
+  id                  String               @id @default(cuid())
+  tenantId            String
+  employeeId          String
+  shiftId             String?
+  jobId               String?
+  orgUnitId           String?
+  kind                LocationEventKind
+  source              LocationSource
+  verification        LocationVerification @default(UNVERIFIED)
+  latitude            Decimal?             @db.Decimal(9, 6)
+  longitude           Decimal?             @db.Decimal(9, 6)
   /// Horizontal accuracy radius in whole meters, as reported by the device (rounded up).
-  accuracyM        Int?
+  accuracyM           Int?
   /// Straight-line distance to the job address and the radius it was judged against (arrival checks).
-  distanceToJobM   Int?
-  geofenceRadiusM  Int?
+  distanceToJobM      Int?
+  geofenceRadiusM     Int?
   /// Device clock (null for manual / manager entries) vs the server's receive time (spec 17.2).
-  deviceTime       DateTime?            @db.Timestamptz(3)
-  serverTime       DateTime             @default(now()) @db.Timestamptz(3)
-  deviceId         String?
-  exception        LocationException?
-  exceptionNote    String?
+  deviceTime          DateTime?            @db.Timestamptz(3)
+  serverTime          DateTime             @default(now()) @db.Timestamptz(3)
+  deviceId            String?
+  exception           LocationException?
+  exceptionNote       String?
+  /// Retention (spec 22.2): the purge NULLs latitude/longitude and stamps this; the row (kind, times, accuracy, distance) stays
+  /// because shifts, arrivals and recovery cases reference it.
+  coordinatesPurgedAt DateTime?            @db.Timestamptz(3)
   /// Who entered it when source = MANAGER (or MANUAL on someone's behalf).
-  recordedByUserId String?
-  fieldEventId     String?
+  recordedByUserId    String?
+  fieldEventId        String?
 
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   employee   Employee    @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
@@ -2186,7 +2215,8 @@ model LocationEvent {
   recoveryPresence     LeadRecoveryCase[]
 
   @@unique([id, tenantId])
-  @@unique([id, jobId, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@unique([id, jobId, employeeId, tenantId])
   @@unique([tenantId, fieldEventId])
   @@index([tenantId, employeeId, serverTime])
   @@index([tenantId, jobId, kind, serverTime])
@@ -2226,7 +2256,8 @@ model ArrivalVerification {
   job           Job            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
   employee      Employee       @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
   shift         Shift?         @relation(fields: [shiftId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
-  locationEvent LocationEvent? @relation(fields: [locationEventId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
+  locationEvent LocationEvent? @relation(fields: [locationEventId, jobId, employeeId, tenantId], references: [id, jobId, employeeId, tenantId], onDelete: Restrict)
+  fieldEvent    FieldEvent?    @relation(fields: [fieldEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
   verifiedBy    User?          @relation("ArrivalVerifiedBy", fields: [verifiedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
@@ -2260,6 +2291,8 @@ model FieldEvent {
   occurredAt    DateTime         @db.Timestamptz(3)
   receivedAt    DateTime         @default(now()) @db.Timestamptz(3)
   payload       Json?
+  /// sha256 (hex) of the canonical event content: a replay with the same clientEventId but a different hash is a CONFLICT.
+  payloadHash   String?
   result        FieldEventResult
   /// Stable machine code for REJECTED / CONFLICT (e.g. "job.invalid_transition").
   resultCode    String?
@@ -2267,12 +2300,13 @@ model FieldEvent {
   entityType    String?
   entityId      String?
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  employee       Employee        @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  actor          User?           @relation("FieldEventActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  job            Job?            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  shift          Shift?          @relation(fields: [shiftId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
-  locationEvents LocationEvent[] @relation("LocationEventFieldEvent")
+  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee       Employee              @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  actor          User?                 @relation("FieldEventActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  job            Job?                  @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  shift          Shift?                @relation(fields: [shiftId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  locationEvents LocationEvent[]       @relation("LocationEventFieldEvent")
+  arrivals       ArrivalVerification[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, employeeId, clientEventId])
@@ -2342,11 +2376,12 @@ model JobCompletion {
   job            Job                         @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
   employee       Employee                    @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
   formDefinition JobCompletionFormDefinition @relation(fields: [formDefinitionId, formVersion, tenantId], references: [id, version, tenantId], onDelete: Restrict)
-  signature      JobAttachment?              @relation("CompletionSignature", fields: [signatureAttachmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  signature      JobAttachment?              @relation("CompletionSignature", fields: [signatureAttachmentId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
   submittedBy    User?                       @relation("JobCompletionSubmittedBy", fields: [submittedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   materials      JobMaterialUsage[]
 
   @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
   @@unique([tenantId, jobId, visitNumber])
   @@unique([tenantId, jobId, clientEventId])
   @@index([tenantId, employeeId, submittedAt])
@@ -2372,7 +2407,7 @@ model JobMaterialUsage {
 
   tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   job        Job            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  completion JobCompletion? @relation(fields: [completionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  completion JobCompletion? @relation(fields: [completionId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
   employee   Employee?      @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
@@ -2435,6 +2470,7 @@ model JobAttachment {
   signedFor  JobCompletion[] @relation("CompletionSignature")
 
   @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
   @@unique([tenantId, jobId, clientEventId])
   @@index([tenantId, jobId, capturedAt])
 }
@@ -2501,6 +2537,8 @@ model JobOutcome {
   recordedBy    User?              @relation("JobOutcomeRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   recoveryCases LeadRecoveryCase[]
 
+  ruleRuns RecoveryRuleRun[]
+
   @@unique([id, tenantId])
   @@unique([id, jobId, tenantId])
   @@unique([tenantId, jobId, visitNumber])
@@ -2548,8 +2586,10 @@ model RecoveryRule {
   createdBy  User?              @relation("RecoveryRuleCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
   approvedBy User?              @relation("RecoveryRuleApprovedBy", fields: [approvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   cases      LeadRecoveryCase[]
+  runs       RecoveryRuleRun[]
 
   @@unique([id, tenantId])
+  @@unique([id, version, tenantId])
   @@unique([tenantId, ruleKey, version])
   @@index([tenantId, status, trigger, priority])
   @@index([tenantId, orgUnitId])
@@ -2605,6 +2645,7 @@ model LeadRecoveryCase {
   recoveredAmountMinor    Int?
   collectedAmountMinor    Int?
   recoveredJobId          String?
+  recoveredLeadId         String?
   recoveredById           String?
   attemptCount            Int            @default(0)
   lastAttemptAt           DateTime?      @db.Timestamptz(3)
@@ -2622,13 +2663,15 @@ model LeadRecoveryCase {
   orgUnit          OrgUnit?                    @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
   lostReason       LostReason?                 @relation(fields: [lostReasonId, tenantId], references: [id, tenantId], onDelete: Restrict)
   assignedTo       Employee?                   @relation("RecoveryCaseAssignee", fields: [assignedToId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  rule             RecoveryRule?               @relation(fields: [ruleId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  presenceLocation LocationEvent?              @relation(fields: [presenceLocationEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  rule             RecoveryRule?               @relation(fields: [ruleId, ruleVersion, tenantId], references: [id, version, tenantId], onDelete: Restrict)
+  presenceLocation LocationEvent?              @relation(fields: [presenceLocationEventId, technicianId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  recoveredLead    Lead?                       @relation("RecoveredLead", fields: [recoveredLeadId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
   recoveredJob     Job?                        @relation("RecoveredJob", fields: [recoveredJobId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
   recoveredBy      User?                       @relation("RecoveryCaseRecoveredBy", fields: [recoveredById, tenantId], references: [id, tenantId], onDelete: Restrict)
   attempts         RecoveryAttempt[]
   statusHistory    RecoveryCaseStatusHistory[]
   followUps        FollowUpTask[]
+  ruleRuns         RecoveryRuleRun[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, number])
@@ -2742,4 +2785,34 @@ model FollowUpTask {
   @@index([tenantId, customerId])
   @@index([tenantId, jobId])
   @@index([tenantId, recoveryCaseId])
+}
+
+/// One evaluation of one rule version for one job outcome (spec 9.6; explainability, cooldown and loop safety). Append-only
+/// (trigger). `(tenantId, ruleId, jobOutcomeId)` is unique, so re-running the engine for an outcome never fires a rule twice.
+/// Cooldown = look up the latest run of the rule for the same customer inside `cooldownMinutes`. `actionsTaken` is an array of
+/// action codes ("create_case", "notify", "create_follow_up", "recommend"); `skippedReason` is a machine code ("cooldown",
+/// "conditions_not_met", "rule_inactive", ...) and, when set, `actionsTaken` is empty. Dry runs are NOT stored.
+model RecoveryRuleRun {
+  id             String   @id @default(cuid())
+  tenantId       String
+  ruleId         String
+  ruleVersion    Int
+  jobOutcomeId   String
+  customerId     String
+  matched        Boolean
+  actionsTaken   Json     @default("[]")
+  skippedReason  String?
+  recoveryCaseId String?
+  firedAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  rule         RecoveryRule      @relation(fields: [ruleId, ruleVersion, tenantId], references: [id, version, tenantId], onDelete: Restrict)
+  jobOutcome   JobOutcome        @relation(fields: [jobOutcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer     Customer          @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recoveryCase LeadRecoveryCase? @relation(fields: [recoveryCaseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, ruleId, jobOutcomeId])
+  @@index([tenantId, ruleId, customerId, firedAt])
+  @@index([tenantId, jobOutcomeId])
 }

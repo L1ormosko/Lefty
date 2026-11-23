@@ -16,7 +16,10 @@ describe("permission catalog", () => {
         create: { key: permissionKey(def), module: def.module, action: def.action, sensitive: def.sensitive ?? false },
       });
     }
-    expect(await prisma.permission.count()).toBe(PERMISSION_CATALOG.length);
+    // The Permission table is global and shared by every worktree's test run, so assert "every catalog key is stored"
+    // (a subset check), never an exact row count.
+    const stored = new Set((await prisma.permission.findMany({ select: { key: true } })).map((p) => p.key));
+    for (const def of PERMISSION_CATALOG) expect(stored.has(permissionKey(def)), permissionKey(def)).toBe(true);
   });
 
   it("defines the Phase 2 modules with the documented actions", () => {

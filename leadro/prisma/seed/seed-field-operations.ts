@@ -59,7 +59,11 @@ export async function seedFieldOperationsData(tenantId: string): Promise<SeedFie
     const rule = EXAMPLE_RECOVERY_RULE;
     const alreadySeeded = await tx.recoveryRule.findFirst({ where: { ruleKey: rule.ruleKey }, select: { id: true } });
     const reason = await tx.lostReason.findFirst({ where: { code: rule.lostReasonCode }, select: { id: true } });
-    if (!alreadySeeded && reason) {
+    // A high-impact rule needs a known author (CHECK): the Owner when present, else the first user.
+    const author =
+      (await tx.user.findFirst({ where: { email: { startsWith: "owner@" } }, select: { id: true } })) ??
+      (await tx.user.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }));
+    if (!alreadySeeded && reason && author) {
       await tx.recoveryRule.create({
         data: {
           tenantId,
@@ -71,6 +75,7 @@ export async function seedFieldOperationsData(tenantId: string): Promise<SeedFie
           priority: rule.priority,
           trigger: rule.trigger,
           highImpact: true,
+          createdById: author.id,
           cooldownMinutes: rule.cooldownMinutes,
           conditions: { outcomes: ["NOT_SOLD"], lostReasonIds: [reason.id], presence: ["AT_LOCATION"] },
           actions: [
