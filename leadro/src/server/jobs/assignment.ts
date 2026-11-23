@@ -2,7 +2,7 @@ import type { AssignmentMethod } from "@prisma/client";
 import { ASSIGNABLE_STATUSES } from "@/lib/job-lifecycle";
 import type { EligibilityFailure } from "@/lib/eligibility";
 import { auditContextFields, recordAudit } from "@/server/audit";
-import { canInTx, enforceInTx } from "@/server/authz";
+import { canInTx, employeeScopeColumns, enforceInTx, scopeFilterInTx } from "@/server/authz";
 import {
   ConflictError,
   ForbiddenError,
@@ -93,10 +93,14 @@ async function eligibilityFailures(tx: TenantTx, actor: Actor, job: JobForChange
 }
 
 /** Validates that the target exists and may be assigned this job at all (employee exists; team is an active TEAM inside the service area). */
-async function validateTarget(tx: TenantTx, tenantId: string, job: JobForChange, input: AssignJobInput): Promise<Target> {
+async function validateTarget(tx: TenantTx, actor: Actor, job: JobForChange, input: AssignJobInput): Promise<Target> {
+  const tenantId = actor.tenantId;
   if (input.employeeId) {
-    const employee = await tx.employee.findFirst({ where: { id: input.employeeId, tenantId }, select: { id: true } });
-    if (!employee) throw new ValidationError({ message: "Unknown employee.", field: "employeeId" });
+    // The target must be someone the caller may see (`employees.view`, any field set). An employee outside that scope is
+    // indistinguishable from one that does not exist (404): assigning must not confirm that a person exists elsewhere.
+    const visible = await scopeFilterInTx(tx, actor, "employees.view", employeeScopeColumns);
+    const employee = await tx.employee.findFirst({ where: { AND: [visible, { id: input.employeeId, tenantId }] }, select: { id: true } });
+    if (!employee) throw new NotFoundError();
     return { employeeId: employee.id };
   }
   const teamOrgUnitId = input.teamOrgUnitId as string;
@@ -122,117 +126,145 @@ async function validateTarget(tx: TenantTx, tenantId: string, job: JobForChange,
  */
 export async function assignJob(actor: Actor, ctx: RequestContext, jobId: string, input: AssignJobInput): Promise<Record<string, unknown>> {
   const notificationIds: string[] = [];
-  const result = await withTenant(actor.tenantId, async (tx) => {
-    await enforceInTx(tx, actor, "jobs.assign");
-    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
-    // concurrent assignment or status change cannot make this check stale (TOCTOU).
-    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
-    const ref = await jobResourceRef(tx, actor.tenantId, jobId);
-    if (!ref) throw new NotFoundError();
-    const decision = await enforceInTx(tx, actor, "jobs.assign", ref);
-    if (!decision.fieldSets.includes("base")) throw new ForbiddenError();
-
-    const job = await loadJobForChange(tx, actor.tenantId, jobId);
-    if (!ASSIGNABLE_STATUSES.includes(job.status)) {
-      throw new InvalidStateTransitionError({ message: `A job in status ${job.status} can no longer be assigned or reassigned.` });
-    }
-    const target = await validateTarget(tx, actor.tenantId, job, input);
-
-    const current = await tx.jobAssignment.findMany({
-      where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" },
-      select: { id: true, employeeId: true, teamOrgUnitId: true },
-    });
-    // Optional precondition: the caller names the assignment it saw (null = it saw none). Two dispatchers acting on the same
-    // stale screen: the second gets 409 instead of silently replacing the first one's decision.
-    if (input.expectedAssignmentId !== undefined) {
-      const stale = input.expectedAssignmentId === null ? current.length > 0 : !current.some((row) => row.id === input.expectedAssignmentId);
-      if (stale) throw new ConflictError({ message: "The job's assignment changed since you loaded it. Reload and decide again.", field: "expectedAssignmentId" });
-    }
-    const alreadyAssigned = current.some((row) => ("employeeId" in target ? row.employeeId === target.employeeId : row.teamOrgUnitId === target.teamOrgUnitId));
-    if (alreadyAssigned) throw new ConflictError({ message: "The job is already assigned to this employee or team." });
-
-    let method: AssignmentMethod = "MANUAL";
-    const { failures, overridable } = await eligibilityFailures(tx, actor, job, target);
-    if (failures.length > 0) {
-      const field = "employeeId" in target ? "employeeId" : "teamOrgUnitId";
-      if (!input.override) {
-        throw new ConflictError({
-          message: "The assignee is not eligible for this job. Fix the reasons below or ask someone with approval rights to override.",
-          field,
-          details: failureIssues(field, failures),
-        });
-      }
-      if (!overridable) {
-        throw new ConflictError({ message: "An inactive or terminated employee cannot be assigned, even with an override.", field, details: failureIssues(field, failures) });
-      }
-      if (!(await canInTx(tx, actor, "jobs.approve", ref)).allowed) {
-        throw new ForbiddenError({ message: "Assigning an ineligible employee needs approval rights (jobs.approve)." });
-      }
-      method = "OVERRIDE";
-    }
-
-    const now = new Date();
-    const before = (await loadJobAccessFacts(tx, actor.tenantId, [jobId], now)).get(jobId)?.assignedEmployeeIds ?? [];
-    if (current.length > 0) {
-      await tx.jobAssignment.updateMany({
-        where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" },
-        data: { state: "ENDED", endedAt: now, endedReason: input.reason ?? "Reassigned" },
-      });
-    }
-    const assignment = await tx.jobAssignment.create({
-      data: {
-        tenantId: actor.tenantId,
-        jobId,
-        employeeId: "employeeId" in target ? target.employeeId : null,
-        teamOrgUnitId: "teamOrgUnitId" in target ? target.teamOrgUnitId : null,
-        role: "LEAD",
-        method,
-        overrideReason: method === "OVERRIDE" ? (input.override?.reason ?? null) : null,
-        assignedById: actor.userId,
-        reason: input.reason ?? null,
-        assignedAt: now,
-      },
-      select: { id: true },
-    });
-    const audit = auditContextFields(ctx);
-    if (job.status === "PENDING_ASSIGNMENT") await changeJobStatus(tx, actor, audit, job, "ASSIGNED", { reason: input.reason });
-
-    const isReassignment = current.length > 0;
-    const payload = { assignmentId: assignment.id, ...target, method, previousAssignmentIds: current.map((row) => row.id) };
-    await recordJobEvent(tx, actor.tenantId, jobId, { type: isReassignment ? "job.reassigned" : "job.assigned", actor, payload });
-    if (method === "OVERRIDE") {
-      // §7.4: a manual override must be recorded, with who decided it and why.
-      await recordJobEvent(tx, actor.tenantId, jobId, {
-        type: "dispatch.override",
-        actor,
-        payload: { assignmentId: assignment.id, ...target, reason: input.override?.reason ?? null, failureCodes: [...new Set(failures.map((failure) => failure.code))] },
-      });
-    }
-    await recordAudit(tx, {
-      ...audit,
-      action: isReassignment ? "job.reassign" : "job.assign",
-      targetType: "Job",
-      targetId: jobId,
-      previousValue: { assignments: current.map(({ employeeId, teamOrgUnitId }) => ({ employeeId, teamOrgUnitId })) },
-      newValue: { ...target, method },
-      reason: method === "OVERRIDE" ? (input.override?.reason ?? input.reason) : input.reason,
-    });
-
-    const after = (await loadJobAccessFacts(tx, actor.tenantId, [jobId], now)).get(jobId)?.assignedEmployeeIds ?? [];
-    notificationIds.push(
-      ...(await notifyJobEmployees(tx, actor, { eventType: "job.assigned", job, anchor: `assigned:${assignment.id}`, employeeIds: after, link: true })),
-      ...(await notifyJobEmployees(tx, actor, {
-        eventType: "job.reassigned",
-        job,
-        anchor: `reassigned:${assignment.id}`,
-        employeeIds: before.filter((employeeId) => !after.includes(employeeId)),
-        link: false,
-      })),
-    );
-    return viewJobAfterWrite(tx, actor, jobId, decision);
-  });
+  const result = await withTenant(actor.tenantId, async (tx) => (await assignJobInTx(tx, actor, ctx, jobId, input, {}, notificationIds)).view);
   await deliverAfterCommit(actor.tenantId, notificationIds);
   return result;
+}
+
+/** Where an assignment came from, when it came from a dispatch recommendation (the dispatch module is the only caller that sets it). */
+export interface AssignmentProvenance {
+  recommendation?: { id: string; method: "RECOMMENDATION_APPROVED" | "RECOMMENDATION_MODIFIED" };
+}
+
+/**
+ * `assignJob` inside a transaction the caller opened with `withTenant`, so a caller can do more in the SAME transaction
+ * (dispatch stamps its recommendation as decided). Same checks, same trails; notification ids are pushed onto
+ * `notificationIds` and the caller must `deliverAfterCommit` them. With `provenance.recommendation` the assignment records
+ * the recommendation (method RECOMMENDATION_*; an eligibility override keeps method OVERRIDE). Every OTHER pending
+ * recommendation of the job becomes SUPERSEDED: a person's choice makes older suggestions stale.
+ * @returns the job view, the new assignment's id and the method it was stored with.
+ */
+export async function assignJobInTx(
+  tx: TenantTx,
+  actor: Actor,
+  ctx: RequestContext,
+  jobId: string,
+  input: AssignJobInput,
+  provenance: AssignmentProvenance,
+  notificationIds: string[],
+): Promise<{ view: Record<string, unknown>; assignmentId: string; method: AssignmentMethod }> {
+  await enforceInTx(tx, actor, "jobs.assign");
+  // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+  // concurrent assignment or status change cannot make this check stale (TOCTOU).
+  if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
+  const ref = await jobResourceRef(tx, actor.tenantId, jobId);
+  if (!ref) throw new NotFoundError();
+  const decision = await enforceInTx(tx, actor, "jobs.assign", ref);
+  if (!decision.fieldSets.includes("base")) throw new ForbiddenError();
+
+  const job = await loadJobForChange(tx, actor.tenantId, jobId);
+  if (!ASSIGNABLE_STATUSES.includes(job.status)) {
+    throw new InvalidStateTransitionError({ message: `A job in status ${job.status} can no longer be assigned or reassigned.` });
+  }
+  const target = await validateTarget(tx, actor, job, input);
+
+  const current = await tx.jobAssignment.findMany({
+    where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" },
+    select: { id: true, employeeId: true, teamOrgUnitId: true },
+  });
+  // Optional precondition: the caller names the assignment it saw (null = it saw none). Two dispatchers acting on the same
+  // stale screen: the second gets 409 instead of silently replacing the first one's decision.
+  if (input.expectedAssignmentId !== undefined) {
+    const stale = input.expectedAssignmentId === null ? current.length > 0 : !current.some((row) => row.id === input.expectedAssignmentId);
+    if (stale) throw new ConflictError({ message: "The job's assignment changed since you loaded it. Reload and decide again.", field: "expectedAssignmentId" });
+  }
+  const alreadyAssigned = current.some((row) => ("employeeId" in target ? row.employeeId === target.employeeId : row.teamOrgUnitId === target.teamOrgUnitId));
+  if (alreadyAssigned) throw new ConflictError({ message: "The job is already assigned to this employee or team." });
+
+  let method: AssignmentMethod = provenance.recommendation?.method ?? "MANUAL";
+  const { failures, overridable } = await eligibilityFailures(tx, actor, job, target);
+  if (failures.length > 0) {
+    const field = "employeeId" in target ? "employeeId" : "teamOrgUnitId";
+    if (!input.override) {
+      throw new ConflictError({
+        message: "The assignee is not eligible for this job. Fix the reasons below or ask someone with approval rights to override.",
+        field,
+        details: failureIssues(field, failures),
+      });
+    }
+    if (!overridable) {
+      throw new ConflictError({ message: "An inactive or terminated employee cannot be assigned, even with an override.", field, details: failureIssues(field, failures) });
+    }
+    if (!(await canInTx(tx, actor, "jobs.approve", ref)).allowed) {
+      throw new ForbiddenError({ message: "Assigning an ineligible employee needs approval rights (jobs.approve)." });
+    }
+    method = "OVERRIDE";
+  }
+
+  const now = new Date();
+  const before = (await loadJobAccessFacts(tx, actor.tenantId, [jobId], now)).get(jobId)?.assignedEmployeeIds ?? [];
+  if (current.length > 0) {
+    await tx.jobAssignment.updateMany({
+      where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" },
+      data: { state: "ENDED", endedAt: now, endedReason: input.reason ?? "Reassigned" },
+    });
+  }
+  const assignment = await tx.jobAssignment.create({
+    data: {
+      recommendationId: provenance.recommendation?.id ?? null,
+      tenantId: actor.tenantId,
+      jobId,
+      employeeId: "employeeId" in target ? target.employeeId : null,
+      teamOrgUnitId: "teamOrgUnitId" in target ? target.teamOrgUnitId : null,
+      role: "LEAD",
+      method,
+      overrideReason: method === "OVERRIDE" ? (input.override?.reason ?? null) : null,
+      assignedById: actor.userId,
+      reason: input.reason ?? null,
+      assignedAt: now,
+    },
+    select: { id: true },
+  });
+  await tx.dispatchRecommendation.updateMany({
+    where: { tenantId: actor.tenantId, jobId, status: "PENDING", ...(provenance.recommendation ? { id: { not: provenance.recommendation.id } } : {}) },
+    data: { status: "SUPERSEDED" },
+  });
+  const audit = auditContextFields(ctx);
+  if (job.status === "PENDING_ASSIGNMENT") await changeJobStatus(tx, actor, audit, job, "ASSIGNED", { reason: input.reason });
+
+  const isReassignment = current.length > 0;
+  const payload = { assignmentId: assignment.id, ...target, method, previousAssignmentIds: current.map((row) => row.id) };
+  await recordJobEvent(tx, actor.tenantId, jobId, { type: isReassignment ? "job.reassigned" : "job.assigned", actor, payload });
+  if (method === "OVERRIDE") {
+    // §7.4: a manual override must be recorded, with who decided it and why.
+    await recordJobEvent(tx, actor.tenantId, jobId, {
+      type: "dispatch.override",
+      actor,
+      payload: { assignmentId: assignment.id, ...target, reason: input.override?.reason ?? null, failureCodes: [...new Set(failures.map((failure) => failure.code))] },
+    });
+  }
+  await recordAudit(tx, {
+    ...audit,
+    action: isReassignment ? "job.reassign" : "job.assign",
+    targetType: "Job",
+    targetId: jobId,
+    previousValue: { assignments: current.map(({ employeeId, teamOrgUnitId }) => ({ employeeId, teamOrgUnitId })) },
+    newValue: { ...target, method },
+    reason: method === "OVERRIDE" ? (input.override?.reason ?? input.reason) : input.reason,
+  });
+
+  const after = (await loadJobAccessFacts(tx, actor.tenantId, [jobId], now)).get(jobId)?.assignedEmployeeIds ?? [];
+  notificationIds.push(
+    ...(await notifyJobEmployees(tx, actor, { eventType: "job.assigned", job, anchor: `assigned:${assignment.id}`, employeeIds: after, link: true })),
+    ...(await notifyJobEmployees(tx, actor, {
+      eventType: "job.reassigned",
+      job,
+      anchor: `reassigned:${assignment.id}`,
+      employeeIds: before.filter((employeeId) => !after.includes(employeeId)),
+      link: false,
+    })),
+  );
+  return { view: await viewJobAfterWrite(tx, actor, jobId, decision), assignmentId: assignment.id, method };
 }
 
 /**

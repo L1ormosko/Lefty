@@ -100,9 +100,20 @@ describe("assigning a job", () => {
     }
   });
 
+  it("answers 404 when the target employee is outside the caller's employee scope, as if they did not exist", async () => {
+    const job = await createJobViaApi(w);
+    const outside = await assign(w.cookie.cityManagerA, job.id, { employeeId: w.techB.employeeId }); // City B employee, City A manager
+    expect(outside.status).toBe(404);
+    const unknown = await assign(w.cookie.cityManagerA, job.id, { employeeId: "nope" });
+    expect(unknown.status).toBe(404);
+    expect(outside.json.error.code).toBe(unknown.json.error.code);
+    expect(outside.json.error.message).toBe(unknown.json.error.message);
+    expect((await assign(w.cookie.cityManagerA, job.id, { employeeId: w.techA1.employeeId })).status).toBe(200); // in scope still works
+  });
+
   it("refuses unknown employees and teams, a team outside the service area, both targets at once, and assigning twice", async () => {
     const job = await createJobViaApi(w);
-    expect((await assign(w.cookie.dispatcher, job.id, { employeeId: "nope" })).json.error.field).toBe("employeeId");
+    expect((await assign(w.cookie.dispatcher, job.id, { employeeId: "nope" })).status).toBe(404); // unknown = outside scope: indistinguishable
     expect((await assign(w.cookie.dispatcher, job.id, { teamOrgUnitId: w.units.cityB })).json.error.field).toBe("teamOrgUnitId"); // a city, not a team
     expect((await assign(w.cookie.dispatcher, job.id, { employeeId: w.techA1.employeeId, teamOrgUnitId: w.units.teamA1 })).status).toBe(400);
     expect((await assign(w.cookie.dispatcher, job.id, {})).status).toBe(400);
