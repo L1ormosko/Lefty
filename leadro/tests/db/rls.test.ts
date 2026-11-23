@@ -14,6 +14,10 @@ const TENANT_OWNED_TABLES = [
   "EmployeeQualification", "ServiceTerritory", "Availability", "JobType", "JobTypeSkill", "JobTypeCertification", "Job",
   "JobRequirement", "JobAssignment", "JobStatusHistory", "JobEvent", "DispatchRecommendation", "Notification",
   "NotificationDelivery", "NotificationPreference", "EmployeeJobPermission", "CustomerPreferredEmployee",
+  // Phase 3 field operations and recovery (17)
+  "Shift", "LocationEvent", "ArrivalVerification", "FieldEvent", "JobCompletionFormDefinition", "JobCompletion",
+  "JobMaterialUsage", "JobFieldNote", "JobAttachment", "LostReason", "JobOutcome", "RecoveryRule", "LeadRecoveryCase",
+  "RecoveryCaseStatusHistory", "RecoveryAttempt", "FollowUpTask", "RecoveryRuleRun",
 ];
 
 let A: { id: string };

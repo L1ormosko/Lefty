@@ -172,6 +172,24 @@ model Tenant {
   notificationPreferences    NotificationPreference[]
   employeeJobPermissions     EmployeeJobPermission[]
   customerPreferredEmployees CustomerPreferredEmployee[]
+  // Phase 3
+  shifts                     Shift[]
+  locationEvents             LocationEvent[]
+  arrivalVerifications       ArrivalVerification[]
+  fieldEvents                FieldEvent[]
+  completionFormDefinitions  JobCompletionFormDefinition[]
+  jobCompletions             JobCompletion[]
+  jobMaterialUsages          JobMaterialUsage[]
+  jobFieldNotes              JobFieldNote[]
+  jobAttachments             JobAttachment[]
+  lostReasons                LostReason[]
+  jobOutcomes                JobOutcome[]
+  recoveryRules              RecoveryRule[]
+  recoveryCases              LeadRecoveryCase[]
+  recoveryCaseStatusHistory  RecoveryCaseStatusHistory[]
+  recoveryAttempts           RecoveryAttempt[]
+  followUpTasks              FollowUpTask[]
+  recoveryRuleRuns           RecoveryRuleRun[]
 }
 
 model LegalEntity {
@@ -231,6 +249,13 @@ model OrgUnit {
   teamJobAssignments JobAssignment[]
   serviceTerritories ServiceTerritory[]
 
+  // Phase 3
+  shifts         Shift[]
+  locationEvents LocationEvent[]
+  recoveryRules  RecoveryRule[]
+  recoveryCases  LeadRecoveryCase[]
+  followUpTasks  FollowUpTask[]
+
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
   @@index([tenantId, type])
@@ -273,6 +298,20 @@ model Employee {
   leadAssignments         LeadAssignment[]
   jobAssignments          JobAssignment[]
   dispatchRecommendations DispatchRecommendation[]
+
+  // Phase 3
+  shifts                    Shift[]
+  locationEvents            LocationEvent[]
+  arrivalVerifications      ArrivalVerification[]
+  fieldEvents               FieldEvent[]
+  jobCompletions            JobCompletion[]
+  jobMaterialUsages         JobMaterialUsage[]
+  jobFieldNotes             JobFieldNote[]
+  jobOutcomes               JobOutcome[]
+  recoveryCasesAsTechnician LeadRecoveryCase[]    @relation("RecoveryCaseTechnician")
+  recoveryCasesAssigned     LeadRecoveryCase[]    @relation("RecoveryCaseAssignee")
+  recoveryAttempts          RecoveryAttempt[]     @relation("RecoveryAttemptEmployee")
+  followUpsAssigned         FollowUpTask[]        @relation("FollowUpAssignee")
 
   @@unique([id, tenantId])
   @@unique([userId, tenantId])
@@ -382,6 +421,26 @@ model User {
 
   jobPermissionsGranted     EmployeeJobPermission[] @relation("JobPermissionGrantedBy")
   operationsSettingsUpdated OperationsSettings[]    @relation("OperationsSettingsUpdatedBy")
+
+  // Phase 3
+  shiftsEnded              Shift[]                       @relation("ShiftEndedBy")
+  locationEventsRecorded   LocationEvent[]               @relation("LocationEventRecordedBy")
+  arrivalsVerified         ArrivalVerification[]         @relation("ArrivalVerifiedBy")
+  fieldEventsSent          FieldEvent[]                  @relation("FieldEventActor")
+  formsPublished           JobCompletionFormDefinition[] @relation("FormDefinitionPublishedBy")
+  formsCreated             JobCompletionFormDefinition[] @relation("FormDefinitionCreatedBy")
+  completionsSubmitted     JobCompletion[]               @relation("JobCompletionSubmittedBy")
+  attachmentsUploaded      JobAttachment[]               @relation("JobAttachmentUploadedBy")
+  outcomesRecorded         JobOutcome[]                  @relation("JobOutcomeRecordedBy")
+  recoveryRulesCreated     RecoveryRule[]                @relation("RecoveryRuleCreatedBy")
+  recoveryRulesApproved    RecoveryRule[]                @relation("RecoveryRuleApprovedBy")
+  recoveryCasesRecovered   LeadRecoveryCase[]            @relation("RecoveryCaseRecoveredBy")
+  recoveryStatusChanges    RecoveryCaseStatusHistory[]   @relation("RecoveryStatusChangedBy")
+  recoveryAttemptsRecorded RecoveryAttempt[]             @relation("RecoveryAttemptRecordedBy")
+  followUpsCompleted       FollowUpTask[]                @relation("FollowUpCompletedBy")
+  followUpsCreated         FollowUpTask[]                @relation("FollowUpCreatedBy")
+
+  shiftsReviewed Shift[] @relation("ShiftReviewedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -924,6 +983,16 @@ model OperationsSettings {
   /// Days before expiry at which "certification expiring" notifications are raised.
   qualificationWarningDays  Int                   @default(30)
   defaultCurrency           String                @default("USD") @db.Char(3)
+  /// Phase 3. Arrival geofence radius in meters, used when the address has no override (spec 17.2).
+  arrivalGeofenceRadiusM    Int                   @default(150)
+  /// A location with a worse (larger) accuracy radius than this is never used for verification or presence.
+  locationMaxAccuracyM      Int                   @default(100)
+  /// Presence for recovery (spec 26.5) is only shown from a location newer than this.
+  presenceMaxAgeMinutes     Int                   @default(30)
+  /// Location history (spec 22.2) is kept this long, then purged by the retention job.
+  locationRetentionDays     Int                   @default(90)
+  /// The follow-up sweep raises "due soon" this many minutes before a task is due.
+  followUpDueSoonMinutes    Int                   @default(60)
   updatedAt                 DateTime              @updatedAt @db.Timestamptz(3)
   updatedById               String?
 
@@ -979,6 +1048,12 @@ model Customer {
 
   preferredEmployees CustomerPreferredEmployee[]
 
+  // Phase 3
+  recoveryCases LeadRecoveryCase[]
+  followUpTasks FollowUpTask[]
+
+  recoveryRuleRuns RecoveryRuleRun[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, number])
   @@index([tenantId, archivedAt, createdAt])
@@ -1007,6 +1082,8 @@ model CustomerAddress {
   longitude          Decimal?  @db.Decimal(9, 6)
   /// How the coordinates were obtained ("manual", "import", ...). Null when there are none.
   coordinateSource   String?
+  /// Per-site arrival geofence radius in meters (large sites); null = the tenant default (OperationsSettings).
+  geofenceRadiusM    Int?
   /// Lower-case "line1|line2|city|region|postalCode|country" with collapsed whitespace; the
   /// duplicate-address matching key, computed by the customers service.
   normalizedKey      String
@@ -1135,6 +1212,12 @@ model Lead {
   jobs           Job[]
   flagsAsPrimary DuplicateFlag[]     @relation("DuplicateLead")
   flagsAsOther   DuplicateFlag[]     @relation("DuplicateOtherLead")
+
+  // Phase 3
+  recoveryCases LeadRecoveryCase[]
+  followUpTasks FollowUpTask[]
+
+  recoveredByCases LeadRecoveryCase[] @relation("RecoveredLead")
 
   @@unique([id, tenantId])
   @@unique([id, customerId, tenantId])
@@ -1446,6 +1529,9 @@ model JobType {
 
   employeePermissions EmployeeJobPermission[]
 
+  // Phase 3
+  completionForms JobCompletionFormDefinition[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, category])
@@ -1515,16 +1601,23 @@ model Job {
   quotedAmountMinor        Int?
   currency                 String       @default("USD") @db.Char(3)
   /// Phase 3 execution milestones (denormalized for lists; the full trail is JobEvent).
-  startedAt                DateTime?    @db.Timestamptz(3)
-  completedAt              DateTime?    @db.Timestamptz(3)
-  closedAt                 DateTime?    @db.Timestamptz(3)
-  cancelledAt              DateTime?    @db.Timestamptz(3)
+  /// The visit being worked: JobOutcome / JobCompletion rows of this job use it as `visitNumber`. Starts at 1 and is
+  /// incremented by the jobs lifecycle (in the same transaction as the status change) when a job whose visit already has an
+  /// outcome goes back to SCHEDULED after REQUIRES_RETURN_VISIT / RESCHEDULED / CUSTOMER_UNAVAILABLE.
+  currentVisitNumber       Int          @default(1)
+  enRouteAt                DateTime?    @db.Timestamptz(3)
+
+  arrivedAt    DateTime? @db.Timestamptz(3)
+  startedAt    DateTime? @db.Timestamptz(3)
+  completedAt  DateTime? @db.Timestamptz(3)
+  closedAt     DateTime? @db.Timestamptz(3)
+  cancelledAt  DateTime? @db.Timestamptz(3)
   /// Reason when CANCELLED / FAILED / ON_HOLD etc. (the full trail is in JobStatusHistory).
-  statusReason             String?
-  archivedAt               DateTime?    @db.Timestamptz(3)
-  createdById              String?
-  createdAt                DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt                DateTime     @updatedAt @db.Timestamptz(3)
+  statusReason String?
+  archivedAt   DateTime? @db.Timestamptz(3)
+  createdById  String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
 
   tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   customer        Customer                 @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
@@ -1541,7 +1634,22 @@ model Job {
   events          JobEvent[]
   recommendations DispatchRecommendation[]
 
+  // Phase 3
+  locationEvents       LocationEvent[]
+  arrivalVerifications ArrivalVerification[]
+  fieldEvents          FieldEvent[]
+  completions          JobCompletion[]
+  materialUsages       JobMaterialUsage[]
+  fieldNotes           JobFieldNote[]
+  attachments          JobAttachment[]
+  outcomes             JobOutcome[]
+  recoveryCases        LeadRecoveryCase[]    @relation("RecoveryCaseJob")
+  recoveredByCases     LeadRecoveryCase[]    @relation("RecoveredJob")
+  followUpTasks        FollowUpTask[]
+
   @@unique([id, tenantId])
+  // Lets a recovery case reference (job, customer) so a case and its job can never disagree on the customer.
+  @@unique([id, customerId, tenantId])
   @@unique([tenantId, number])
   @@unique([leadId, tenantId])
   @@index([tenantId, status, scheduledStartAt])
@@ -1826,4 +1934,885 @@ model CustomerPreferredEmployee {
   @@unique([id, tenantId])
   @@unique([tenantId, customerId, employeeId])
   @@index([tenantId, employeeId])
+}
+
+// ═════════════════════════ Phase 3: field operations and recovery ═════════════════════════
+// Every table below is tenant-owned (tenantId, @@unique([id, tenantId]), composite FKs, FORCE RLS).
+// JSON columns hold ids, codes, numbers and enum values only (see docs/ERD.md "Contracts for JSON");
+// the single documented exception is JobCompletion.values (the technician's form answers).
+// Location data is sensitive (spec 22.2): raw coordinates live ONLY on LocationEvent; arrival
+// verifications and recovery cases hold distances, accuracy, ids and status.
+
+enum ShiftStatus {
+  ACTIVE
+  ENDED
+}
+
+/// Why a location could not be captured or accepted normally (spec 17.4).
+enum LocationException {
+  GPS_DISABLED
+  PERMISSION_DENIED
+  POOR_SIGNAL
+  DEVICE_OFFLINE
+  OUTSIDE_GEOFENCE
+  DELAYED
+  OTHER
+}
+
+/// Event-based collection only (spec 17.1). NAVIGATION_OPENED is informational: it never changes a
+/// job status and never counts as arrival (spec 8.3).
+enum LocationEventKind {
+  SHIFT_START
+  SHIFT_END
+  ARRIVAL
+  DEPARTURE
+  NAVIGATION_OPENED
+  VERIFICATION
+}
+
+enum LocationSource {
+  DEVICE_GPS
+  GEOFENCE
+  MANUAL
+  MANAGER
+}
+
+/// What the server concluded about the reported position. GPS is never "proof" (spec 17.2).
+enum LocationVerification {
+  UNVERIFIED
+  WITHIN_RADIUS
+  OUTSIDE_RADIUS
+  MANAGER_VERIFIED
+}
+
+/// Review of a shift started or ended under an exception (shifts.approve).
+enum ShiftExceptionReview {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ArrivalMethod {
+  TECHNICIAN
+  GEOFENCE
+  MANAGER
+}
+
+enum ArrivalStatus {
+  RECORDED
+  PENDING_MANAGER_REVIEW
+  MANAGER_VERIFIED
+  MANAGER_REJECTED
+}
+
+enum FieldEventResult {
+  ACCEPTED
+  REJECTED
+  CONFLICT
+}
+
+enum FormDefinitionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+/// Spec 9.1 primary choices.
+enum JobOutcomeType {
+  SOLD
+  NOT_SOLD
+  CUSTOMER_UNAVAILABLE
+  RESCHEDULE_REQUIRED
+  WORK_NOT_POSSIBLE
+  ADDITIONAL_APPROVAL_REQUIRED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  CHECK
+  BANK_TRANSFER
+  FINANCING
+  OTHER
+}
+
+enum PaymentStatus {
+  NOT_APPLICABLE
+  PENDING
+  PARTIAL
+  PAID
+  WAIVED
+  REFUSED
+}
+
+enum FieldNoteKind {
+  NOTE
+  WORK_PERFORMED
+  ADDITIONAL_WORK_REQUESTED
+  CUSTOMER_APPROVAL
+}
+
+enum AttachmentKind {
+  PHOTO
+  SIGNATURE
+  DOCUMENT
+}
+
+/// No storage provider is configured in Phase 3: rows stay PENDING_UPLOAD (metadata captured on the
+/// device) and are never marked STORED without a storage key.
+enum AttachmentStatus {
+  PENDING_UPLOAD
+  STORED
+  FAILED
+}
+
+enum RuleStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  INACTIVE
+  SUPERSEDED
+}
+
+/// Spec 9.5.
+enum RecoveryStatus {
+  NEW
+  ASSIGNED
+  CONTACTING
+  CUSTOMER_REACHED
+  FOLLOW_UP_REQUIRED
+  RECOVERED
+  NOT_RECOVERED
+  CLOSED
+}
+
+/// UNKNOWN whenever there is no valid, recent, accurate location (spec 26.5).
+enum PresenceStatus {
+  AT_LOCATION
+  LEFT_LOCATION
+  UNKNOWN
+}
+
+enum FollowUpTargetType {
+  LEAD
+  CUSTOMER
+  JOB
+  RECOVERY_CASE
+}
+
+enum FollowUpStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum FollowUpOrigin {
+  MANUAL
+  OUTCOME
+  RECOVERY_RULE
+  SYSTEM
+}
+
+// ───────────────────────── Shifts and location (spec 8.1, 17) ─────────────────────────
+
+/// A technician's working shift (spec 8.1). At most one ACTIVE shift per employee (partial unique
+/// index), so starting twice is idempotent. `startedAt` / `endedAt` are when it happened (device
+/// clock for offline events); `*RecordedAt` is the server clock.
+model Shift {
+  id                    String                @id @default(cuid())
+  tenantId              String
+  employeeId            String
+  /// The employee's placement when the shift started (snapshot): drives ORG_UNIT scope for managers.
+  orgUnitId             String?
+  status                ShiftStatus           @default(ACTIVE)
+  startedAt             DateTime              @db.Timestamptz(3)
+  startRecordedAt       DateTime              @default(now()) @db.Timestamptz(3)
+  endedAt               DateTime?             @db.Timestamptz(3)
+  endRecordedAt         DateTime?             @db.Timestamptz(3)
+  deviceId              String?
+  startLocationEventId  String?
+  endLocationEventId    String?
+  /// Exceptions: GPS disabled, permission denied, offline -> manual start/end with a note (spec 8.1, 17.4).
+  startException        LocationException?
+  startExceptionNote    String?
+  endException          LocationException?
+  endExceptionNote      String?
+  /// Set when someone other than the technician ended or corrected the shift.
+  endedByUserId         String?
+  endReason             String?
+  /// Review of the start/end exception (null = no exception). PENDING until someone with shifts.approve decides.
+  exceptionReviewStatus ShiftExceptionReview?
+  reviewedById          String?
+  reviewedAt            DateTime?             @db.Timestamptz(3)
+  reviewNote            String?
+  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee           Employee              @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit            OrgUnit?              @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  startLocationEvent LocationEvent?        @relation("ShiftStartEvent", fields: [startLocationEventId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  endLocationEvent   LocationEvent?        @relation("ShiftEndEvent", fields: [endLocationEventId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  reviewedBy         User?                 @relation("ShiftReviewedBy", fields: [reviewedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  endedBy            User?                 @relation("ShiftEndedBy", fields: [endedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  locationEvents     LocationEvent[]       @relation("ShiftLocationEvents")
+  arrivals           ArrivalVerification[]
+  fieldEvents        FieldEvent[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@index([tenantId, employeeId, startedAt])
+  @@index([tenantId, status, startedAt])
+  @@index([tenantId, orgUnitId, startedAt])
+}
+
+/// One captured (or failed-to-capture) position (spec 17). SENSITIVE: coordinates are the opt-in
+/// `location.coordinate_fields` field set; retention is `OperationsSettings.locationRetentionDays`.
+/// Coordinates may be absent when `exception` explains why (GPS off, permission denied, offline) or the
+/// event is manual / manager-entered / NAVIGATION_OPENED. Whenever coordinates exist, so does `accuracyM`.
+model LocationEvent {
+  id                  String               @id @default(cuid())
+  tenantId            String
+  employeeId          String
+  shiftId             String?
+  jobId               String?
+  orgUnitId           String?
+  kind                LocationEventKind
+  source              LocationSource
+  verification        LocationVerification @default(UNVERIFIED)
+  latitude            Decimal?             @db.Decimal(9, 6)
+  longitude           Decimal?             @db.Decimal(9, 6)
+  /// Horizontal accuracy radius in whole meters, as reported by the device (rounded up).
+  accuracyM           Int?
+  /// Straight-line distance to the job address and the radius it was judged against (arrival checks).
+  distanceToJobM      Int?
+  geofenceRadiusM     Int?
+  /// Device clock (null for manual / manager entries) vs the server's receive time (spec 17.2).
+  deviceTime          DateTime?            @db.Timestamptz(3)
+  serverTime          DateTime             @default(now()) @db.Timestamptz(3)
+  deviceId            String?
+  exception           LocationException?
+  exceptionNote       String?
+  /// Retention (spec 22.2): the purge NULLs latitude/longitude and stamps this; the row (kind, times, accuracy, distance) stays
+  /// because shifts, arrivals and recovery cases reference it.
+  coordinatesPurgedAt DateTime?            @db.Timestamptz(3)
+  /// Who entered it when source = MANAGER (or MANUAL on someone's behalf).
+  recordedByUserId    String?
+  fieldEventId        String?
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee   Employee    @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  shift      Shift?      @relation("ShiftLocationEvents", fields: [shiftId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  job        Job?        @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit    OrgUnit?    @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy User?       @relation("LocationEventRecordedBy", fields: [recordedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  fieldEvent FieldEvent? @relation("LocationEventFieldEvent", fields: [fieldEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  shiftStarts          Shift[]               @relation("ShiftStartEvent")
+  shiftEnds            Shift[]               @relation("ShiftEndEvent")
+  arrivalVerifications ArrivalVerification[]
+  recoveryPresence     LeadRecoveryCase[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@unique([id, jobId, employeeId, tenantId])
+  @@unique([tenantId, fieldEventId])
+  @@index([tenantId, employeeId, serverTime])
+  @@index([tenantId, jobId, kind, serverTime])
+  @@index([tenantId, shiftId])
+  @@index([tenantId, serverTime])
+}
+
+/// How and when a technician's arrival at a job was established (spec 8.4, 17.2): technician
+/// confirmation, an authorized geofence event, or manager verification. Several rows per job are
+/// normal (return visits, corrections); the latest non-rejected row is the arrival. Text shown to
+/// users is always about confidence, never certainty.
+model ArrivalVerification {
+  id               String             @id @default(cuid())
+  tenantId         String
+  jobId            String
+  employeeId       String
+  shiftId          String?
+  method           ArrivalMethod
+  status           ArrivalStatus      @default(RECORDED)
+  /// When the technician arrived (device clock for offline) vs when the server recorded it.
+  arrivedAt        DateTime           @db.Timestamptz(3)
+  recordedAt       DateTime           @default(now()) @db.Timestamptz(3)
+  locationEventId  String?
+  accuracyM        Int?
+  distanceToJobM   Int?
+  geofenceRadiusM  Int?
+  /// Outside the geofence / GPS off / offline ...: needs manager verification (spec 17.4).
+  exceptionReason  LocationException?
+  exceptionNote    String?
+  /// Manager decision (verify or reject) and the mandatory reason for it.
+  verifiedByUserId String?
+  verifiedAt       DateTime?          @db.Timestamptz(3)
+  verificationNote String?
+  fieldEventId     String?
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee      Employee       @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  shift         Shift?         @relation(fields: [shiftId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  locationEvent LocationEvent? @relation(fields: [locationEventId, jobId, employeeId, tenantId], references: [id, jobId, employeeId, tenantId], onDelete: Restrict)
+  fieldEvent    FieldEvent?    @relation(fields: [fieldEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  verifiedBy    User?          @relation("ArrivalVerifiedBy", fields: [verifiedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, jobId, arrivedAt])
+  @@index([tenantId, employeeId, arrivedAt])
+  @@index([tenantId, status, arrivedAt])
+}
+
+// ───────────────────────── Offline-safe field events (spec 8.7, 25.3) ─────────────────────────
+
+/// Ingestion log for events a technician's device sends (live or after being offline). The unique
+/// key (tenantId, employeeId, clientEventId) makes every submission idempotent: a replay finds this
+/// row and returns the stored result instead of applying the event twice. Rejected events are stored
+/// too, so a replay answers identically. `payload` holds ids and enum values only; free text lives
+/// in the domain tables (JobFieldNote, JobOutcome, ...) which the payload points at.
+model FieldEvent {
+  id            String           @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  actorUserId   String?
+  /// Client-generated UUID (CHECK).
+  clientEventId String
+  /// Dotted lower-case key, e.g. "shift.start", "job.status", "job.note", "job.outcome" (CHECK).
+  type          String
+  jobId         String?
+  shiftId       String?
+  deviceId      String?
+  /// Sync batch this event arrived in (client-generated), for per-batch result reporting.
+  batchId       String?
+  /// When it happened on the device vs when the server received it. Events are applied in occurredAt order.
+  occurredAt    DateTime         @db.Timestamptz(3)
+  receivedAt    DateTime         @default(now()) @db.Timestamptz(3)
+  payload       Json?
+  /// sha256 (hex) of the canonical event content: a replay with the same clientEventId but a different hash is a CONFLICT.
+  payloadHash   String?
+  result        FieldEventResult
+  /// Stable machine code for REJECTED / CONFLICT (e.g. "job.invalid_transition").
+  resultCode    String?
+  /// What the event created or changed (polymorphic; resolve through tenant-scoped queries).
+  entityType    String?
+  entityId      String?
+
+  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee       Employee              @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  actor          User?                 @relation("FieldEventActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  job            Job?                  @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  shift          Shift?                @relation(fields: [shiftId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  locationEvents LocationEvent[]       @relation("LocationEventFieldEvent")
+  arrivals       ArrivalVerification[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, employeeId, clientEventId])
+  @@index([tenantId, employeeId, occurredAt])
+  @@index([tenantId, jobId, occurredAt])
+  @@index([tenantId, batchId])
+}
+
+// ───────────────────────── Job completion (spec 8.5, 8.6) ─────────────────────────
+
+/// Versioned completion form for ONE job type or ONE job category (exactly one, CHECK; spec 8.6
+/// "configurable by job category"; a type-level form wins over a category-level one). Only DRAFT
+/// rows may change `schema` (trigger); publishing makes a version ACTIVE and retires the previous.
+/// `schema` is `{ "fields": [ { key, type, required, ... } ] }` (see ERD "Contracts for JSON").
+model JobCompletionFormDefinition {
+  id            String               @id @default(cuid())
+  tenantId      String
+  jobTypeId     String?
+  /// Matches JobType.category (tenant-defined).
+  category      String?
+  version       Int
+  status        FormDefinitionStatus @default(DRAFT)
+  name          String
+  schema        Json
+  publishedAt   DateTime?            @db.Timestamptz(3)
+  publishedById String?
+  createdById   String?
+  createdAt     DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime             @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  jobType     JobType?        @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  publishedBy User?           @relation("FormDefinitionPublishedBy", fields: [publishedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy   User?           @relation("FormDefinitionCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  completions JobCompletion[]
+
+  @@unique([id, tenantId])
+  @@unique([id, version, tenantId])
+  @@unique([tenantId, jobTypeId, version])
+  @@unique([tenantId, category, version])
+  @@index([tenantId, jobTypeId, status])
+  @@index([tenantId, category, status])
+}
+
+/// One submitted completion form for one visit of a job: the answers (a snapshot) and the exact form
+/// version they were validated against. `values` is the documented exception to the ids-only JSON rule:
+/// it holds the technician's answers keyed by field key. Money is NOT in here (see JobOutcome).
+model JobCompletion {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  jobId                 String
+  /// 1 for the first visit; a job sent back to SCHEDULED gets visit 2, ...
+  visitNumber           Int      @default(1)
+  employeeId            String
+  formDefinitionId      String
+  formVersion           Int
+  values                Json
+  workPerformed         String?  @db.Text
+  followUpRequired      Boolean  @default(false)
+  signatureAttachmentId String?
+  occurredAt            DateTime @default(now()) @db.Timestamptz(3)
+  submittedAt           DateTime @default(now()) @db.Timestamptz(3)
+  submittedById         String?
+  clientEventId         String?
+
+  tenant         Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job            Job                         @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee       Employee                    @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  formDefinition JobCompletionFormDefinition @relation(fields: [formDefinitionId, formVersion, tenantId], references: [id, version, tenantId], onDelete: Restrict)
+  signature      JobAttachment?              @relation("CompletionSignature", fields: [signatureAttachmentId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
+  submittedBy    User?                       @relation("JobCompletionSubmittedBy", fields: [submittedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  materials      JobMaterialUsage[]
+
+  @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
+  @@unique([tenantId, jobId, visitNumber])
+  @@unique([tenantId, jobId, clientEventId])
+  @@index([tenantId, employeeId, submittedAt])
+  @@index([tenantId, formDefinitionId])
+}
+
+/// Material used on a visit. Free text until the Phase 4 materials catalog exists: `materialRef` is
+/// a placeholder id for that catalog (no FK yet).
+model JobMaterialUsage {
+  id            String   @id @default(cuid())
+  tenantId      String
+  jobId         String
+  completionId  String?
+  employeeId    String?
+  name          String
+  materialRef   String?
+  quantity      Decimal  @db.Decimal(12, 3)
+  unit          String   @default("each")
+  note          String?
+  occurredAt    DateTime @default(now()) @db.Timestamptz(3)
+  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  clientEventId String?
+
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job        Job            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  completion JobCompletion? @relation(fields: [completionId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
+  employee   Employee?      @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, jobId, clientEventId])
+  @@index([tenantId, jobId, occurredAt])
+  @@index([tenantId, completionId])
+}
+
+/// Notes the technician records during work (spec 8.5): plain notes, work performed, additional work
+/// requested and the customer's approval of it. Free text lives here, never in event payloads.
+model JobFieldNote {
+  id               String        @id @default(cuid())
+  tenantId         String
+  jobId            String
+  employeeId       String?
+  kind             FieldNoteKind @default(NOTE)
+  body             String        @db.Text
+  /// ADDITIONAL_WORK_REQUESTED: the estimate; CUSTOMER_APPROVAL: the approved amount (minor units).
+  amountMinor      Int?
+  currency         String        @default("USD") @db.Char(3)
+  /// CUSTOMER_APPROVAL only: whether the customer approved (false = declined).
+  customerApproved Boolean?
+  occurredAt       DateTime      @default(now()) @db.Timestamptz(3)
+  recordedAt       DateTime      @default(now()) @db.Timestamptz(3)
+  clientEventId    String?
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job      Job       @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee Employee? @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, jobId, clientEventId])
+  @@index([tenantId, jobId, occurredAt])
+  @@index([tenantId, kind, occurredAt])
+}
+
+/// Photo / signature / document METADATA (spec 8.5). No storage provider exists in Phase 3: rows are
+/// PENDING_UPLOAD and `storageKey` stays null; STORED requires a key (CHECK).
+model JobAttachment {
+  id              String           @id @default(cuid())
+  tenantId        String
+  jobId           String
+  kind            AttachmentKind   @default(PHOTO)
+  status          AttachmentStatus @default(PENDING_UPLOAD)
+  fileName        String
+  contentType     String
+  sizeBytes       Int
+  checksumSha256  String?
+  caption         String?
+  storageProvider String?
+  storageKey      String?
+  capturedAt      DateTime         @default(now()) @db.Timestamptz(3)
+  recordedAt      DateTime         @default(now()) @db.Timestamptz(3)
+  uploadedById    String?
+  clientEventId   String?
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job        Job             @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  uploadedBy User?           @relation("JobAttachmentUploadedBy", fields: [uploadedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  signedFor  JobCompletion[] @relation("CompletionSignature")
+
+  @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
+  @@unique([tenantId, jobId, clientEventId])
+  @@index([tenantId, jobId, capturedAt])
+}
+
+// ───────────────────────── Outcome reporting (spec 9.1, 9.2) ─────────────────────────
+
+/// Tenant-configurable lost / unsuccessful-visit reasons (spec 9.2). `appliesTo` lists the outcomes
+/// the reason may be chosen for. Deactivate, never delete (outcomes reference them).
+model LostReason {
+  id          String           @id @default(cuid())
+  tenantId    String
+  /// Stable lower-case key, unique per tenant (CHECK).
+  code        String
+  name        String
+  description String?
+  appliesTo   JobOutcomeType[] @default([NOT_SOLD, WORK_NOT_POSSIBLE])
+  /// False for reasons recovery can do nothing about (e.g. work outside service capabilities).
+  recoverable Boolean          @default(true)
+  active      Boolean          @default(true)
+  sortOrder   Int              @default(0)
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime         @updatedAt @db.Timestamptz(3)
+
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outcomes      JobOutcome[]
+  recoveryCases LeadRecoveryCase[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, active, sortOrder])
+}
+
+/// What happened at a customer visit (spec 9.1). One row per visit; the job cannot close without one.
+/// Amounts are integer minor units in `currency` (no commission math, Phase 4). NOT_SOLD and
+/// WORK_NOT_POSSIBLE require a lost reason (CHECK).
+model JobOutcome {
+  id                        String         @id @default(cuid())
+  tenantId                  String
+  jobId                     String
+  visitNumber               Int            @default(1)
+  employeeId                String?
+  outcome                   JobOutcomeType
+  lostReasonId              String?
+  notes                     String?        @db.Text
+  quotedAmountMinor         Int?
+  approvedAmountMinor       Int?
+  chargedAmountMinor        Int?
+  collectedAmountMinor      Int?
+  currency                  String         @default("USD") @db.Char(3)
+  paymentMethod             PaymentMethod?
+  paymentStatus             PaymentStatus  @default(NOT_APPLICABLE)
+  /// The technician says the customer asked to be contacted again (spec 9.4 "customer request").
+  customerRequestedFollowUp Boolean        @default(false)
+  preferredFollowUpAt       DateTime?      @db.Timestamptz(3)
+  occurredAt                DateTime       @default(now()) @db.Timestamptz(3)
+  recordedAt                DateTime       @default(now()) @db.Timestamptz(3)
+  recordedById              String?
+  clientEventId             String?
+
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee      Employee?          @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lostReason    LostReason?        @relation(fields: [lostReasonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy    User?              @relation("JobOutcomeRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recoveryCases LeadRecoveryCase[]
+
+  ruleRuns RecoveryRuleRun[]
+
+  @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
+  @@unique([tenantId, jobId, visitNumber])
+  @@unique([tenantId, jobId, clientEventId])
+  @@index([tenantId, outcome, occurredAt])
+  @@index([tenantId, lostReasonId])
+  @@index([tenantId, employeeId, occurredAt])
+}
+
+// ───────────────────────── Lead recovery (spec 9.3 - 9.7) ─────────────────────────
+
+/// A recovery rule, versioned (spec 9.6). `ruleKey` is the stable identity; each edit is a new row
+/// with version + 1 and the previous ACTIVE one becomes SUPERSEDED. `trigger` is a dotted event key
+/// (e.g. "job.not_converted"). `conditions` and `actions` are ids / codes / numbers only (see ERD
+/// "Contracts for JSON"); an action can recommend a call or create a task, never offer a discount.
+/// A highImpact rule can be ACTIVE only after approval by someone other than its author (CHECK, SoD).
+model RecoveryRule {
+  id              String     @id @default(cuid())
+  tenantId        String
+  ruleKey         String
+  version         Int        @default(1)
+  name            String
+  description     String?
+  status          RuleStatus @default(DRAFT)
+  /// Lower number = evaluated first.
+  priority        Int        @default(100)
+  trigger         String
+  conditions      Json
+  actions         Json
+  /// Scope: the org unit the rule applies to (and below); null = the whole tenant.
+  orgUnitId       String?
+  highImpact      Boolean    @default(false)
+  /// Loop safety: the same rule does not fire again for the same job/customer within this window.
+  cooldownMinutes Int        @default(0)
+  createdById     String?
+  submittedAt     DateTime?  @db.Timestamptz(3)
+  approvedById    String?
+  approvedAt      DateTime?  @db.Timestamptz(3)
+  activatedAt     DateTime?  @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @db.Timestamptz(3)
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orgUnit    OrgUnit?           @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy  User?              @relation("RecoveryRuleCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvedBy User?              @relation("RecoveryRuleApprovedBy", fields: [approvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  cases      LeadRecoveryCase[]
+  runs       RecoveryRuleRun[]
+
+  @@unique([id, tenantId])
+  @@unique([id, version, tenantId])
+  @@unique([tenantId, ruleKey, version])
+  @@index([tenantId, status, trigger, priority])
+  @@index([tenantId, orgUnitId])
+}
+
+/// A lead recovery case (spec 9.3 - 9.5) created from a not-converted job outcome (one case per
+/// outcome: unique jobOutcomeId, so creation is idempotent). `presence*` is a SNAPSHOT of the
+/// technician's presence when the case was evaluated: AT_LOCATION / LEFT_LOCATION only when backed by
+/// a valid, recent, accurate LocationEvent (spec 26.5), else UNKNOWN. Estimates and confirmed revenue
+/// are separate columns (spec 9.7): `estimatedValueMinor` is a guess, `recoveredAmountMinor` /
+/// `collectedAmountMinor` are confirmed facts and need `recoveredAt` (CHECK).
+model LeadRecoveryCase {
+  id                      String         @id @default(cuid())
+  tenantId                String
+  /// Human-friendly number from NumberSequence "recovery_case".
+  number                  Int
+  jobOutcomeId            String
+  jobId                   String
+  customerId              String
+  leadId                  String?
+  technicianId            String?
+  /// Service area of the job (scope).
+  orgUnitId               String?
+  lostReasonId            String?
+  status                  RecoveryStatus @default(NEW)
+  statusChangedAt         DateTime       @default(now()) @db.Timestamptz(3)
+  priority                WorkPriority   @default(NORMAL)
+  /// Rule-computed numeric priority input, explainable through the rule that created the case.
+  priorityScore           Int?
+  /// The recovery employee working the case.
+  assignedToId            String?
+  assignedAt              DateTime?      @db.Timestamptz(3)
+  ruleId                  String?
+  ruleVersion             Int?
+  /// Machine code of the suggested next step, e.g. "call_customer". Never a discount (spec 9.6).
+  recommendation          String?
+  /// Job outcome time (spec 9.4).
+  outcomeAt               DateTime       @db.Timestamptz(3)
+  presenceStatus          PresenceStatus @default(UNKNOWN)
+  presenceEvaluatedAt     DateTime?      @db.Timestamptz(3)
+  /// The location event the presence was derived from; null when UNKNOWN.
+  presenceLocationEventId String?
+  presenceDistanceM       Int?
+  presenceAccuracyM       Int?
+  /// Machine code when UNKNOWN: "no_location", "stale_location", "inaccurate_location", "no_coordinates".
+  presenceReason          String?
+  initialValueMinor       Int?
+  /// An estimate of what recovery could bring in; NEVER mixed into confirmed revenue.
+  estimatedValueMinor     Int?
+  currency                String         @default("USD") @db.Char(3)
+  /// Confirmed result (spec 9.7), recorded together with `recoveredAt`.
+  recoveredAt             DateTime?      @db.Timestamptz(3)
+  recoveredAmountMinor    Int?
+  collectedAmountMinor    Int?
+  recoveredJobId          String?
+  recoveredLeadId         String?
+  recoveredById           String?
+  attemptCount            Int            @default(0)
+  lastAttemptAt           DateTime?      @db.Timestamptz(3)
+  closedAt                DateTime?      @db.Timestamptz(3)
+  closeReason             String?
+  createdAt               DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime       @updatedAt @db.Timestamptz(3)
+
+  tenant           Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  jobOutcome       JobOutcome                  @relation(fields: [jobOutcomeId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
+  job              Job                         @relation("RecoveryCaseJob", fields: [jobId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  customer         Customer                    @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lead             Lead?                       @relation(fields: [leadId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  technician       Employee?                   @relation("RecoveryCaseTechnician", fields: [technicianId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit          OrgUnit?                    @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lostReason       LostReason?                 @relation(fields: [lostReasonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedTo       Employee?                   @relation("RecoveryCaseAssignee", fields: [assignedToId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  rule             RecoveryRule?               @relation(fields: [ruleId, ruleVersion, tenantId], references: [id, version, tenantId], onDelete: Restrict)
+  presenceLocation LocationEvent?              @relation(fields: [presenceLocationEventId, technicianId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  recoveredLead    Lead?                       @relation("RecoveredLead", fields: [recoveredLeadId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  recoveredJob     Job?                        @relation("RecoveredJob", fields: [recoveredJobId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  recoveredBy      User?                       @relation("RecoveryCaseRecoveredBy", fields: [recoveredById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  attempts         RecoveryAttempt[]
+  statusHistory    RecoveryCaseStatusHistory[]
+  followUps        FollowUpTask[]
+  ruleRuns         RecoveryRuleRun[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, number])
+  @@unique([tenantId, jobOutcomeId])
+  @@index([tenantId, status, priority, outcomeAt])
+  @@index([tenantId, orgUnitId, status])
+  @@index([tenantId, assignedToId, status])
+  @@index([tenantId, jobId])
+  @@index([tenantId, customerId])
+}
+
+/// Append-only (trigger). One row per recovery status change (the first row has fromStatus null).
+model RecoveryCaseStatusHistory {
+  id          String          @id @default(cuid())
+  tenantId    String
+  caseId      String
+  fromStatus  RecoveryStatus?
+  toStatus    RecoveryStatus
+  actorType   AuditActorType  @default(USER)
+  actorUserId String?
+  reason      String?
+  occurredAt  DateTime        @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  case      LeadRecoveryCase @relation(fields: [caseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  changedBy User?            @relation("RecoveryStatusChangedBy", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, caseId, occurredAt])
+}
+
+/// One communication attempt on a recovery case (spec 9.3 "record communication attempts"). Channel
+/// and outcome reuse the lead-contact vocabularies. `offeredAmountMinor` records an amount the
+/// employee quoted, if any; the platform itself never offers a discount (spec 9.6).
+model RecoveryAttempt {
+  id                 String          @id @default(cuid())
+  tenantId           String
+  caseId             String
+  employeeId         String?
+  channel            ContactChannel
+  outcome            ContactOutcome?
+  occurredAt         DateTime        @default(now()) @db.Timestamptz(3)
+  durationSeconds    Int?
+  notes              String?         @db.Text
+  offeredAmountMinor Int?
+  recordedAt         DateTime        @default(now()) @db.Timestamptz(3)
+  recordedById       String?
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  case       LeadRecoveryCase @relation(fields: [caseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee   Employee?        @relation("RecoveryAttemptEmployee", fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy User?            @relation("RecoveryAttemptRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, caseId, occurredAt])
+  @@index([tenantId, employeeId, occurredAt])
+}
+
+// ───────────────────────── Follow-up tasks (spec 5.6, 5.9, 9.3) ─────────────────────────
+
+/// A generic follow-up task. The target is typed: `targetType` says which ONE of leadId / customerId /
+/// jobId / recoveryCaseId is set (CHECK), so every target is a tenant-safe composite FK. `dedupeKey`
+/// lets a rule or sweep create "the same task" idempotently. The sweep stamps `dueSoonNotifiedAt` /
+/// `overdueNotifiedAt` so each notification is sent once.
+model FollowUpTask {
+  id                String             @id @default(cuid())
+  tenantId          String
+  targetType        FollowUpTargetType
+  leadId            String?
+  customerId        String?
+  jobId             String?
+  recoveryCaseId    String?
+  orgUnitId         String?
+  title             String
+  description       String?            @db.Text
+  status            FollowUpStatus     @default(OPEN)
+  priority          WorkPriority       @default(NORMAL)
+  origin            FollowUpOrigin     @default(MANUAL)
+  assigneeId        String?
+  assignedAt        DateTime?          @db.Timestamptz(3)
+  dueAt             DateTime           @db.Timestamptz(3)
+  dedupeKey         String?
+  dueSoonNotifiedAt DateTime?          @db.Timestamptz(3)
+  overdueNotifiedAt DateTime?          @db.Timestamptz(3)
+  completedAt       DateTime?          @db.Timestamptz(3)
+  completedById     String?
+  completionNote    String?
+  cancelledAt       DateTime?          @db.Timestamptz(3)
+  cancelReason      String?
+  createdById       String?
+  createdAt         DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(3)
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lead         Lead?             @relation(fields: [leadId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer     Customer?         @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  job          Job?              @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recoveryCase LeadRecoveryCase? @relation(fields: [recoveryCaseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit      OrgUnit?          @relation(fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignee     Employee?         @relation("FollowUpAssignee", fields: [assigneeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  completedBy  User?             @relation("FollowUpCompletedBy", fields: [completedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy    User?             @relation("FollowUpCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, status, dueAt])
+  @@index([tenantId, assigneeId, status, dueAt])
+  @@index([tenantId, orgUnitId, status])
+  @@index([tenantId, targetType, status])
+  @@index([tenantId, leadId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, recoveryCaseId])
+}
+
+/// One evaluation of one rule version for one job outcome (spec 9.6; explainability, cooldown and loop safety). Append-only
+/// (trigger). `(tenantId, ruleId, jobOutcomeId)` is unique, so re-running the engine for an outcome never fires a rule twice.
+/// Cooldown = look up the latest run of the rule for the same customer inside `cooldownMinutes`. `actionsTaken` is an array of
+/// action codes ("create_case", "notify", "create_follow_up", "recommend"); `skippedReason` is a machine code ("cooldown",
+/// "conditions_not_met", "rule_inactive", ...) and, when set, `actionsTaken` is empty. Dry runs are NOT stored.
+model RecoveryRuleRun {
+  id             String   @id @default(cuid())
+  tenantId       String
+  ruleId         String
+  ruleVersion    Int
+  jobOutcomeId   String
+  customerId     String
+  matched        Boolean
+  actionsTaken   Json     @default("[]")
+  skippedReason  String?
+  recoveryCaseId String?
+  firedAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  rule         RecoveryRule      @relation(fields: [ruleId, ruleVersion, tenantId], references: [id, version, tenantId], onDelete: Restrict)
+  jobOutcome   JobOutcome        @relation(fields: [jobOutcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer     Customer          @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recoveryCase LeadRecoveryCase? @relation(fields: [recoveryCaseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, ruleId, jobOutcomeId])
+  @@index([tenantId, ruleId, customerId, firedAt])
+  @@index([tenantId, jobOutcomeId])
 }

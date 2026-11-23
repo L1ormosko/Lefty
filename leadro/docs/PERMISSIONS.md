@@ -55,6 +55,12 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `compensation` | view*, create, edit, approve*, reject, export, configure* |
 | `financial_reports` | view*, export* |
 | `performance` | view, export |
+| `shifts` | view, create (start a shift), edit (end / correct one), approve (accept a shift started or ended under an exception) |
+| `location` | view*, create (record an event: a technician's own), approve* (verify or override an arrival / location exception) |
+| `job_outcomes` | view, create (report a visit outcome), edit (correct one), configure (lost reasons) |
+| `completion_forms` | view (fill one in), configure (definitions per job type / category) |
+| `recovery` | view, create, edit (work a case, record attempts), assign, approve (activate a high-impact rule, never its author), manage (author and test rules) |
+| `follow_ups` | view, create, edit, assign |
 
 Phase 2 additions (`qualifications`, `notifications`, `job_types`, and `manage` on customers/leads) are not rows of the
 4.5 matrix; their defaults are in section 5 ("Phase 2 modules"). `notifications.*` is a capability check: the
@@ -81,6 +87,10 @@ the `base` (non-sensitive) fields only; a sensitive set is visible only to a gra
 | `employees.financial_fields` | employees | `financial` |
 | `customers.billing_fields` | customers | `billing` |
 | `jobs.financial_fields` | jobs | `financial` |
+| `location.coordinate_fields` | location | `coordinates` |
+
+`location.coordinate_fields` (spec 22.2): `LocationEvent.latitude` / `longitude` (`LOCATION_EVENT_FIELD_MAP`). A plain `location.view` grant reads when, what
+kind, how accurate and what the server concluded, never where. Only the Owner/CEO template names it (`includeFields`); no other shipped template does.
 
 Field maps (`field-maps.ts`) classify every stored column of `Employee`, `Customer`, `Lead` and `Job` (a test fails when a
 column is added without a tag). Customer billing columns (`billingName`, `billingEmail`, `billingAddress`, `taxId`,
@@ -225,6 +235,26 @@ constraint because scopes are a child table).
 `job_types.configure` makes the role require MFA (every `*.configure` does), which is why only Owner and COO hold it.
 `qualifications.approve` (verifying licenses and certifications) stays with HR and the Owner so managers who record
 credentials do not verify them. The `customer_history` set is passed by the customer history view only.
+
+**Phase 3 modules (defaults, not in the 4.5 table; Owner/CEO holds every action, with the `coordinates` set).** Scope follows the assignment:
+Technician `OWN` / `ASSIGNED`, managers their unit, COO / Owner tenant-wide. `location.view` and `location.approve` are `sensitive` (a custom role holding one
+requires MFA; shipped operational templates stay MFA-free unless they hold a `*.configure`).
+
+| Module | COO | State/Regional/City Mgr | Team Leader | Dispatcher | Lead Ops | Customer Relations | Technician |
+|---|---|---|---|---|---|---|---|
+| `shifts` | `*` | view, edit, approve | view | view | - | - | view, create, edit (own shift) |
+| `location` | view, approve (no coordinates) | view, approve (no coordinates) | - | - | - | - | create (record own events; no history, no verification) |
+| `job_outcomes` | `*` (incl. configure: lost reasons) | view, edit | view | view | view | - | view, create |
+| `completion_forms` | `*` (incl. configure) | view | view | view | - | - | view |
+| `recovery` | `*` (incl. approve) | view | - | - | view, create, edit, assign, manage (no approve) | - | - |
+| `follow_ups` | `*` | view, create, edit, assign | view, create, edit | view, create, edit | `*` | `*` | view, create, edit |
+
+Design notes: (1) Lead Operations holds no `location.*` permission; technician presence reaches them only as the derived `presenceStatus` inside a
+recovery case (AT_LOCATION / LEFT_LOCATION / UNKNOWN), never as coordinates or history. (2) `recovery.approve` (activating a high-impact rule) is held by
+the COO and Owner only, so Lead Ops authors rules (`recovery.manage`) but a second person activates them; the database also refuses a high-impact rule that
+is ACTIVE without an approver other than its author. (3) `job_outcomes.configure` and `completion_forms.configure` make a role require MFA (every
+`*.configure` does), which is why only Owner and COO hold them. (4) Technicians record outcomes (`job_outcomes.create`) but cannot correct them
+(`edit` is a manager's action); they hold no approve / manage / configure.
 
 Additional 4.4 role templates not in the 4.5 table are derived by analogy and flagged for
 confirmation in `DECISIONS.md`:

@@ -16,7 +16,10 @@ describe("permission catalog", () => {
         create: { key: permissionKey(def), module: def.module, action: def.action, sensitive: def.sensitive ?? false },
       });
     }
-    expect(await prisma.permission.count()).toBe(PERMISSION_CATALOG.length);
+    // The Permission table is global and shared by every worktree's test run, so assert "every catalog key is stored"
+    // (a subset check), never an exact row count.
+    const stored = new Set((await prisma.permission.findMany({ select: { key: true } })).map((p) => p.key));
+    for (const def of PERMISSION_CATALOG) expect(stored.has(permissionKey(def)), permissionKey(def)).toBe(true);
   });
 
   it("defines the Phase 2 modules with the documented actions", () => {
@@ -30,6 +33,25 @@ describe("permission catalog", () => {
     // The billing field set exists for customers and the financial set for jobs (opt-in, see PERMISSIONS.md).
     const tags = SENSITIVE_FIELD_CATEGORIES.map((category) => `${category.module}:${category.tag}`);
     expect(tags).toEqual(expect.arrayContaining(["customers:billing", "jobs:financial"]));
+  });
+
+  it("defines the Phase 3 modules with the documented actions and a sensitive location history", () => {
+    const actionsOf = (module: string) =>
+      PERMISSION_CATALOG.filter((p) => p.module === module).map((p) => p.action).sort();
+    expect(actionsOf("shifts")).toEqual(["APPROVE", "CREATE", "EDIT", "VIEW"]);
+    expect(actionsOf("location")).toEqual(["APPROVE", "CREATE", "VIEW"]);
+    expect(actionsOf("job_outcomes")).toEqual(["CONFIGURE", "CREATE", "EDIT", "VIEW"]);
+    expect(actionsOf("completion_forms")).toEqual(["CONFIGURE", "VIEW"]);
+    expect(actionsOf("recovery")).toEqual(["APPROVE", "ASSIGN", "CREATE", "EDIT", "MANAGE", "VIEW"]);
+    expect(actionsOf("follow_ups")).toEqual(["ASSIGN", "CREATE", "EDIT", "VIEW"]);
+    // Location history is sensitive (spec 22.2): reading or approving it is a sensitive permission, recording one's own event is not.
+    const sensitive = (key: string) => PERMISSION_CATALOG.find((p) => permissionKey(p) === key)?.sensitive;
+    expect(sensitive("location.view")).toBe(true);
+    expect(sensitive("location.approve")).toBe(true);
+    expect(sensitive("location.create")).toBe(false);
+    // Raw coordinates are an opt-in field set on top of location.view.
+    const tags = SENSITIVE_FIELD_CATEGORIES.map((category) => `${category.module}:${category.tag}`);
+    expect(tags).toContain("location:coordinates");
   });
 
   afterAll(async () => {

@@ -59,6 +59,24 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   ...mod("compensation", "compensation", ["VIEW", "CREATE", "EDIT", "APPROVE", "REJECT", "EXPORT", "CONFIGURE"], ["VIEW", "APPROVE", "CONFIGURE"]),
   ...mod("financial_reports", "financial reports", ["VIEW", "EXPORT"], ["VIEW", "EXPORT"]),
   ...mod("performance", "performance data", ["VIEW", "EXPORT"]),
+
+  // ── Phase 3: field operations and recovery ──
+  // Shifts (spec 8.1): CREATE starts a shift, EDIT ends/corrects one (technicians: own shift, OWN scope),
+  // APPROVE accepts a shift started or ended under an exception (GPS off, offline).
+  ...mod("shifts", "work shifts", ["VIEW", "CREATE", "EDIT", "APPROVE"]),
+  // Location history (spec 17, 22.2) is sensitive: VIEW reads events and verifications WITHOUT coordinates
+  // (the opt-in `location.coordinate_fields` set adds them); CREATE records an event (a technician's own);
+  // APPROVE is a manager verifying or overriding an arrival / location exception.
+  ...mod("location", "location events and arrival verification", ["VIEW", "CREATE", "APPROVE"], ["VIEW", "APPROVE"]),
+  // Outcome reporting (spec 9.1, 9.2): CREATE reports a visit outcome, EDIT corrects it, CONFIGURE = lost reasons.
+  ...mod("job_outcomes", "job outcomes and lost reasons", ["VIEW", "CREATE", "EDIT", "CONFIGURE"]),
+  // Completion form definitions per job type / category (spec 8.6); VIEW is what a technician needs to fill one in.
+  ...mod("completion_forms", "job completion forms", ["VIEW", "CONFIGURE"]),
+  // Lead recovery (spec 9.3-9.7): MANAGE = author and test recovery rules; APPROVE = activate a high-impact rule
+  // (never the rule's author, spec 21.3); ASSIGN = give a case to a recovery employee.
+  ...mod("recovery", "lead recovery cases and rules", ["VIEW", "CREATE", "EDIT", "ASSIGN", "APPROVE", "MANAGE"]),
+  // Generic follow-up tasks (spec 5.6, 5.9, 9.3).
+  ...mod("follow_ups", "follow-up tasks", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
 ];
 
 export const permissionKey = (p: Pick<PermissionDef, "module" | "action">) =>
@@ -93,6 +111,12 @@ export const SENSITIVE_FIELD_CATEGORIES = [
     module: "jobs",
     tag: "financial",
     description: "Prices, margins and other financial fields of jobs",
+  },
+  {
+    key: "location.coordinate_fields",
+    module: "location",
+    tag: "coordinates",
+    description: "Raw latitude / longitude of location events (spec 22.2); a plain location.view grant never reveals them",
   },
 ] as const;
 

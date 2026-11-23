@@ -124,6 +124,14 @@ const unitManagerGrants = (): TemplateGrant[] => [
   ...grantActions("qualifications", ["VIEW", "CREATE", "EDIT"]),
   ...view("job_types"),
   ...own("notifications"),
+  // Phase 3: oversee shifts and arrivals (verifying one is a manager's call, spec 8.4), correct outcomes, run follow-ups.
+  // Location history is read without coordinates (the `coordinates` set is opt-in).
+  ...grantActions("shifts", ["VIEW", "EDIT", "APPROVE"]),
+  ...grantActions("location", ["VIEW", "APPROVE"]),
+  ...grantActions("job_outcomes", ["VIEW", "EDIT"]),
+  ...view("completion_forms"),
+  ...view("recovery"),
+  ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
 ];
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
@@ -154,6 +162,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...full("jobs"),
       ...view("qualifications"),
       ...full("job_types"),
+      // Phase 3: operational oversight and the policies behind it (forms, lost reasons, recovery rules + their approval).
+      // No location coordinates: only the Owner's template opts into that set.
+      ...full("shifts"),
+      ...grantActions("location", ["VIEW", "APPROVE"]),
+      ...full("job_outcomes"),
+      ...full("completion_forms"),
+      ...full("recovery"),
+      ...full("follow_ups"),
       ...own("notifications"),
       ...view("compensation"),
       ...view("financial_reports"),
@@ -217,6 +233,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("job_types"),
       ...own("notifications"),
       ...view("performance"),
+      ...view("shifts"),
+      ...view("job_outcomes"),
+      ...view("completion_forms"),
+      ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
     ],
   }),
   defineTemplate({
@@ -234,6 +254,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("job_types"),
       ...own("notifications"),
       ...view("performance", { set: "lead_team" }),
+      // Phase 3: lead recovery (spec 4.4). Authors rules (manage) but cannot activate a high-impact one (approve is COO/Owner).
+      // Technician presence arrives inside the case as a status; Lead Ops holds no location permission.
+      ...grantActions("recovery", ["VIEW", "CREATE", "EDIT", "ASSIGN", "MANAGE"]),
+      ...view("job_outcomes"),
+      ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
     ],
   }),
   defineTemplate({
@@ -252,6 +277,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("qualifications"),
       ...view("job_types"),
       ...own("notifications"),
+      // Phase 3: sees who is on shift and how visits ended; works follow-ups. No location history.
+      ...view("shifts"),
+      ...view("job_outcomes"),
+      ...view("completion_forms"),
+      ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
     ],
   }),
   defineTemplate({
@@ -267,6 +297,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("jobs", { set: "customer_history" }),
       ...view("job_types"),
       ...own("notifications"),
+      // Phase 3: "Follow-up tasks" are part of the role (spec 4.4).
+      ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
     ],
   }),
   defineTemplate({
@@ -309,6 +341,13 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("compensation"),
       // No financial_reports.view: own statements/summary are self-service, not the module permission.
       ...view("performance"),
+      // Phase 3 (OWN / ASSIGNED scopes): own shift, own location events (recording only, no history, no verification),
+      // outcomes of assigned jobs, the completion form to fill in, follow-ups assigned to them.
+      ...grantActions("shifts", ["VIEW", "CREATE", "EDIT"]),
+      ...grantActions("location", ["CREATE"]),
+      ...grantActions("job_outcomes", ["VIEW", "CREATE"]),
+      ...view("completion_forms"),
+      ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
     ],
   }),
 ];

@@ -528,3 +528,132 @@ Column and constraint changes:
 
 - **Lead intake must always set `sourceId`.** The unique index `(tenantId, sourceId, externalId)` ignores rows with a NULL source (NULLs are distinct in Postgres), so webhook de-duplication only works with a source. Services default to the tenant's `manual`/`api` source rather than leaving it NULL.
 - **Availability windows cannot cross midnight.** `WEEKLY_WINDOW` needs `endMinute > startMinute` within one local day (CHECK `availability_shape`); a night shift is two windows (e.g. 22:00-24:00 on Monday, 00:00-06:00 on Tuesday). The qualification engine (Task 3) must evaluate the window in its own `timeZone` per local date, including DST days (a 02:30 start that does not exist or occurs twice).
+
+---
+
+# Phase 3: field operations and recovery
+
+Migration `20261123100000_phase3_field_operations` (schema only; services arrive in Phase 3 Tasks 2-7). 17 new tenant-owned tables
+(64 in total), all with `tenantId`, `(id, tenantId)` unique keys, composite `(ref, tenantId)` FKs and FORCE RLS (the Phase 1/2 DO-block
+runs again over the whole schema). Constraint and index names are asserted in `tests/db/phase3-schema.test.ts`.
+
+```mermaid
+erDiagram
+  Employee ||--o{ Shift : works
+  Shift ||--o{ LocationEvent : "events during"
+  Shift |o--o| LocationEvent : "start / end event"
+  Employee ||--o{ LocationEvent : "reported by"
+  Job |o--o{ LocationEvent : "about"
+  FieldEvent |o--o| LocationEvent : "produced"
+  Employee ||--o{ FieldEvent : "sent by (idempotent)"
+  Job ||--o{ ArrivalVerification : "arrival of"
+  LocationEvent |o--o{ ArrivalVerification : "evidence"
+  JobType ||--o{ JobCompletionFormDefinition : "form versions"
+  JobCompletionFormDefinition ||--o{ JobCompletion : "validated against (id, version)"
+  Job ||--o{ JobCompletion : "per visit"
+  JobCompletion ||--o{ JobMaterialUsage : materials
+  Job ||--o{ JobFieldNote : notes
+  Job ||--o{ JobAttachment : "metadata only"
+  JobAttachment |o--o{ JobCompletion : "signature"
+  Job ||--o{ JobOutcome : "per visit"
+  LostReason |o--o{ JobOutcome : why
+  JobOutcome ||--o| LeadRecoveryCase : "creates (unique)"
+  RecoveryRule |o--o{ LeadRecoveryCase : "created by (id, version)"
+  LeadRecoveryCase ||--o{ RecoveryAttempt : attempts
+  LeadRecoveryCase ||--o{ RecoveryCaseStatusHistory : "append-only"
+  LeadRecoveryCase |o--o{ FollowUpTask : target
+  Lead |o--o{ FollowUpTask : target
+  Customer |o--o{ FollowUpTask : target
+  Job |o--o{ FollowUpTask : target
+  Job |o--o{ LeadRecoveryCase : "recovered work"
+```
+
+## Model guide
+
+| Model | Purpose | Main consumers (planned) |
+|---|---|---|
+| `Shift` | spec 8.1: one working shift. Partial unique `Shift_one_active_per_employee` makes "start shift" idempotent. Start/end exception (`LocationException` + note). `orgUnitId` is the employee's placement at start (snapshot) so manager scope does not depend on later moves. Exception review for `shifts.approve`: `exceptionReviewStatus` (PENDING / APPROVED / REJECTED, null = no exception), `reviewedById`, `reviewedAt`, `reviewNote` (`shift_exception_review`). | shifts |
+| `LocationEvent` | spec 17: one position or one failed capture. **Sensitive.** Dual timestamps (`deviceTime`, `serverTime`), `source` (DEVICE_GPS, GEOFENCE, MANUAL, MANAGER), `accuracyM`, `verification` (UNVERIFIED, WITHIN_RADIUS, OUTSIDE_RADIUS, MANAGER_VERIFIED), `coordinatesPurgedAt` (retention), straight-line `distanceToJobM` vs `geofenceRadiusM`. Kinds: SHIFT_START, SHIFT_END, ARRIVAL, DEPARTURE, NAVIGATION_OPENED (never changes status, never arrival), VERIFICATION. | shifts, arrival, recovery (presence) |
+| `ArrivalVerification` | spec 8.4 / 17.2: how an arrival was established (TECHNICIAN, GEOFENCE, MANAGER), `status` (RECORDED, PENDING_MANAGER_REVIEW, MANAGER_VERIFIED, MANAGER_REJECTED), exception reason, manager decision with mandatory note. Several rows per job; wording is always about confidence. | arrival |
+| `FieldEvent` | spec 8.7 / 25.3: ingestion log of device events. **Unique `(tenantId, employeeId, clientEventId)`**: a replay finds the row and returns the stored result (`ACCEPTED` / `REJECTED` / `CONFLICT` + `resultCode`). Rejected events are stored too. `occurredAt` (device) vs `receivedAt` (server); applied in `occurredAt` order; `batchId` groups a sync batch. | field execution + sync |
+| `JobCompletionFormDefinition` | spec 8.6: versioned form for ONE job type XOR ONE category. One ACTIVE per type/category (partial unique), only DRAFT may change `schema` (trigger). | completion forms |
+| `JobCompletion` | one submitted form per `(job, visitNumber)`: answers snapshot + the exact `(definition, version)` (composite FK). | field execution |
+| `JobMaterialUsage` | material used: free text + `materialRef` placeholder for the Phase 4 catalog, quantity `Decimal(12,3)`, unit. | field execution |
+| `JobFieldNote` | spec 8.5 notes, work performed, additional work requested, customer approval (optional amount in minor units). Free text lives here, not in events. | field execution |
+| `JobAttachment` | photo / signature / document **metadata**. No storage provider: rows are PENDING_UPLOAD; STORED needs `storageKey` + `storageProvider` (CHECK). | field execution |
+| `LostReason` | spec 9.2: tenant-configurable (`code`, `name`, `appliesTo` outcomes, `recoverable`, `active`, `sortOrder`). Deactivate, never delete. | outcomes, recovery |
+| `JobOutcome` | spec 9.1: one per `(job, visitNumber)`; outcome, lost reason (required for NOT_SOLD / WORK_NOT_POSSIBLE, forbidden for SOLD: CHECK), quoted / approved / charged / collected (minor units), payment method + status, `customerRequestedFollowUp`. | outcomes, recovery |
+| `RecoveryRule` | spec 9.6: versioned (`ruleKey` + `version`, one ACTIVE version per key), `status` (DRAFT, PENDING_APPROVAL, ACTIVE, INACTIVE, SUPERSEDED), `priority`, `trigger`, `conditions`, `actions`, org-unit scope, `cooldownMinutes` (loop safety). High-impact + ACTIVE needs an approver other than the author (CHECK). | recovery |
+| `LeadRecoveryCase` | spec 9.3-9.5, 9.7: one per outcome (unique `jobOutcomeId` = idempotent creation), status machine fields, priority + score, assignee, presence **snapshot**, `estimatedValueMinor` (estimate) vs `recoveredAmountMinor` / `collectedAmountMinor` (confirmed, need `recoveredAt`), `recoveredJobId` and `recoveredLeadId` (same customer, composite FKs), `(ruleId, ruleVersion)` is a real rule version. UNKNOWN presence requires `presenceReason` and no evidence event; AT/LEFT require the technician's own event. | recovery |
+| `RecoveryCaseStatusHistory` | append-only status trail (trigger). | recovery |
+| `RecoveryRuleRun` | append-only record of one rule version evaluated for one job outcome: `matched`, `actionsTaken` (action codes), `skippedReason` (e.g. `cooldown`). Unique `(tenantId, ruleId, jobOutcomeId)` makes the engine idempotent and loop-safe; cooldown = latest run of the rule for the same customer inside `cooldownMinutes`. Dry runs are not stored. | recovery |
+| `RecoveryAttempt` | one communication attempt (channel, outcome, duration, notes, amount offered by the employee, never by the system). | recovery |
+| `FollowUpTask` | generic task; `targetType` selects exactly ONE of `leadId` / `customerId` / `jobId` / `recoveryCaseId` (CHECK + composite FKs). `dedupeKey` unique per tenant; `dueSoonNotifiedAt` / `overdueNotifiedAt` make the sweep send each notification once. | follow-ups |
+
+Columns added to Phase 2 tables: `Job.currentVisitNumber` (default 1: the `visitNumber` outcomes and completions of this job use; the jobs lifecycle increments it in the same transaction when a job whose current visit already has a `JobOutcome` returns to SCHEDULED after REQUIRES_RETURN_VISIT / RESCHEDULED / CUSTOMER_UNAVAILABLE), `Job.enRouteAt`, `Job.arrivedAt` (milestones; `startedAt` is work start); `Job` unique `(id, customerId, tenantId)`
+(lets a recovery case tie job and customer together); `CustomerAddress.geofenceRadiusM` (per-site override); `OperationsSettings`:
+`arrivalGeofenceRadiusM` (150), `locationMaxAccuracyM` (100), `presenceMaxAgeMinutes` (30), `locationRetentionDays` (90),
+`followUpDueSoonMinutes` (60). `JobType.completionFormSchema` (Phase 2 placeholder) is superseded by `JobCompletionFormDefinition` and must not be read.
+
+## Location data is sensitive (spec 17, 22.2)
+
+- **Event-based only**: rows exist for shift start/end, arrival, departure, navigation-opened and approved verification. No polling table.
+- **Own permission and field set**: `location.view` (sensitive) reads events and verifications WITHOUT coordinates; raw `latitude` / `longitude`
+  are the opt-in `coordinates` field set (`location.coordinate_fields`, `LOCATION_EVENT_FIELD_MAP`), held by the Owner template only.
+  Coordinates exist in exactly one table (`LocationEvent`); `ArrivalVerification` and `LeadRecoveryCase` keep distance, accuracy, ids and status.
+- **Accuracy is mandatory with a position** (`location_event_accuracy_with_coordinates`) and both clocks are kept; GPS is never stored as "proof".
+- **Retention (one strategy: purge the coordinates, keep the row)**: `OperationsSettings.locationRetentionDays` (default 90, range 1-3650). The retention
+  function (a callable function only; no scheduler exists yet) runs `UPDATE "LocationEvent" SET latitude = NULL, longitude = NULL, "coordinatesPurgedAt" = now()`
+  for rows whose `serverTime` is older than the setting (index `LocationEvent_tenantId_serverTime_idx`). Rows are NOT deleted: shifts (start/end event),
+  arrivals (GEOFENCE evidence) and recovery cases (presence evidence) reference them with RESTRICT foreign keys, and kind, times, accuracy, distance and
+  verdict are the non-sensitive record those modules need. The CHECKs allow exactly this: `location_event_position_or_reason` and
+  `location_event_radius_verdict_needs_data` accept `coordinatesPurgedAt IS NOT NULL`, and `location_event_purged_has_no_coordinates` forbids coordinates on a
+  stamped row. Tested on an event referenced by a shift, an arrival and a case.
+- **Coordinates never appear in any JSON column** (`FieldEvent.payload`, `RecoveryRuleRun.actionsTaken`, rule `conditions`/`actions`, form `values`, audit
+  values): they live only in `LocationEvent.latitude/longitude`, where the purge can reach them. Not expressible as a CHECK; every writer must pass payloads through
+  a service-level validator that rejects keys such as `latitude`, `longitude`, `lat`, `lng`, `coords` (built with the shifts/field-sync tasks).
+- Presence for recovery uses the latest event newer than `presenceMaxAgeMinutes` with `accuracyM <= locationMaxAccuracyM`; otherwise UNKNOWN (spec 26.5).
+
+## Database-level rules (Phase 3)
+
+- **RLS**: the same fail-closed DO-block as before; `tests/db/rls.test.ts` lists the 17 tables.
+- **Composite FKs with extra guards**: `LocationEvent (shiftId, employeeId, tenantId) -> Shift` (an event's shift is the same employee's);
+  `Shift (start/endLocationEventId, employeeId, tenantId) -> LocationEvent (id, employeeId, tenantId)`; `ArrivalVerification (locationEventId, jobId, employeeId, tenantId) -> LocationEvent` (evidence is the arriving employee's, for the arrival's job); `ArrivalVerification (fieldEventId, tenantId) -> FieldEvent`; `JobCompletion (signatureAttachmentId, jobId, tenantId) -> JobAttachment` and `JobMaterialUsage (completionId, jobId, tenantId) -> JobCompletion` (same job); `LeadRecoveryCase (presenceLocationEventId, technicianId, tenantId) -> LocationEvent (id, employeeId, tenantId)` and `(ruleId, ruleVersion, tenantId) -> RecoveryRule (id, version, tenantId)`;
+  `JobCompletion (formDefinitionId, formVersion, tenantId) -> JobCompletionFormDefinition (id, version, tenantId)`;
+  `LeadRecoveryCase (jobOutcomeId, jobId, tenantId) -> JobOutcome`, `(jobId, customerId, tenantId) -> Job`, `(leadId, customerId, tenantId) -> Lead`,
+  `(recoveredJobId, customerId, tenantId) -> Job`, `(recoveredLeadId, customerId, tenantId) -> Lead`.
+- **Idempotency keys**: `FieldEvent (tenantId, employeeId, clientEventId)`; `(tenantId, jobId, clientEventId)` on `JobCompletion`, `JobMaterialUsage`,
+  `JobFieldNote`, `JobAttachment`, `JobOutcome`; `LocationEvent (tenantId, fieldEventId)`; `FollowUpTask (tenantId, dedupeKey)`.
+- **Partial unique indexes**: `Shift_one_active_per_employee`, `JobCompletionFormDefinition_one_active_per_job_type` / `_per_category`,
+  `RecoveryRule_one_active_per_key`. Sweep indexes: `FollowUpTask_open_due_idx`, `ArrivalVerification_pending_review_idx`.
+- **Triggers**: `RecoveryCaseStatusHistory` and `RecoveryRuleRun` append-only; `recovery_rule_guard` (once a rule leaves DRAFT its `conditions`, `actions`, `trigger`, `priority`, `orgUnitId`, `highImpact`, `ruleKey`, `version` and `createdById` are immutable, so an approval stays bound to the approved content; status only moves PENDING_APPROVAL -> ACTIVE | INACTIVE, ACTIVE -> INACTIVE | SUPERSEDED, INACTIVE -> ACTIVE | SUPERSEDED); `job_completion_form_definition_guard` (a published definition's schema, version and target are
+  immutable, status only moves DRAFT -> ACTIVE -> RETIRED).
+- **CHECKs** (names in the migration): location (`location_event_*`: ranges, pair, accuracy, device time, position-or-reason, kind needs job/shift,
+  manager recorder, radius verdict needs data), shifts (`shift_*`), arrivals (`arrival_verification_*`), field events (`field_event_*`: UUID, dotted type,
+  result code), forms (`job_completion_form_*`), notes / attachments (`job_field_note_*`, `job_attachment_*`), outcomes (`job_outcome_*`: reason rules,
+  non-negative money, payment needs collected + method), rules (`recovery_rule_*`: formats, JSON shape; `highImpact` requires `createdById`, and ACTIVE + high impact requires an approver other than the author. The service DERIVES `highImpact` from the actions (case creation, notification, task creation) rather than trusting the author's flag), cases
+  (`lead_recovery_case_*`: confirmed revenue needs `recoveredAt`, closed iff NOT_RECOVERED/CLOSED, ASSIGNED has an owner, presence evidence, not its own
+  recovery), follow-ups (`follow_up_task_*`: target shape, state consistency, cancel reason), settings ranges
+  (`operations_settings_location_ranges`, `customer_address_geofence_radius`).
+
+## Contracts for JSON and polymorphic references (Phase 3)
+
+The Phase 2 rules apply (ids only, resolve through tenant-scoped queries and re-check authorization). Per column:
+- `FieldEvent.payload`: ids and enum values of the thing the event refers to; free text lives in `JobFieldNote` / `JobOutcome` / ... which the payload points at.
+  `entityType` + `entityId` name what the event created or changed (resolve through a tenant-scoped query).
+- `JobCompletionFormDefinition.schema`: `{ "fields": [ { "key", "type", "required", "labelKey" } ] }`; `key` is from the closed vocabulary
+  `outcome, quotedAmount, approvedAmount, finalChargedAmount, amountCollected, paymentMethod, paymentStatus, materials, photos, notes,
+  customerSignature, followUpRequired`; `type` is `select | money | text | longtext | boolean | materials | photos | signature`; labels are i18n keys.
+  The database checks only the outer shape (object with a `fields` array); the completion service validates the rest.
+- `JobCompletion.values`: the ONE documented exception to "ids only": the technician's answers keyed by field key (validated against the form version).
+  Amounts and the payment record live in `JobOutcome` columns, materials in `JobMaterialUsage`, photos in `JobAttachment`; `values` repeats none of them.
+- `RecoveryRule.conditions`: an object of ids / enum values / numbers, e.g. `{ "outcomes": ["NOT_SOLD"], "lostReasonIds": ["<id>"], "presence": ["AT_LOCATION"],
+  "minValueMinor": 100000, "jobTypeIds": ["<id>"] }`. `RecoveryRule.actions`: an array of `{ "type": "create_case" | "notify" | "create_follow_up" | "recommend", ... }`
+  with codes only (`audience`, `priority`, `code`); there is no discount action and the engine must refuse one.
+
+## Documented rules not expressible in the database
+
+- A job is not allowed to close without an outcome (Task 5, service check; the schema offers `JobOutcome (job, visitNumber)`).
+- The latest non-rejected `ArrivalVerification` of a job is its arrival; `NAVIGATION_OPENED` events never create one.
+- `LocationEvent` rows are immutable by convention (a correction is a new event); the only update is the retention purge of coordinates (never deleted).
+- A `LeadRecoveryCase` status change always writes `RecoveryCaseStatusHistory` in the same transaction (service rule).

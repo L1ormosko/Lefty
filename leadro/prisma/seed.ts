@@ -1,6 +1,7 @@
 import { assertPasswordMeetsPolicy, hashPassword } from "../src/server/auth";
 import { PERMISSION_CATALOG, permissionKey } from "../src/server/authz";
 import { prisma } from "../src/server/db";
+import { seedFieldOperationsData } from "./seed/seed-field-operations";
 import { seedOperationalData } from "./seed/seed-operations";
 import { seedTenant } from "./seed/seed-tenant";
 import { TENANT_SPECS } from "./seed/tenant-specs";
@@ -69,6 +70,11 @@ async function main(): Promise<void> {
       operations.created
         ? `  operations: ${operations.jobTypes} job types, ${operations.skills} skills, ${operations.certifications} certifications, ${operations.leadSources} lead sources, ${operations.technicians} technicians with ${operations.qualifications} qualifications`
         : "  operations: already seeded, left unchanged",
+    );
+    // Phase 3 catalogs (lost reasons, default completion forms, the inactive example recovery rule); idempotent.
+    const field = await seedFieldOperationsData(result.tenantId);
+    console.log(
+      `  field operations: ${field.lostReasons} lost reasons, ${field.completionForms} completion forms, ${field.recoveryRules} recovery rule(s) (inactive)`,
     );
   }
   // Both tenants share the password from SEED_PASSWORD; it is intentionally not echoed.

@@ -139,6 +139,9 @@ export const JOB_FIELD_MAP: FieldMap = buildFieldMap(
     "scheduledEndAt",
     "timeZone",
     "estimatedDurationMinutes",
+    "currentVisitNumber",
+    "enRouteAt",
+    "arrivedAt",
     "startedAt",
     "completedAt",
     "closedAt",
@@ -150,6 +153,36 @@ export const JOB_FIELD_MAP: FieldMap = buildFieldMap(
     "updatedAt",
   ],
   { financial: ["quotedAmountMinor", "currency"] },
+);
+
+/**
+ * Location event fields (every stored `LocationEvent` column except `tenantId`). Raw coordinates are the
+ * opt-in `coordinates` set (`location.coordinate_fields`, spec 22.2): a plain `location.view` grant sees
+ * when, what kind, how accurate and what the server concluded, never where.
+ */
+export const LOCATION_EVENT_FIELD_MAP: FieldMap = buildFieldMap(
+  [
+    "id",
+    "employeeId",
+    "shiftId",
+    "jobId",
+    "orgUnitId",
+    "kind",
+    "source",
+    "verification",
+    "accuracyM",
+    "distanceToJobM",
+    "geofenceRadiusM",
+    "deviceTime",
+    "serverTime",
+    "deviceId",
+    "exception",
+    "exceptionNote",
+    "coordinatesPurgedAt",
+    "recordedByUserId",
+    "fieldEventId",
+  ],
+  { coordinates: ["latitude", "longitude"] },
 );
 
 /**
