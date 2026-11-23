@@ -58,7 +58,7 @@ export async function startShift(actor: Actor, ctx: RequestContext, input: Start
     }
 
     const settings = await loadLocationSettings(tx, actor.tenantId);
-    const assessment = assessBoundary(input, settings.locationMaxAccuracyM);
+    const assessment = assessBoundary(input, settings.locationMaxAccuracyM, now.getTime() - startedAt.getTime());
     const orgUnitId = (await orgUnitAtInTx(tx, actor.tenantId, employeeId, startedAt))?.orgUnitId ?? null;
 
     const shift = await tx.shift.create({

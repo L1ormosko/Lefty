@@ -173,6 +173,41 @@ describe("ending a shift", () => {
   });
 });
 
+describe("ending: races and the id-less end", () => {
+  it("lets two concurrent ends of the same shift both succeed with one SHIFT_END event", async () => {
+    await offShift();
+    const shift = await startShiftNow();
+    const [a, b] = await Promise.all([endById(w.cookie.techA1, shift.id, { position: position() }), endById(w.cookie.cityManagerA, shift.id, { reason: "Racing the technician" })]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const events = await shiftEvents(w.tenantId, shift.id);
+    expect(events.filter((event) => event.kind === "SHIFT_END")).toHaveLength(1);
+  });
+
+  it("serialises an end racing a review: the decision is kept and the shift ends exactly once", async () => {
+    await offShift();
+    const shift = (await start(w.cookie.techA1, { exception: { code: "GPS_DISABLED" } })).json.data;
+    const [ended, reviewed] = await Promise.all([
+      endById(w.cookie.techA1, shift.id, { position: position() }),
+      review(w.cookie.cityManagerA, shift.id, { decision: "APPROVED", note: "Accepted while ending" }),
+    ]);
+    expect(ended.status).toBe(200);
+    expect(reviewed.status).toBe(200);
+    const final = (await getShift(w.cookie.cityManagerA, shift.id)).json.data;
+    expect(final).toMatchObject({ status: "ENDED", exceptionReviewStatus: "APPROVED", reviewNote: "Accepted while ending" });
+  });
+
+  it("POST /shifts/end without an id ends the CURRENT shift after start, end, start", async () => {
+    await offShift();
+    const first = await startShiftNow();
+    expect((await endOwn(w.cookie.techA1, { position: position() })).json.data.id).toBe(first.id);
+    const second = await startShiftNow();
+    expect(second.id).not.toBe(first.id);
+    const ended = await endOwn(w.cookie.techA1, { position: position() });
+    expect(ended.json.data).toMatchObject({ id: second.id, status: "ENDED" });
+    expect((await getShift(w.cookie.techA1, first.id)).json.data.endedAt).not.toBe(ended.json.data.endedAt);
+  });
+});
+
 describe("reviewing a shift exception (shifts.approve)", () => {
   it("lets a manager over the unit approve or reject once, with a mandatory note, recording who and when", async () => {
     await offShift();
@@ -229,6 +264,8 @@ describe("offline shifts (clientEventId + occurredAt)", () => {
     expect(replayedStart.json.data.id).toBe(firstStart.json.data.id);
     expect(new Date(firstStart.json.data.startedAt).toISOString()).toBe(startedAt.toISOString());
     expect(new Date(firstStart.json.data.startRecordedAt).getTime()).toBeGreaterThan(startedAt.getTime()); // dual timestamps on the shift
+    // A boundary reported hours late is an exception on its own: the server raises DELAYED and queues the review.
+    expect(firstStart.json.data).toMatchObject({ startException: "DELAYED", exceptionReviewStatus: "PENDING" });
 
     const changed = await start(cookie, { clientEventId: startId, occurredAt: startedAt.toISOString(), position: position({ latitude: 41, deviceTime: startedAt.toISOString() }) });
     expect(changed.status).toBe(409);
@@ -239,6 +276,7 @@ describe("offline shifts (clientEventId + occurredAt)", () => {
     expect(firstEnd.status).toBe(200);
     expect(replayedEnd.json.data.id).toBe(firstStart.json.data.id);
     expect(new Date(firstEnd.json.data.endedAt).toISOString()).toBe(endedAt.toISOString());
+    expect(firstEnd.json.data.endException).toBe("DELAYED");
     expect(await shiftEvents(w.tenantId, firstStart.json.data.id)).toHaveLength(2);
 
     const logged = await withTenant(w.tenantId, (tx) => tx.fieldEvent.findMany({ where: { tenantId: w.tenantId, clientEventId: { in: [startId, endId] } }, orderBy: { type: "asc" } }));
@@ -254,7 +292,7 @@ describe("offline shifts (clientEventId + occurredAt)", () => {
     await clearActiveShifts(w.tenantId, w.techB.employeeId as string);
     // Shifts that ended long ago are not a retry of "end": move them back in time (retry window is 5 minutes).
     await withTenant(w.tenantId, (tx) =>
-      tx.shift.updateMany({ where: { tenantId: w.tenantId, employeeId: w.techB.employeeId as string }, data: { startedAt: hoursAgo(3), endedAt: hoursAgo(2) } }),
+      tx.shift.updateMany({ where: { tenantId: w.tenantId, employeeId: w.techB.employeeId as string }, data: { startedAt: hoursAgo(3), endedAt: hoursAgo(2), endRecordedAt: hoursAgo(2) } }),
     );
     const eventId = crypto.randomUUID();
     const body = { clientEventId: eventId, occurredAt: new Date().toISOString(), position: position() };

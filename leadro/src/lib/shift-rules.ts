@@ -6,6 +6,13 @@ import { isAccurateEnough } from "@/lib/location-rules";
  * position only means the device said so, it is stored with its accuracy and judged by people when it matters.
  */
 
+/**
+ * A boundary reported this long after it happened (offline sync, a phone that was off) is an exception a manager reviews:
+ * the shift's time then rests on the device clock alone. Named constant, 15 minutes; a future `OperationsSettings` field
+ * (no schema change in this task).
+ */
+export const DELAYED_BOUNDARY_THRESHOLD_MS = 15 * 60_000;
+
 export type CaptureException =
   | "GPS_DISABLED"
   | "PERMISSION_DENIED"
@@ -20,6 +27,8 @@ export interface CaptureInput {
   accuracyM?: number;
   /** The reason the technician gave (GPS off, permission denied, offline ...), if any. */
   exception?: { code: CaptureException; note?: string };
+  /** How long ago the boundary happened on the device when the server received it (server now minus `occurredAt`). */
+  delayedByMs?: number;
   /** Tenant setting: positions vaguer than this never count (spec 17.2). */
   maxAccuracyM: number;
 }
@@ -44,7 +53,9 @@ export function assessCapture(input: CaptureInput): CaptureAssessment | null {
   const stated = input.exception ? { code: input.exception.code, note: input.exception.note?.trim() || null } : null;
   // A position too vague to be evidence is still recorded, but the boundary becomes an exception a person can look at.
   const tooVague = hasPosition && !isAccurateEnough(input.accuracyM, input.maxAccuracyM);
-  const exception = stated ?? (tooVague ? { code: "POOR_SIGNAL" as const, note: null } : null);
+  const delayed = (input.delayedByMs ?? 0) > DELAYED_BOUNDARY_THRESHOLD_MS;
+  // A stated reason wins; else the server names what it can see: a vague fix, then a late report.
+  const exception = stated ?? (tooVague ? { code: "POOR_SIGNAL" as const, note: null } : delayed ? { code: "DELAYED" as const, note: null } : null);
   return { source: hasPosition ? "DEVICE_GPS" : "MANUAL", exception, reviewRequired: exception !== null };
 }
 

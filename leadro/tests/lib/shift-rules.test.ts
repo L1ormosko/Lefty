@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessCapture, reviewStateAfterBoundary } from "@/lib/shift-rules";
+import { DELAYED_BOUNDARY_THRESHOLD_MS, assessCapture, reviewStateAfterBoundary } from "@/lib/shift-rules";
 
 describe("assessCapture", () => {
   it("accepts an accurate position as a clean device capture", () => {
@@ -24,6 +24,17 @@ describe("assessCapture", () => {
       exception: { code: "DELAYED", note: null },
       reviewRequired: true,
     });
+  });
+
+  it("raises DELAYED for a boundary reported later than the threshold, but not at or under it", () => {
+    expect(assessCapture({ accuracyM: 10, maxAccuracyM: 100, delayedByMs: DELAYED_BOUNDARY_THRESHOLD_MS + 1 })).toEqual({
+      source: "DEVICE_GPS",
+      exception: { code: "DELAYED", note: null },
+      reviewRequired: true,
+    });
+    expect(assessCapture({ accuracyM: 10, maxAccuracyM: 100, delayedByMs: DELAYED_BOUNDARY_THRESHOLD_MS })?.exception).toBeNull();
+    // a stated reason wins over the server's own observation
+    expect(assessCapture({ exception: { code: "DEVICE_OFFLINE" }, maxAccuracyM: 100, delayedByMs: 3_600_000 })?.exception?.code).toBe("DEVICE_OFFLINE");
   });
 
   it("refuses a blank capture: neither position nor reason", () => {

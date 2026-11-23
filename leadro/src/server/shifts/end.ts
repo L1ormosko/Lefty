@@ -28,7 +28,7 @@ export interface EndShiftResult {
   replayed: boolean;
 }
 
-/** An end repeated within this long after it succeeded gets the ended shift back (a retry after a lost response), not an error. */
+/** An end repeated within this long after the server RECORDED it (not the device's `endedAt`, which may be hours old) gets the ended shift back (a retry after a lost response), not an error. */
 const RETRY_WINDOW_MS = 5 * 60_000;
 
 /** The shift to end: the named one, or the caller's own ACTIVE one (or one that ended just now, so a plain retry is idempotent). */
@@ -42,7 +42,7 @@ async function findShiftToEnd(tx: TenantTx, actor: Actor, shiftId: string | unde
     where: {
       tenantId: actor.tenantId,
       employeeId: actor.employeeId as string,
-      OR: [{ status: "ACTIVE" }, { endedAt: { gte: new Date(Date.now() - RETRY_WINDOW_MS) } }],
+      OR: [{ status: "ACTIVE" }, { endRecordedAt: { gte: new Date(Date.now() - RETRY_WINDOW_MS) } }],
     },
     orderBy: [{ status: "asc" }, { startedAt: "desc" }], // ACTIVE sorts before ENDED
     select: shiftSelect,
@@ -78,7 +78,7 @@ export async function endShift(actor: Actor, ctx: RequestContext, shiftId: strin
 
     const settings = await loadLocationSettings(tx, actor.tenantId);
     // A technician's own end is backed by the device or a stated exception; a manager's correction by the reason alone.
-    const assessment = byOther ? null : assessBoundary(input, settings.locationMaxAccuracyM);
+    const assessment = byOther ? null : assessBoundary(input, settings.locationMaxAccuracyM, now.getTime() - endedAt.getTime());
     const event = await recordLocationEventInTx(
       tx,
       {

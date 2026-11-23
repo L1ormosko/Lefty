@@ -11,7 +11,7 @@ import type { LocationExceptionInput, PositionInput } from "@/server/location";
  * end) queue up, so the loser sees the winner's shift instead of tripping the one-active-shift unique index.
  */
 export async function lockEmployee(tx: TenantTx, tenantId: string, employeeId: string): Promise<void> {
-  await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId} AND "tenantId" = ${tenantId} FOR NO KEY UPDATE`;
 }
 
 /** When the boundary happened: the device's `occurredAt` (offline events) or now. Refuses futures and ancient events. */
@@ -24,8 +24,8 @@ export function boundaryTime(occurredAt: Date | undefined, now: Date): Date {
 }
 
 /** Judges the position / reason a boundary came with; a blank capture is refused (spec 17.4: say why there is no position). */
-export function assessBoundary(input: { position?: PositionInput; exception?: LocationExceptionInput }, maxAccuracyM: number): CaptureAssessment {
-  const assessment = assessCapture({ accuracyM: input.position?.accuracyM, exception: input.exception, maxAccuracyM });
+export function assessBoundary(input: { position?: PositionInput; exception?: LocationExceptionInput }, maxAccuracyM: number, delayedByMs: number): CaptureAssessment {
+  const assessment = assessCapture({ accuracyM: input.position?.accuracyM, exception: input.exception, maxAccuracyM, delayedByMs });
   if (!assessment) {
     throw new ValidationError({ message: "Send the device position, or say why there is none (GPS off, permission denied, offline).", field: "position" });
   }
