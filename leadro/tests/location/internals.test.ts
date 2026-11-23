@@ -92,6 +92,16 @@ describe("latestValidLocation (presence helper for arrival and recovery)", () =>
     expect(await find(lone, { maxAgeMinutes: 5 })).toBeNull(); // so does the freshness limit
   });
 
+  it("does not treat an old offline fix synced just now as fresh (the device clock counts too, §26.5)", async () => {
+    const lone = w.techB.employeeId as string;
+    await withTenant(w.tenantId, (tx) =>
+      tx.locationEvent.create({
+        data: { tenantId: w.tenantId, employeeId: lone, kind: "VERIFICATION", source: "DEVICE_GPS", latitude: 41, longitude: -88, accuracyM: 10, deviceTime: minutesAgo(6 * 24 * 60), serverTime: minutesAgo(1) },
+      }),
+    );
+    expect(await find(lone)).toBeNull();
+  });
+
   it("ignores positions whose coordinates were purged", async () => {
     const lone = w.techB.employeeId as string;
     await withTenant(w.tenantId, (tx) =>

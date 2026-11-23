@@ -32,6 +32,9 @@ export interface ValidLocation {
  */
 export async function latestValidLocation(tx: TenantTx, employeeId: string, options: LatestValidLocationOptions): Promise<ValidLocation | null> {
   const now = options.now ?? new Date();
+  const cutoff = new Date(now.getTime() - options.maxAgeMinutes * 60_000);
+  // §26.5: a position is "now" only if it was TAKEN recently. An offline fix captured days ago and synced just now has a
+  // fresh serverTime but an old deviceTime, so both clocks must be inside the window (the older one decides).
   const row = await tx.locationEvent.findFirst({
     where: {
       tenantId: options.tenantId,
@@ -39,7 +42,8 @@ export async function latestValidLocation(tx: TenantTx, employeeId: string, opti
       latitude: { not: null },
       longitude: { not: null },
       accuracyM: { lte: options.maxAccuracyM },
-      serverTime: { gte: new Date(now.getTime() - options.maxAgeMinutes * 60_000), lte: now },
+      serverTime: { gte: cutoff, lte: now },
+      OR: [{ deviceTime: null }, { deviceTime: { gte: cutoff } }],
     },
     orderBy: [{ serverTime: "desc" }, { id: "desc" }],
     select: { id: true, kind: true, jobId: true, latitude: true, longitude: true, accuracyM: true, deviceTime: true, serverTime: true },
