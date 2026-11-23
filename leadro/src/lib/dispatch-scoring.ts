@@ -21,6 +21,9 @@
  * same ranking. Distances are a labelled straight-line estimate, never travel time (§28.3).
  */
 
+/** Bump when a weight or rule below changes, so stored recommendations say which rules produced them. */
+export const SCORING_VERSION = 1;
+
 export const DISTANCE_MAX_POINTS = 40;
 export const DISTANCE_CAP_KM = 50;
 export const WORKLOAD_MAX_POINTS = 30;

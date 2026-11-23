@@ -16,8 +16,10 @@ Invariants:
   distance (straight-line estimate), open workload, completed jobs of the job type, customer preferred/avoid.
 - Deterministic and explainable: every factor stores key, value, contribution and an i18n key; conflicts are warnings.
 - JSON columns hold ids and codes only (no names, addresses, phones). Clients resolve ids through other modules' tenant-checked APIs.
-- Generating never assigns. Accepting calls jobs' `assignJob` (hard eligibility and `jobs.approve` for overrides re-checked at
-  decision time) and then stamps `recommendationId` / method through `linkAssignmentToRecommendation`.
+- Generating never assigns. A decision is ONE transaction: job lock, claim the PENDING recommendation, staleness check
+  (`STALE_RECOMMENDATION`), jobs' `assignJobInTx` (hard eligibility, `jobs.approve` for overrides, employee scope), stamp.
+- Everything listed (eligible, blocked, blocking reasons) is limited to employees the caller may see (`employees.view`); others
+  are only counted (`outOfScopeCount`), and reads re-check the viewer. Pool = SQL pre-filter, paged, ceiling reports `poolTruncated`.
 - Every decision records who, when, why and whom, in the row and in the audit log.
 - Every function checks its permission over the job (`dispatch.create` / `view` / `assign`); out-of-scope jobs are 404.
 

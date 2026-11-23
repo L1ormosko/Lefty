@@ -1778,7 +1778,7 @@ or unassigned.
 - **Auth**: session. **Permission**: `jobs.assign` over the job with the base field set.
 - **Request body** (strict): exactly one of `employeeId`, `teamOrgUnitId` (an active TEAM unit inside the job's service area);
   `reason`; `override { reason }`.
-- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `400` unknown employee or team; `409 CONFLICT` already assigned to
+- **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `404` unknown employee or one outside the caller's employee scope; `400` unknown team; `409 CONFLICT` already assigned to
   this target or not eligible; `409 INVALID_STATE_TRANSITION` job already on its way or finished.
 - **Audit**: `job.assign` or `job.reassign`. Events `job.assigned` / `job.reassigned`. Notifications: `job.assigned` to the new
   assignee (every current member of a team) and `job.reassigned` to people who lost the job, after commit.
@@ -1835,7 +1835,10 @@ distanceBasis ("STRAIGHT_LINE_ESTIMATE"), generatedAt, generatedById, chosenEmpl
 contribution, maxContribution, explanationKey, explanationParams }], conflicts: [{ code, messageKey }] }`. Only ids and codes are returned:
 translate `DISPATCH.FACTOR.*`, `DISPATCH.CONFLICT.*`, `DISPATCH.STATUS.*`, `QUALIFICATION.FAILURE.<code>` and resolve employee ids with the
 employees API. Distances are straight-line estimates from stored coordinates, never travel time. `blockingReasons` is
-`{ employeeId: [{ code, params }] }` and is set only when nobody was eligible (then `candidates` is `[]`).
+`{ employeeId: [{ code, params }] }` and is set only when nobody was eligible AND the evaluation was complete (then `candidates` is `[]`).
+Everything is limited to employees the CALLER may see (`employees.view`): `outOfScopeCount` says how many relevant employees were not
+evaluated for them (no ids), `hiddenCandidateCount` how many entries of a stored recommendation were dropped for this viewer,
+`evaluatedCount` how many were judged, `poolTruncated` that the evaluation ceiling (5000) stopped the pass, `scoringVersion` which rules ranked.
 
 Permissions are checked over the job's service area; a job outside the caller's scope is `404`.
 
@@ -1855,7 +1858,8 @@ Permissions are checked over the job's service area; a job outside the caller's 
 
 - **Purpose**: who passes the HARD eligibility rules for this job right now, unranked, and why everybody else does not:
   `{ jobId, distanceBasis, eligibleEmployeeIds, blocked: [{ employeeId, failures: [{ code, params }] }] }` (every failed rule per
-  employee). Works in every mode (manual dispatch uses it); stores nothing. Evaluates up to 500 non-terminated employees.
+  employee). plus `evaluatedCount`, `outOfScopeCount`, `poolTruncated`. Works in every mode (manual dispatch uses it); stores nothing.
+  Candidates are non-terminated employees in the caller's scope with a territory covering the job's area or a permission for its type/category.
 - **Auth**: session. **Permission**: `dispatch.view` over the job.
 
 ### POST /api/v1/dispatch/jobs/{id}/recommendations
@@ -1882,8 +1886,10 @@ Permissions are checked over the job's service area; a job outside the caller's 
   candidate who became ineligible is refused with the reasons) and notifications are sent. The assignment is method
   `RECOMMENDATION_APPROVED` with `recommendationId`; the recommendation becomes APPROVED with who, when and the reason.
 - **Auth**: session. **Permission**: `dispatch.assign` over the job, plus `jobs.assign`. **Request body** (strict): `reason` (optional).
-- **Response**: `200 { data: recommendation }`. **Errors**: `403`; `404`; `409 CONFLICT` no candidates, or the top candidate is no longer
-  eligible (`error.details` as for `/jobs/{id}/assign`); `409 INVALID_STATE_TRANSITION` already decided or superseded.
+- **Response**: `200 { data: recommendation }`. **Errors**: `403`; `404`; `409 CONFLICT` no candidates, the top candidate is outside your scope, the top candidate is no longer
+  eligible (`error.details` as for `/jobs/{id}/assign`), or the job's assignments changed since generation (`details[0].code`
+  `STALE_RECOMMENDATION`: generate a new one); `409 INVALID_STATE_TRANSITION` already decided or superseded (a manual assignment supersedes it).
+  The decision is one atomic step: on any error nothing is assigned and the recommendation stays pending.
 - **Audit**: `dispatch.recommendation_approve` (chosen employee and rank, method), plus the jobs module's `job.assign`.
 
 ### POST /api/v1/dispatch/recommendations/{id}/modify
@@ -1893,7 +1899,7 @@ Permissions are checked over the job's service area; a job outside the caller's 
   (Owner/CEO, COO by default; `403` otherwise), never for employment failures, and the assignment is method `OVERRIDE` with
   `overrideReason`, a `dispatch.override` job event and the audit trail.
 - **Auth**: session. **Permission**: `dispatch.assign` over the job, plus `jobs.assign`. **Request body** (strict): `employeeId`,
-  `reason` (both required), `override { reason }`.
+  `reason` (both required), `override { reason }`. An employee outside your employee scope is `404`.
 - **Errors**: `400` missing reason, or the employee is the recommended one (approve instead); `403`; `404`; `409` not eligible and no
   override (with reasons), or already decided. **Audit**: `dispatch.recommendation_modify` (chosen rank, `overrideUsed`, reason).
 

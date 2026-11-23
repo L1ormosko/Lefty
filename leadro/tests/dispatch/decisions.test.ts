@@ -72,15 +72,6 @@ describe("approving", () => {
     expect(response.status).toBe(409);
     expect(await statusOf(job.id)).toBe("PENDING_ASSIGNMENT");
   });
-
-  it("completes a decision whose assignment already exists (repeat after an interrupted request)", async () => {
-    const job = await inspectionJob();
-    const rec = (await generate(w.cookie.dispatcher, job.id)).json.data;
-    await withTenant(w.tenantId, (tx) => tx.jobAssignment.create({ data: { tenantId: w.tenantId, jobId: job.id, employeeId: w.techA1.employeeId as string } }));
-    const response = await approve(w.cookie.dispatcher, rec.id);
-    expect(response.status).toBe(200);
-    expect((await assignmentsOf(job.id))[0]).toMatchObject({ method: "RECOMMENDATION_APPROVED", recommendationId: rec.id });
-  });
 });
 
 describe("modifying", () => {

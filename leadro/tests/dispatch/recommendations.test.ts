@@ -45,7 +45,10 @@ describe("generating a recommendation", () => {
     const stored = await withTenant(w.tenantId, (tx) => tx.dispatchRecommendation.findFirstOrThrow({ where: { id: rec.id } }));
     const text = JSON.stringify(stored.candidates);
     expect(text).not.toMatch(/12 Main St|Springfield|@/);
-    expect(Object.keys((stored.candidates as Array<Record<string, unknown>>)[0]).sort()).toEqual(["conflicts", "employeeId", "factors", "rank", "score"]);
+    const envelope = stored.candidates as { scoringVersion: number; ranked: Array<Record<string, unknown>> };
+    expect(envelope.scoringVersion).toBe(1);
+    expect(Object.keys(envelope.ranked[0]).sort()).toEqual(["conflicts", "employeeId", "factors", "rank", "score"]);
+    expect(rec.scoringVersion).toBe(1);
   });
 
   it("never lists an employee who fails the hard rules, and says why on the candidates endpoint", async () => {
@@ -70,7 +73,9 @@ describe("generating a recommendation", () => {
     expect(rec.status).toBe("PENDING");
     const reasons = rec.blockingReasons[w.techA1.employeeId as string].map((failure: { code: string }) => failure.code);
     expect(reasons).toContain("OUTSIDE_TERRITORY");
-    expect(Object.keys(rec.blockingReasons)).toContain(w.techB.employeeId);
+    // techB has neither a territory nor a job permission: not a candidate at all, so not listed.
+    expect(Object.keys(rec.blockingReasons)).not.toContain(w.techB.employeeId);
+    expect(rec.poolTruncated).toBe(false);
 
     const stored = await withTenant(w.tenantId, (tx) => tx.job.findFirstOrThrow({ where: { id: job.id }, select: { status: true } }));
     expect(stored.status).toBe("PENDING_ASSIGNMENT");
@@ -117,6 +122,20 @@ describe("soft factors", () => {
     expect(other.factors[2]).toMatchObject({ key: "EXPERIENCE", value: 1, contribution: 2 });
     expect(own.factors[2]).toMatchObject({ value: 0, contribution: 0 });
     expect(JSON.stringify(rec)).not.toMatch(/rating|speed|revenue|performance/i);
+  });
+
+  it("does not count a completed job for someone it was reassigned away from", async () => {
+    const done = await inspectionJob();
+    const t0 = Date.now() - 10 * 60_000;
+    await withTenant(w.tenantId, async (tx) => {
+      await tx.jobAssignment.create({ data: { tenantId: w.tenantId, jobId: done.id, employeeId: w.techA1.employeeId as string, assignedAt: new Date(t0), state: "ENDED", endedAt: new Date(t0 + 60_000), endedReason: "Reassigned" } });
+      await tx.jobAssignment.create({ data: { tenantId: w.tenantId, jobId: done.id, employeeId: w.techA1Other.employeeId as string, assignedAt: new Date(t0 + 60_000), state: "ENDED", endedAt: new Date(t0 + 120_000), endedReason: "Closed" } });
+      await tx.job.update({ where: { id: done.id }, data: { status: "CLOSED" } });
+    });
+    const rec = (await generate(w.cookie.dispatcher, (await inspectionJob()).id)).json.data;
+    const experienceOf = (employeeId: string | null) => rec.candidates.find((candidate: { employeeId: string }) => candidate.employeeId === employeeId).factors[2].value;
+    expect(experienceOf(w.techA1.employeeId)).toBe(0);
+    expect(experienceOf(w.techA1Other.employeeId)).toBeGreaterThanOrEqual(1);
   });
 
   it("counts open assigned jobs as workload", async () => {

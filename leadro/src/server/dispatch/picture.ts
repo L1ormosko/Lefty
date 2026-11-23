@@ -1,10 +1,11 @@
+import type { Prisma } from "@prisma/client";
 import { haversineKm, type CandidateFacts, type CustomerPreference, type GeoPoint } from "@/lib/dispatch-scoring";
 import type { EligibilityFailure } from "@/lib/eligibility";
-import { activePlacementWhere } from "@/server/authz";
-import { NotFoundError } from "@/server/core";
+import { activePlacementWhere, employeeScopeColumns, scopeFilterInTx } from "@/server/authz";
+import { NotFoundError, type Actor } from "@/server/core";
 import type { TenantTx } from "@/server/db";
 import { getJobEligibilityInputs } from "@/server/jobs";
-import { evaluateCandidates, requirementsFromInputs } from "@/server/qualifications";
+import { evaluateCandidates, orgUnitAncestry, requirementsFromInputs } from "@/server/qualifications";
 
 /**
  * Everything the dispatch engine knows about one job at one moment: who passes the HARD eligibility
@@ -13,8 +14,14 @@ import { evaluateCandidates, requirementsFromInputs } from "@/server/qualificati
  * sees the eligible side. No permission check: the callers authorize over the job first.
  */
 
-/** Upper bound on how many employees one pass evaluates; keeps one request bounded in very large tenants. */
-export const MAX_POOL = 500;
+/** Employees loaded and judged per round trip. */
+const PAGE_SIZE = 500;
+/**
+ * Hard ceiling on employees judged in one pass. It is only reached by a very large tenant AFTER the SQL pre-filter (territory
+ * or job permission, in the caller's scope); the picture then says so (`poolTruncated`) and callers must never treat a
+ * truncated "nobody eligible" as the truth.
+ */
+export const MAX_EVALUATED = 5000;
 
 /** Statuses in which an ACTIVE assignment still counts as workload ("open jobs"). */
 const OPEN_JOB_STATUSES = ["ASSIGNED", "SCHEDULED", "RESCHEDULED", "EN_ROUTE", "ARRIVED", "IN_PROGRESS", "ON_HOLD"] as const;
@@ -34,10 +41,16 @@ export interface JobDispatchFacts {
 export interface EligibilityPicture {
   job: JobDispatchFacts;
   eligibleEmployeeIds: string[];
-  /** One entry per evaluated but ineligible employee, with EVERY failed rule. */
+  /** Employees the caller may see who were judged and are NOT eligible, with EVERY failed rule. Never includes anyone out of scope. */
   blocked: Array<{ employeeId: string; failures: EligibilityFailure[] }>;
   /** Employees skipped because they already hold the job. */
   alreadyAssignedEmployeeIds: string[];
+  /** How many employees were judged. */
+  evaluatedCount: number;
+  /** Relevant employees (territory or permission match) the caller may not see: counted, never named, never judged for the caller. */
+  outOfScopeCount: number;
+  /** True when `MAX_EVALUATED` stopped the pass: the lists may be incomplete. */
+  poolTruncated: boolean;
 }
 
 const pointOf = (latitude: { toNumber(): number } | null, longitude: { toNumber(): number } | null): GeoPoint | null =>
@@ -79,37 +92,84 @@ export async function loadJobDispatchFacts(tx: TenantTx, tenantId: string, jobId
   };
 }
 
-/** Runs the hard eligibility filter over the tenant's non-terminated employees (up to `MAX_POOL`). */
-export async function buildEligibilityPicture(tx: TenantTx, tenantId: string, jobId: string, now: Date = new Date()): Promise<EligibilityPicture> {
+/**
+ * Runs the hard eligibility filter for the CALLER (§4.2, §10): only employees the caller may see (`employees.view`, any field
+ * set) are judged or listed, because the failures carry HR facts (credential expiry, skill level, time off). The pool is
+ * pre-filtered in SQL to non-terminated employees with a service territory covering the job's area OR a permission for its
+ * job type / category (the two rules every eligible employee must satisfy; employees matching neither are not "candidates"),
+ * then judged in pages of `PAGE_SIZE` up to `evaluationLimit` (default `MAX_EVALUATED`; a parameter so the ceiling is testable).
+ */
+export async function buildEligibilityPicture(
+  tx: TenantTx,
+  actor: Actor,
+  jobId: string,
+  now: Date = new Date(),
+  evaluationLimit: number = MAX_EVALUATED,
+): Promise<EligibilityPicture> {
+  const tenantId = actor.tenantId;
   const job = await loadJobDispatchFacts(tx, tenantId, jobId);
 
   const held = await tx.jobAssignment.findMany({ where: { tenantId, jobId, state: "ACTIVE", employeeId: { not: null } }, select: { employeeId: true } });
   const alreadyAssignedEmployeeIds = held.flatMap((row) => (row.employeeId ? [row.employeeId] : []));
 
-  const pool = await tx.employee.findMany({
-    where: { tenantId, status: { not: "TERMINATED" }, id: { notIn: alreadyAssignedEmployeeIds } },
-    select: { id: true },
-    orderBy: { id: "asc" },
-    take: MAX_POOL,
-  });
-  const { requirements, timeZone } = await requirementsFromInputs(tx, tenantId, await getJobEligibilityInputs(tx, tenantId, jobId));
-  const verdicts = await evaluateCandidates(
-    tx,
+  const jobType = await tx.jobType.findFirst({ where: { id: job.jobTypeId, tenantId }, select: { category: true } });
+  const ancestry = await orgUnitAncestry(tx, tenantId, job.orgUnitId);
+  const relevant: Prisma.EmployeeWhereInput = {
     tenantId,
-    pool.map((employee) => employee.id),
-    requirements,
-    { at: now, window: job.window, timeZone },
-  );
+    status: { not: "TERMINATED" },
+    id: { notIn: alreadyAssignedEmployeeIds },
+    OR: [
+      {
+        serviceTerritories: {
+          some: { OR: [{ orgUnitId: job.orgUnitId }, { includeDescendants: true, orgUnitId: { in: ancestry } }] },
+        },
+      },
+      {
+        jobPermissions: {
+          some: { OR: [{ jobTypeId: job.jobTypeId }, ...(jobType ? [{ category: jobType.category }] : [])] },
+        },
+      },
+    ],
+  };
+  const visible = await scopeFilterInTx(tx, actor, "employees.view", employeeScopeColumns);
+  const outOfScopeCount = await tx.employee.count({ where: { AND: [relevant, { NOT: visible }] } });
 
+  const { requirements, timeZone } = await requirementsFromInputs(tx, tenantId, await getJobEligibilityInputs(tx, tenantId, jobId));
   const eligibleEmployeeIds: string[] = [];
   const blocked: EligibilityPicture["blocked"] = [];
-  for (const { id } of pool) {
-    const verdict = verdicts.get(id);
-    if (!verdict) continue;
-    if (verdict.eligible) eligibleEmployeeIds.push(id);
-    else blocked.push({ employeeId: id, failures: verdict.failures });
+  let evaluatedCount = 0;
+  let poolTruncated = false;
+  let after: string | undefined;
+  while (true) {
+    const page = await tx.employee.findMany({
+      where: { AND: [relevant, visible, after ? { id: { gt: after } } : {}] },
+      select: { id: true },
+      orderBy: { id: "asc" },
+      take: Math.min(PAGE_SIZE, evaluationLimit - evaluatedCount),
+    });
+    if (page.length === 0) break;
+    const verdicts = await evaluateCandidates(
+      tx,
+      tenantId,
+      page.map((employee) => employee.id),
+      requirements,
+      { at: now, window: job.window, timeZone },
+    );
+    for (const { id } of page) {
+      const verdict = verdicts.get(id);
+      if (!verdict) continue;
+      if (verdict.eligible) eligibleEmployeeIds.push(id);
+      else blocked.push({ employeeId: id, failures: verdict.failures });
+    }
+    evaluatedCount += page.length;
+    after = page[page.length - 1].id;
+    if (evaluatedCount >= evaluationLimit) {
+      // Truncated only if somebody is left over.
+      poolTruncated = (await tx.employee.count({ where: { AND: [relevant, visible, { id: { gt: after } }] } })) > 0;
+      break;
+    }
   }
-  return { job, eligibleEmployeeIds, blocked, alreadyAssignedEmployeeIds };
+  return { job, eligibleEmployeeIds, blocked, alreadyAssignedEmployeeIds, evaluatedCount, outOfScopeCount, poolTruncated };
 }
 
 /** Where each employee starts from: their own start point, else the coordinates of their current primary unit. */
@@ -150,14 +210,20 @@ export async function loadCandidateFacts(tx: TenantTx, tenantId: string, job: Jo
     }),
     tx.jobAssignment.findMany({
       where: { tenantId, employeeId: { in: employeeIds }, job: { jobTypeId: job.jobTypeId, status: { in: [...COMPLETED_JOB_STATUSES] } } },
-      select: { employeeId: true, jobId: true },
-      distinct: ["employeeId", "jobId"],
+      select: { employeeId: true, jobId: true, assignedAt: true },
     }),
     tx.customerPreferredEmployee.findMany({ where: { tenantId, customerId: job.customerId, employeeId: { in: employeeIds } }, select: { employeeId: true, kind: true } }),
   ]);
+  // Experience counts the work a person actually did: for a job that changed hands, only the LAST assignee (the one it was
+  // assigned to when it finished), never someone it was reassigned away from.
+  const latestAssignedAt = new Map(
+    (
+      await tx.jobAssignment.groupBy({ by: ["jobId"], where: { tenantId, jobId: { in: [...new Set(completedRows.map((row) => row.jobId))] } }, _max: { assignedAt: true } })
+    ).map((row) => [row.jobId, row._max.assignedAt?.getTime() ?? null]),
+  );
   const openByEmployee = new Map(openRows.flatMap((row) => (row.employeeId ? [[row.employeeId, row._count._all] as const] : [])));
   const completedByEmployee = new Map<string, number>();
-  for (const row of completedRows) if (row.employeeId) completedByEmployee.set(row.employeeId, (completedByEmployee.get(row.employeeId) ?? 0) + 1);
+  for (const row of completedRows) if (row.employeeId && row.assignedAt.getTime() === latestAssignedAt.get(row.jobId)) completedByEmployee.set(row.employeeId, (completedByEmployee.get(row.employeeId) ?? 0) + 1);
   const preferenceByEmployee = new Map<string, CustomerPreference>(preferences.map((row) => [row.employeeId, row.kind]));
 
   return employeeIds.map((employeeId) => {
