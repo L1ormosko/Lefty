@@ -1,3 +1,4 @@
+import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobNotificationTarget } from "@/server/jobs";
 import { registerLeadNotifications } from "@/server/leads";
 
@@ -11,6 +12,7 @@ import { registerLeadNotifications } from "@/server/leads";
 export function registerNotificationTargets(): void {
   registerLeadNotifications();
   registerJobNotificationTarget();
+  registerFollowUpNotificationTarget();
 }
 
 registerNotificationTargets();
