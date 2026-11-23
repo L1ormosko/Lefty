@@ -14,7 +14,7 @@ Public API (`index.ts`):
 - Duplicates and sources: `flagLeadDuplicates`, `revealableLeadDuplicates`, `listLeadDuplicateFlags`, `resolveLeadDuplicateFlag`,
   `listLeadSources`, `createLeadSource`, `updateLeadSource`.
 - Scope helpers: `leadResourceRef` (route resolver and notifications), `leadRowAttributes`, `resolveLeadListAccess`, `visibleLeadIds`.
-- `registerLeadNotifications()`: registers the "lead" notification target resolver (`leads.view`). Importing the module registers it; `src/instrumentation.ts` calls it at server start because the notifications routes never import this module.
+- `registerLeadNotifications()`: registers the "lead" notification target resolver (`leads.view`); called from `src/server/notification-targets.ts`.
 
 Invariants:
 1. The owner of a lead is its ACTIVE `LeadAssignment` (at most one). ASSIGNED scope uses the shared fragment `leadAssignedToWhere` from `@/server/customers`
@@ -27,6 +27,5 @@ Invariants:
 5. Duplicate detection flags only (customers via the shared matcher, recent leads within `RECENT_LEAD_WINDOW_DAYS`); never merges, never blocks, never reopens a decided pair; responses reveal only duplicates the caller may view.
 6. New leads and conversions refuse archived customers (`assertCustomerActive`). Human numbers come from `nextNumber(..., "lead")`.
 
-Conversion wiring: `job-conversion-port.ts` defines `createJobFromLead(tx, actor, { leadId, customerId, serviceAddressId, jobTypeId, description?, priority?, appointmentWindow? })`.
-Until `@/server/jobs` is merged it is a stub that throws (conversion then rolls back and answers 500). To wire: replace the stub with `export { createJobFromLead } from "@/server/jobs";`
-and adapt the return type if the jobs function returns more than `{ id, number }`; delete `tests/leads/conversion-port.test.ts` (it asserts the stub). `tests/leads/conversion.test.ts` mocks the port with a double that inserts a real Job in the same transaction.
+Conversion: `job-conversion-port.ts` re-exports the jobs module's `createJobFromLead(tx, actor, input, ctx?)` (returns `{ id, number, created, warnings }`), called in the same transaction; tests mock the port only to inject failures. `convertLead` locks the lead row (`lockLead`, FOR UPDATE) first, so concurrent conversions queue and the later one replays (`created: false`). Changing the lead's customer/address/job type during conversion needs `leads.edit` (and `assertWritableFields`); that is also what lets it confirm a duplicate flag.
+Notification targets: the registry is on `globalThis`; `src/server/notification-targets.ts` registers lead and job resolvers and is imported by `src/instrumentation.ts` and the notifications routes.
