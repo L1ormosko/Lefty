@@ -22,13 +22,15 @@ import type { UpdateJobInput } from "./schemas";
 export async function updateJob(actor: Actor, ctx: RequestContext, jobId: string, input: UpdateJobInput): Promise<Record<string, unknown>> {
   return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "jobs.edit");
+    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+    // concurrent assignment or status change cannot make this check stale (TOCTOU).
+    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     const ref = await jobResourceRef(tx, actor.tenantId, jobId);
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "jobs.edit", ref);
     const sent = Object.entries(input).filter(([, value]) => value !== undefined).map(([key]) => key);
     assertWritableFields(decision, sent, JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
 
-    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     const current = await tx.job.findFirst({
       where: { id: jobId, tenantId: actor.tenantId },
       select: {

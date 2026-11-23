@@ -7,7 +7,7 @@ import { deliverAfterCommit } from "@/server/notifications";
 import { isEligible, requirementsFromInputs } from "@/server/qualifications";
 import { getJobEligibilityInputs } from "./eligibility-inputs";
 import { recordJobEvent } from "./events";
-import { jobResourceRef, loadJobAccessFacts } from "./job-access";
+import { jobResourceRef, loadJobAccessFacts, lockJob } from "./job-access";
 import { notifyJobEmployees } from "./notify";
 import { viewJobAfterWrite } from "./read";
 import type { RescheduleJobInput } from "./schemas";
@@ -59,6 +59,9 @@ export async function rescheduleJob(actor: Actor, ctx: RequestContext, jobId: st
   const notificationIds: string[] = [];
   const result = await withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "jobs.edit");
+    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+    // concurrent assignment or status change cannot make this check stale (TOCTOU).
+    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
     const ref = await jobResourceRef(tx, actor.tenantId, jobId);
     if (!ref) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "jobs.edit", ref);

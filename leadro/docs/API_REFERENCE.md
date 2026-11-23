@@ -1603,7 +1603,7 @@ that reached dispatch (`QUALIFIED, SCHEDULED, DISPATCHED, CONVERTED`). Outside t
 - **Request body** (strict, all optional; omitted values come from the lead): `customerId`, `serviceAddressId`, `jobTypeId`, `description`,
   `priority`, `appointmentWindowStart` + `appointmentWindowEnd` (together).
 - **Idempotency**: supported; converting an already converted lead returns its job (`replayed: true`).
-- **Response**: `200 { data: { leadId, status: "CONVERTED", job: { id, number }, replayed } }`. **Errors**: `400` (customer, service address or
+- **Response**: `200 { data: { leadId, status: "CONVERTED", job: { id, number }, created, replayed, warnings } }` (`created: false` on a replay; `warnings` are the jobs module's soft warnings). **Errors**: `400` (customer, service address or
   job type missing, unknown job type); `403`; `404`; `409` (archived customer, status not convertible, archived lead). **Audit**: `lead.convert`,
   `lead.status_change`.
 
@@ -1710,8 +1710,8 @@ or unassigned.
 - **Purpose**: the technician's own jobs: assigned to the caller's employee directly or through a team they currently belong to,
   within their `jobs.view` scope. Soonest `scheduledStartAt` first, then `appointmentWindowStart`, unscheduled last, then id.
 - **Auth**: session. **Permission**: `jobs.view`.
-- **Request query**: `cursor`, `limit`; `status` (comma list), `scheduledFrom`, `scheduledTo`, `includeFinished` (`true` | `false`,
-  default `false`: CLOSED and CANCELLED are hidden unless asked for or named in `status`).
+- **Request query**: `cursor`, `limit`; `status` (comma list), `scheduledFrom`, `scheduledTo`. CLOSED and CANCELLED are hidden
+  unless named in `status`.
 - **Response**: `200 { data: [job + assignments], page }` (empty for a user with no employee record). **Audit**: none.
 
 ### GET /api/v1/jobs/workflow-settings
@@ -1753,8 +1753,8 @@ or unassigned.
   `closedAt` / `cancelledAt`; CLOSED and CANCELLED end the assignments. Cancelling notifies the people the job was assigned to
   (`job.cancelled`, critical).
 - **Auth**: session. **Permission**: `jobs.edit` over the job with `status` (and `statusReason` when a reason is sent) writable.
-  Edges out of AWAITING_REVIEW also need `jobs.approve` (to CLOSED) or `jobs.reject` (back to IN_PROGRESS); a move that ends an
-  assignment needs `jobs.assign`. An execution-only grant (Technician) may move a job only to `EN_ROUTE` in Phase 2 (`403` otherwise).
+  Edges out of AWAITING_REVIEW also need `jobs.approve` (to CLOSED) or `jobs.reject` (back to IN_PROGRESS); a move that ends the
+  assignments (back to PENDING_ASSIGNMENT, CLOSED, CANCELLED) needs `jobs.assign` too. Entering RESCHEDULED, or leaving ON_HOLD for ASSIGNED, clears the scheduled slot. An execution-only grant (Technician) may move a job only to `EN_ROUTE` in Phase 2 (`403` otherwise).
 - **Request body** (strict): `toStatus`; `reason` (1-500; required for CANCELLED, CUSTOMER_UNAVAILABLE, RESCHEDULED, FAILED, ON_HOLD,
   REQUIRES_RETURN_VISIT).
 - **Response**: `200 { data: job }`. **Errors**: `403`; `404`; `400` missing reason / unknown status; `409 INVALID_STATE_TRANSITION`.
@@ -1770,7 +1770,10 @@ or unassigned.
   availability. A team passes when at least one current member is eligible. A failure is `409 CONFLICT` with
   `error.details: [{ field, code, message }]` (`code` is a `QUALIFICATION.FAILURE.<code>`); nothing is written.
 - **Override**: `override: { reason }` assigns despite the failures. It needs `jobs.approve` over the job (`403` otherwise) and is
-  never accepted for employment failures (inactive or terminated employee, empty team). It is stored as method `OVERRIDE` with
+  never accepted for employment failures (inactive or terminated employee, empty team); a team can be overridden when at least
+  one member lacks only excusable things. Optional `expectedAssignmentId` (the active assignment id the caller saw, or `null` for
+  none): a different current assignment answers `409 field: "expectedAssignmentId"`. `overrideReason` (assignments list) and the
+  `reason`/`failureCodes` of `dispatch.override` events are shown only to `jobs.assign` / `jobs.approve` holders. It is stored as method `OVERRIDE` with
   `overrideReason`, as a `dispatch.override` event and in the audit log.
 - **Auth**: session. **Permission**: `jobs.assign` over the job with the base field set.
 - **Request body** (strict): exactly one of `employeeId`, `teamOrgUnitId` (an active TEAM unit inside the job's service area);

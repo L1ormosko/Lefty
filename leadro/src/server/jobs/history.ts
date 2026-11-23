@@ -1,4 +1,4 @@
-import { enforceInTx } from "@/server/authz";
+import { canInTx, enforceInTx } from "@/server/authz";
 import { ForbiddenError, NotFoundError, pageArgs, toPage, type Actor, type Page } from "@/server/core";
 import { withTenant } from "@/server/db";
 import { jobResourceRef } from "./job-access";
@@ -9,6 +9,16 @@ import type { ListHistoryQuery } from "./schemas";
  * Each needs `jobs.view` over the job WITH the base field set: a financial-only grant (Finance) sees
  * money on a job, not who did what to it. Newest first, paged.
  */
+
+/**
+ * Why an assignment was an override (reason, failed checks) is an exception decision: only people who may assign or
+ * approve on the job see it. Everyone else with trail access sees THAT it was an override (method) but not why.
+ */
+async function mayReadOverrideDetails(tx: Parameters<typeof jobResourceRef>[0], actor: Actor, jobId: string): Promise<boolean> {
+  const ref = await jobResourceRef(tx, actor.tenantId, jobId);
+  if (!ref) return false;
+  return (await canInTx(tx, actor, "jobs.assign", ref)).allowed || (await canInTx(tx, actor, "jobs.approve", ref)).allowed;
+}
 
 async function assertMayReadTrail(actor: Actor, jobId: string, tx: Parameters<typeof jobResourceRef>[0]): Promise<void> {
   await enforceInTx(tx, actor, "jobs.view");
@@ -42,8 +52,19 @@ export async function listJobEvents(actor: Actor, jobId: string, query: ListHist
       orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
       ...pageArgs(query),
     });
-    return toPage(rows, query.limit);
+    const page = toPage(rows, query.limit);
+    if (await mayReadOverrideDetails(tx, actor, jobId)) return page;
+    return {
+      ...page,
+      data: page.data.map((row) => (row.type === "dispatch.override" ? { ...row, payload: redactOverridePayload(row.payload) } : row)),
+    };
   });
+}
+
+function redactOverridePayload(payload: unknown): unknown {
+  if (typeof payload !== "object" || payload === null) return payload;
+  const { reason: _reason, failureCodes: _failureCodes, ...rest } = payload as Record<string, unknown>;
+  return rest;
 }
 
 /** Every assignment the job has had, current first: who or which team, how (MANUAL / OVERRIDE...), by whom, and when it ended. */
@@ -69,6 +90,8 @@ export async function listJobAssignments(actor: Actor, jobId: string, query: Lis
       orderBy: [{ state: "asc" }, { assignedAt: "desc" }, { id: "desc" }],
       ...pageArgs(query),
     });
-    return toPage(rows, query.limit);
+    const page = toPage(rows, query.limit);
+    if (await mayReadOverrideDetails(tx, actor, jobId)) return page;
+    return { ...page, data: page.data.map(({ overrideReason: _overrideReason, ...row }) => row) };
   });
 }
