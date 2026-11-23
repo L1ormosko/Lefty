@@ -21,7 +21,7 @@ export interface RecordLocationEventInput {
   source: LocationSource;
   /** Absent for a manual / manager entry, a failed capture (`exception`) or a pure NAVIGATION_OPENED. */
   position?: ReportedPosition;
-  /** The device clock when the position was taken. Required for DEVICE_GPS and GEOFENCE; null for MANUAL / MANAGER. */
+  /** The device clock when it happened. Required for DEVICE_GPS and GEOFENCE; optional for MANUAL (the offline `occurredAt`); null for MANAGER. */
   deviceTime?: Date | null;
   shiftId?: string;
   jobId?: string;

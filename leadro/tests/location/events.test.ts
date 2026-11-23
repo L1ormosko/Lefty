@@ -123,6 +123,20 @@ describe("offline idempotency (clientEventId)", () => {
     expect((await record(w.cookie.techA1Other, { kind: "NAVIGATION_OPENED", jobId, clientEventId })).status).toBe(404);
   });
 
+  it("keeps the device time of a manual event (occurredAt) and refuses occurredAt that disagrees with the position's device time", async () => {
+    const jobId = await assignedJobFor(w);
+    const happened = new Date(Date.now() - 2 * 3_600_000);
+    const manual = await record(w.cookie.techA1, { kind: "DEPARTURE", jobId, occurredAt: happened.toISOString(), exception: { code: "DEVICE_OFFLINE" } });
+    expect(manual.status).toBe(201);
+    expect(new Date(manual.json.data.deviceTime).toISOString()).toBe(happened.toISOString());
+
+    const apart = await record(w.cookie.techA1, { kind: "DEPARTURE", jobId, occurredAt: happened.toISOString(), position: position({ deviceTime: new Date().toISOString() }) });
+    expect(apart.status).toBe(400);
+    expect(apart.json.error.field).toBe("occurredAt");
+    const agreeing = await record(w.cookie.techA1, { kind: "DEPARTURE", jobId, occurredAt: happened.toISOString(), position: position({ deviceTime: new Date(happened.getTime() + 60_000).toISOString() }) });
+    expect(agreeing.status).toBe(201);
+  });
+
   it("refuses an occurredAt far in the future and a malformed clientEventId", async () => {
     const jobId = await assignedJobFor(w);
     const future = new Date(Date.now() + 3_600_000).toISOString();

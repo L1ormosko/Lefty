@@ -1,4 +1,4 @@
-import { checkOccurredAt, hashFieldEventContent } from "@/lib/location-rules";
+import { MAX_CLOCK_SKEW_MS, checkOccurredAt, hashFieldEventContent } from "@/lib/location-rules";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx, LOCATION_EVENT_FIELD_MAP, projectFields, type AccessDecision } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
@@ -57,6 +57,10 @@ export async function recordLocationEvent(actor: Actor, ctx: RequestContext, inp
   if (!actor.employeeId) throw new ForbiddenError();
   const self = { ...actor, employeeId: actor.employeeId };
   const now = new Date();
+  // The two device clocks the client may send must tell the same story, else one of them is wrong and we cannot say which.
+  if (input.occurredAt && input.position && Math.abs(input.occurredAt.getTime() - input.position.deviceTime.getTime()) > MAX_CLOCK_SKEW_MS) {
+    throw new ValidationError({ message: "occurredAt and the position's device time disagree.", field: "occurredAt" });
+  }
   const occurredAt = input.occurredAt ?? input.position?.deviceTime ?? now;
   if (checkOccurredAt(occurredAt, now) !== null) {
     throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
@@ -72,7 +76,8 @@ export async function recordLocationEvent(actor: Actor, ctx: RequestContext, inp
         kind: input.kind,
         source: input.position ? "DEVICE_GPS" : "MANUAL",
         position: input.position,
-        deviceTime: input.position?.deviceTime ?? null,
+        // A manual entry (no position) still keeps WHEN it happened on the device, when the client said so.
+        deviceTime: input.position?.deviceTime ?? input.occurredAt ?? null,
         jobId: input.jobId,
         deviceId: input.deviceId,
         exception: input.exception?.code,
