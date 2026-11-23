@@ -31,6 +31,7 @@ export const JOB_COLUMNS = {
   scheduledEndAt: true,
   timeZone: true,
   estimatedDurationMinutes: true,
+  currentVisitNumber: true,
   quotedAmountMinor: true,
   currency: true,
   startedAt: true,
