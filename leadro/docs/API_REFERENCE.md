@@ -1908,3 +1908,109 @@ Permissions are checked over the job's service area; a job outside the caller's 
 - **Purpose**: decline the recommendation; the job stays pending and nobody is assigned. The reason is kept.
 - **Auth**: session. **Permission**: `dispatch.assign` over the job. **Request body** (strict): `reason` (required).
 - **Errors**: `400`; `403`; `404`; `409 INVALID_STATE_TRANSITION`. **Audit**: `dispatch.recommendation_reject`.
+
+## Shifts (`/api/v1/shifts`) - Phase 3
+
+Code: `src/server/shifts` (README there), pure rules `src/lib/shift-rules.ts`, routes `src/app/api/v1/shifts/**`. Spec 8.1, 17.
+A **shift** is `{ id, employeeId, orgUnitId (placement snapshot at start), status (ACTIVE | ENDED), startedAt, startRecordedAt, endedAt,
+endRecordedAt, deviceId, startLocationEventId, endLocationEventId, startException, startExceptionNote, endException, endExceptionNote,
+endedByUserId, endReason, exceptionReviewStatus (null | PENDING | APPROVED | REJECTED), reviewedById, reviewedAt, reviewNote, createdAt,
+updatedAt }`. `startedAt` / `endedAt` are when it happened (the device clock for offline events), `*RecordedAt` is the server clock.
+A shift never contains coordinates; its location events (`/location-events?shiftId=`) hold accuracy and verdicts. Exception codes:
+`GPS_DISABLED | PERMISSION_DENIED | POOR_SIGNAL | DEVICE_OFFLINE | OUTSIDE_GEOFENCE | DELAYED | OTHER` (translate `LOCATION.EXCEPTION.*`,
+`SHIFT.STATUS.*`, `SHIFT.REVIEW.*`).
+
+**Boundary body** (start and end, strict): `position { latitude, longitude, accuracyM, deviceTime }` and / or `exception { code, note }`
+(`note` required for `OTHER`); at least one of them. Without a position the boundary is a manual entry with a reason. An exception, or a
+position vaguer than the tenant's `locationMaxAccuracyM` (then `POOR_SIGNAL` is raised by the server), sets `exceptionReviewStatus = PENDING`
+for a manager. Offline (spec 8.7): `clientEventId` (UUID) and `occurredAt` (ISO, at most 5 minutes ahead and 7 days back) make the call
+idempotent per employee: a repeat answers with the original shift (`200`), the same id with different content is `409 CONFLICT`
+(`details[0].code` `CLIENT_EVENT_ID_REUSED`), and a refusal is remembered (a repeat of a refused event is refused again; send a corrected event
+with a new id). `deviceId` is optional.
+
+Scope: a technician's grant is `OWN`; managers see shifts whose placement snapshot is in their unit (or legal entity). A shift outside the caller's
+scope is `404`.
+
+### GET /api/v1/shifts
+
+- **Purpose**: shifts the caller may see, newest start first (`startedAt desc, id desc`). Query: `employeeId`, `orgUnitId`, `status`,
+  `exceptionReview` (`PENDING | APPROVED | REJECTED`: the review queue), `from`, `to` (on `startedAt`), `cursor`, `limit`.
+- **Auth**: session. **Permission**: `shifts.view`. **Response**: `{ data: [shift], page }`.
+
+### GET /api/v1/shifts/current
+
+- **Purpose**: the caller's own ACTIVE shift, `{ data: null }` when off shift. **Permission**: `shifts.view`; `403` for a user with no employee profile.
+
+### POST /api/v1/shifts/start
+
+- **Purpose**: the caller starts their own shift: a SHIFT_START location event (accuracy, both clocks, source `DEVICE_GPS` or `MANUAL`) is recorded in
+  the same transaction, with the org unit snapshot. Idempotent: while a shift is running it is returned (`200`) and nothing is recorded.
+- **Auth**: session. **Permission**: `shifts.create` for their own record. **Request body**: the boundary body above.
+- **Response**: `201 { data: shift }` new; `200` already running or replayed. **Errors**: `400` neither position nor reason, position without
+  accuracy, event time in the future / too old; `403` (no permission, or no employee profile); `409 INVALID_STATE_TRANSITION` employee not
+  ACTIVE or the start precedes the previous shift's end; `409 CONFLICT` reused `clientEventId`.
+- **Audit**: `shift.start` (ids, accuracy, exception code; never coordinates).
+
+### POST /api/v1/shifts/end
+
+- **Purpose**: the caller ends their own current shift (same body and rules as start; no `reason`). Ending a shift that ended less than 5 minutes ago
+  returns it unchanged (a retry after a lost response). A later blank call is `409 INVALID_STATE_TRANSITION` (no active shift).
+- **Auth**: session. **Permission**: `shifts.edit` over their own shift. **Response**: `200 { data: shift }`.
+- **Errors**: as start, plus `409` when `occurredAt` precedes the shift's start. **Audit**: `shift.end`.
+  An end with an exception reopens the review (`PENDING`); a clean end keeps an earlier decision.
+
+### GET /api/v1/shifts/{id}
+
+- **Purpose**: one shift. **Permission**: `shifts.view` over it. **Errors**: `404` (unknown, other company, out of scope).
+
+### POST /api/v1/shifts/{id}/end
+
+- **Purpose**: end a shift by id. The owner ends their own (as above). A manager ending or correcting SOMEONE ELSE's shift sends `reason` (required),
+  no `position` / `exception` (`400`); the shift records `endedByUserId` and `endReason`, and the SHIFT_END event has source `MANAGER`.
+- **Auth**: session. **Permission**: `shifts.edit` over the shift's unit. **Request body**: the boundary body plus `reason` (optional, max 500).
+- **Errors**: `400`; `403` (view-only roles); `404` out of scope; `409` before the start. **Audit**: `shift.end`, or `shift.end_by_manager` with the reason.
+
+### POST /api/v1/shifts/{id}/review
+
+- **Purpose**: approve or reject the exception of a shift (start and / or end), once. Does not change the shift's times.
+- **Auth**: session. **Permission**: `shifts.approve` over the shift's unit; nobody reviews their own shift (`403`). **Request body** (strict):
+  `decision` (`APPROVED | REJECTED`), `note` (required).
+- **Response**: `200 { data: shift }`. **Errors**: `400`; `403`; `404`; `409 INVALID_STATE_TRANSITION` no exception, or already reviewed.
+- **Audit**: `shift.exception_review` with the note as reason.
+
+## Location events (`/api/v1/location-events`) - Phase 3
+
+Code: `src/server/location` (README there), pure rules `src/lib/location-rules.ts`, routes `src/app/api/v1/location-events/**`. Spec 17, 22.2.
+Location data is **sensitive** and **event-based**: rows exist for shift start / end, arrival, departure, navigation-opened and approved verification;
+there is no tracking or polling endpoint. A **location event** is `{ id, employeeId, shiftId, jobId, orgUnitId, kind, source, verification,
+accuracyM, distanceToJobM, geofenceRadiusM, deviceTime, serverTime, deviceId, exception, exceptionNote, coordinatesPurgedAt, recordedByUserId,
+fieldEventId }` plus `latitude` / `longitude`. `deviceTime` (the device clock) and `serverTime` (when the server received it) are both kept.
+`kind`: `SHIFT_START | SHIFT_END | ARRIVAL | DEPARTURE | NAVIGATION_OPENED | VERIFICATION` (NAVIGATION_OPENED never changes a job status and is never an
+arrival). `source`: `DEVICE_GPS | GEOFENCE | MANUAL | MANAGER`. `verification`: `UNVERIFIED | WITHIN_RADIUS | OUTSIDE_RADIUS | MANAGER_VERIFIED`: what the server
+concluded from a reported position, never proof (translate `LOCATION.KIND.*`, `LOCATION.SOURCE.*`, `LOCATION.VERIFICATION.*`, show
+`LOCATION.CONFIDENCE_NOTE` and `LOCATION.ACCURACY`). **`latitude` / `longitude` are returned only to a grant naming the opt-in `coordinates` field set
+(`location.coordinate_fields`: the Owner template); everyone else, managers included, gets time, kind, accuracy, distance and verdicts.** After the
+retention period (tenant `locationRetentionDays`, default 90) the coordinates are removed and `coordinatesPurgedAt` is set; the row stays.
+
+### GET /api/v1/location-events
+
+- **Purpose**: location history, newest first (`serverTime desc, id desc`), limited to the caller's scope (unit / legal entity of the employee's placement
+  at the time). Query: `employeeId`, `jobId`, `shiftId`, `kind`, `from`, `to` (on `serverTime`), `cursor`, `limit`.
+- **Auth**: session. **Permission**: `location.view` (sensitive; held by managers and the COO, not by technicians, dispatchers or Lead Operations).
+  Coordinates per row as described above. **Response**: `{ data: [event], page }`.
+
+### GET /api/v1/location-events/{id}
+
+- **Purpose**: one event. **Permission**: `location.view` over it. **Errors**: `403`; `404` (unknown, other company, out of scope).
+
+### POST /api/v1/location-events
+
+- **Purpose**: a technician reports one of their own events for a job assigned to them: `DEPARTURE` or `NAVIGATION_OPENED`. Shift events belong to the
+  shift endpoints, arrival to arrival verification. This never changes the job.
+- **Auth**: session. **Permission**: `location.create` for their own record, and the job must be assigned to them (`404` otherwise).
+- **Request body** (strict): `kind`, `jobId`, `position { latitude, longitude, accuracyM, deviceTime }` or `exception { code, note }` (not both; a
+  `DEPARTURE` needs one of them, `NAVIGATION_OPENED` may have neither), `clientEventId`, `occurredAt`, `deviceId`. Accuracy is mandatory with a position and
+  is stored rounded up to a whole meter.
+- **Response**: `201 { data: event }`, `200` for a repeated `clientEventId` (same event). The event is projected to the caller's grant: never coordinates.
+- **Errors**: `400` (no accuracy, bad range, blank departure, time in the future); `403`; `404`; `409 CONFLICT` reused `clientEventId` with different content.
+- **Audit**: `location.record` (kind, source, accuracy, job; never coordinates).
