@@ -1,0 +1,192 @@
+import { randomUUID } from "node:crypto";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { POST as assignRoute } from "@/app/api/v1/jobs/[id]/assign/route";
+import { POST as rescheduleRoute } from "@/app/api/v1/jobs/[id]/reschedule/route";
+import { POST as transitionRoute } from "@/app/api/v1/jobs/[id]/transition/route";
+import { POST as syncRoute } from "@/app/api/v1/field-sync/route";
+import { withTenant } from "@/server/db";
+import { clearFieldSyncHandlers, registerBuiltInFieldSyncHandlers, registerFieldSyncHandler, registeredFieldSyncTypes } from "@/server/field-sync";
+import { disconnect } from "../authz/fixtures";
+import { buildJobsWorld, createJobViaApi, type JobsWorld } from "../jobs/fixtures";
+import { call } from "../org/org-helpers";
+
+let w: JobsWorld;
+beforeAll(async () => {
+  w = await buildJobsWorld("field-sync");
+});
+afterAll(disconnect);
+afterEach(() => {
+  clearFieldSyncHandlers();
+  registerBuiltInFieldSyncHandlers();
+});
+
+const move = (jobId: string, toStatus: string) => call(transitionRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: jobId }, body: { toStatus } });
+
+async function jobInProgress() {
+  const job = await createJobViaApi(w);
+  await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, body: { employeeId: w.techA1.employeeId } });
+  const start = Date.now() + 2 * 86_400_000;
+  await call(rescheduleRoute, "POST", "/x", {
+    cookie: w.cookie.dispatcher,
+    params: { id: job.id },
+    body: { scheduledSlot: { start: new Date(start).toISOString(), end: new Date(start + 2 * 3_600_000).toISOString() } },
+  });
+  for (const status of ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"]) expect((await move(job.id, status)).status).toBe(200);
+  return job;
+}
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+const event = (type: string, jobId: string | undefined, payload: Record<string, unknown>, occurredAt: string, clientEventId = randomUUID()) => ({ clientEventId, type, jobId, occurredAt, payload });
+const sync = (cookie: string, events: unknown[], batchId = `batch-${randomUUID()}`) => call(syncRoute, "POST", "/x", { cookie, body: { batchId, events } });
+const fieldEvents = (ids: string[]) => withTenant(w.tenantId, (tx) => tx.fieldEvent.findMany({ where: { clientEventId: { in: ids } }, orderBy: { occurredAt: "asc" } }));
+
+describe("POST /field-sync: ordering, results and isolation of failures", () => {
+  it("applies events in occurredAt order (stable for ties) and answers in the order the device sent them", async () => {
+    const job = await jobInProgress();
+    const late = event("job.note", job.id, { body: "third" }, minutesAgo(1));
+    const early = event("job.note", job.id, { body: "first" }, minutesAgo(30));
+    const tieA = event("job.note", job.id, { body: "second a" }, minutesAgo(10));
+    const tieB = event("job.note", job.id, { body: "second b" }, minutesAgo(10));
+    const response = await sync(w.cookie.techA1, [late, early, tieA, tieB]);
+    expect(response.status).toBe(200);
+    const { results, summary } = response.json.data;
+    expect(summary).toMatchObject({ total: 4, accepted: 4, rejected: 0 });
+    expect(results.map((result: { clientEventId: string }) => result.clientEventId)).toEqual([late, early, tieA, tieB].map((item) => item.clientEventId));
+    const sequenceOf = (id: string) => results.find((result: { clientEventId: string }) => result.clientEventId === id).sequence;
+    expect([early, tieA, tieB, late].map((item) => sequenceOf(item.clientEventId))).toEqual([1, 2, 3, 4]);
+    const stored = await withTenant(w.tenantId, (tx) => tx.jobFieldNote.findMany({ where: { jobId: job.id }, orderBy: { occurredAt: "asc" } }));
+    expect(stored.map((note) => note.body)).toEqual(["first", "second a", "second b", "third"]);
+  });
+
+  it("never lets one failing event stop the batch, and reports each failure with its own status", async () => {
+    const job = await jobInProgress();
+    const otherJob = await createJobViaApi(w); // not the technician's, not in the field
+    const good1 = event("job.note", job.id, { body: "before" }, minutesAgo(20));
+    const invalid = event("job.note", job.id, { kind: "CUSTOMER_APPROVAL", body: "no decision" }, minutesAgo(19));
+    const unknown = event("job.teleport", job.id, {}, minutesAgo(18));
+    const notTheirs = event("job.note", otherJob.id, { body: "not mine" }, minutesAgo(17));
+    const missingJob = event("job.note", undefined, { body: "no job" }, minutesAgo(16));
+    const badState = event("job.completion", job.id, { notes: "x" }, minutesAgo(15)); // no active form for the type
+    const good2 = event("job.material", job.id, { name: "Pipe", quantity: 2 }, minutesAgo(14));
+    const response = await sync(w.cookie.techA1, [good1, invalid, unknown, notTheirs, missingJob, badState, good2]);
+    expect(response.status).toBe(200);
+    const byId = Object.fromEntries(response.json.data.results.map((result: { clientEventId: string }) => [result.clientEventId, result]));
+    expect(byId[good1.clientEventId]).toMatchObject({ status: "ACCEPTED", retryable: false });
+    expect(byId[invalid.clientEventId]).toMatchObject({ status: "REJECTED", code: "VALIDATION_FAILED", retryable: false });
+    expect(byId[unknown.clientEventId]).toMatchObject({ status: "UNSUPPORTED", code: "UNSUPPORTED_EVENT_TYPE" });
+    expect(byId[notTheirs.clientEventId]).toMatchObject({ status: "FORBIDDEN", retryable: true });
+    expect(byId[missingJob.clientEventId]).toMatchObject({ status: "REJECTED", code: "VALIDATION_FAILED" });
+    expect(byId[badState.clientEventId]).toMatchObject({ status: "CONFLICT", retryable: false });
+    expect(byId[good2.clientEventId].status).toBe("ACCEPTED");
+    expect(byId[good2.clientEventId].result.material).toMatchObject({ name: "Pipe", quantity: 2 });
+    expect(response.json.data.summary).toEqual({ total: 7, accepted: 2, replayed: 0, rejected: 2, conflict: 1, forbidden: 1, unsupported: 1, failed: 0 });
+    expect(await withTenant(w.tenantId, (tx) => tx.jobFieldNote.count({ where: { jobId: job.id } }))).toBe(1);
+  });
+
+  it("is safe to send again: a repeated batch replays every applied event and applies nothing twice", async () => {
+    const job = await jobInProgress();
+    const events = [event("job.note", job.id, { body: "once" }, minutesAgo(5)), event("job.material", job.id, { name: "Tape", quantity: 1 }, minutesAgo(4))];
+    const first = await sync(w.cookie.techA1, events);
+    expect(first.json.data.summary.accepted).toBe(2);
+    const again = await sync(w.cookie.techA1, events);
+    expect(again.status).toBe(200);
+    expect(again.json.data.summary).toMatchObject({ accepted: 0, replayed: 2 });
+    expect(again.json.data.results[0].result.note.id).toBe(first.json.data.results[0].result.note.id);
+    expect(await withTenant(w.tenantId, (tx) => tx.jobFieldNote.count({ where: { jobId: job.id } }))).toBe(1);
+    expect(await withTenant(w.tenantId, (tx) => tx.jobMaterialUsage.count({ where: { jobId: job.id } }))).toBe(1);
+  });
+
+  it("answers CONFLICT when a clientEventId comes back with different content", async () => {
+    const job = await jobInProgress();
+    const original = event("job.note", job.id, { body: "original" }, minutesAgo(5));
+    await sync(w.cookie.techA1, [original]);
+    const changed = await sync(w.cookie.techA1, [{ ...original, payload: { body: "changed" } }]);
+    expect(changed.json.data.results[0]).toMatchObject({ status: "CONFLICT", code: "CONFLICT" });
+    expect(changed.json.data.results[0].details[0].code).toBe("CLIENT_EVENT_ID_REUSED");
+    expect((await withTenant(w.tenantId, (tx) => tx.jobFieldNote.findMany({ where: { jobId: job.id } }))).map((note) => note.body)).toEqual(["original"]);
+  });
+
+  it("remembers a refusal: the same refused event is refused again, even after the state would allow it", async () => {
+    const job = await jobInProgress();
+    const refused = event("job.completion", job.id, { notes: "x" }, minutesAgo(5));
+    expect((await sync(w.cookie.techA1, [refused])).json.data.results[0].status).toBe("CONFLICT"); // no active form
+    const row = (await fieldEvents([refused.clientEventId]))[0];
+    expect(row).toMatchObject({ result: "REJECTED", resultCode: "CONFLICT", type: "job.completion" });
+    expect((await sync(w.cookie.techA1, [refused])).json.data.results[0]).toMatchObject({ status: "CONFLICT" });
+  });
+});
+
+describe("POST /field-sync: batch id, event types and the registry", () => {
+  it("stores the batch id on every event row (accepted or refused) and keeps the first batch on a replay", async () => {
+    const job = await jobInProgress();
+    const ok = event("job.note", job.id, { body: "labelled" }, minutesAgo(5));
+    const refused = event("job.completion", job.id, { notes: "x" }, minutesAgo(4));
+    const batchId = `batch-${randomUUID()}`;
+    await sync(w.cookie.techA1, [ok, refused], batchId);
+    const rows = await fieldEvents([ok.clientEventId, refused.clientEventId]);
+    expect(rows.map((row) => row.batchId)).toEqual([batchId, batchId]);
+    expect(rows.every((row) => row.employeeId === w.techA1.employeeId)).toBe(true);
+    await sync(w.cookie.techA1, [ok], `batch-${randomUUID()}`);
+    expect((await fieldEvents([ok.clientEventId]))[0].batchId).toBe(batchId);
+  });
+
+  it("applies the built-in types: shift start/end, job outcome, location events, attachments and completion go through their modules", async () => {
+    const job = await jobInProgress();
+    const shift = event("shift.start", undefined, { exception: { code: "DEVICE_OFFLINE" } }, minutesAgo(60));
+    const nav = event("location.navigation_opened", job.id, {}, minutesAgo(50));
+    const photo = event("job.attachment", job.id, { kind: "PHOTO", fileName: "a.jpg", contentType: "image/jpeg", sizeBytes: 10 }, minutesAgo(30));
+    const outcome = event("job.outcome", job.id, { outcome: "SOLD", chargedAmountMinor: 1000 }, new Date(Date.now() + 1000).toISOString());
+    const response = await sync(w.cookie.techA1, [outcome, photo, nav, shift]);
+    const statuses = Object.fromEntries(response.json.data.results.map((result: { type: string; status: string }) => [result.type, result.status]));
+    expect(statuses).toEqual({ "shift.start": "ACCEPTED", "location.navigation_opened": "ACCEPTED", "job.attachment": "ACCEPTED", "job.outcome": "ACCEPTED" });
+    expect((await withTenant(w.tenantId, (tx) => tx.job.findFirstOrThrow({ where: { id: job.id } }))).status).toBe("COMPLETED");
+    // The FieldEvent of each carries its module's type, the job and no free text or coordinates.
+    const rows = await fieldEvents([shift, nav, photo, outcome].map((item) => item.clientEventId));
+    expect(rows.map((row) => row.type)).toEqual(["shift.start", "location.navigation_opened", "job.attachment", "job.outcome"]);
+
+    const end = await sync(w.cookie.techA1, [event("shift.end", undefined, { exception: { code: "DEVICE_OFFLINE" } }, minutesAgo(1))]);
+    expect(end.json.data.results[0].status).toBe("ACCEPTED");
+  });
+
+  it("lets a module register its own event type (how arrival plugs in), and refuses a duplicate owner", async () => {
+    registerFieldSyncHandler("job.arrival_test", async ({ event: incoming, actor }) => ({ echoed: incoming.payload.value, employeeId: actor.employeeId }));
+    expect(registeredFieldSyncTypes()).toContain("job.arrival_test");
+    expect(() => registerFieldSyncHandler("job.arrival_test", async () => null)).toThrow(/already registered/);
+    expect(() => registerFieldSyncHandler("Bad Type", async () => null)).toThrow(/dotted lower-case/);
+    const job = await jobInProgress();
+    const response = await sync(w.cookie.techA1, [event("job.arrival_test", job.id, { value: 7 }, minutesAgo(1))]);
+    expect(response.json.data.results[0]).toMatchObject({ status: "ACCEPTED", result: { echoed: 7, employeeId: w.techA1.employeeId } });
+  });
+
+  it("turns an unexpected handler error into a retryable FAILED result without leaking details", async () => {
+    registerFieldSyncHandler("job.explodes", async () => {
+      throw new Error("secret internals");
+    });
+    const response = await sync(w.cookie.techA1, [event("job.explodes", undefined, {}, minutesAgo(1))]);
+    expect(response.status).toBe(200);
+    expect(response.json.data.results[0]).toMatchObject({ status: "FAILED", code: "INTERNAL", retryable: true });
+    expect(JSON.stringify(response.json)).not.toContain("secret internals");
+  });
+});
+
+describe("POST /field-sync: request validation", () => {
+  const valid = () => event("job.note", "x", { body: "y" }, minutesAgo(1));
+
+  it("rejects malformed batches with 400 and anonymous callers with 401", async () => {
+    expect((await sync(w.cookie.techA1, [])).status).toBe(400);
+    expect((await sync(w.cookie.techA1, Array.from({ length: 101 }, valid))).status).toBe(400);
+    expect((await sync(w.cookie.techA1, [valid()], "short")).status).toBe(400);
+    expect((await sync(w.cookie.techA1, [{ ...valid(), clientEventId: "not-a-uuid" }])).status).toBe(400);
+    expect((await sync(w.cookie.techA1, [{ ...valid(), type: "NoDots" }])).status).toBe(400);
+    expect((await sync(w.cookie.techA1, [{ ...valid(), occurredAt: "yesterday" }])).status).toBe(400);
+    expect((await call(syncRoute, "POST", "/x", { body: { batchId: "batch-12345678", events: [valid()] } })).status).toBe(401);
+  });
+
+  it("refuses events from the future or older than a week, per event", async () => {
+    const job = await jobInProgress();
+    const future = event("job.note", job.id, { body: "later" }, new Date(Date.now() + 3_600_000).toISOString());
+    const ancient = event("job.note", job.id, { body: "ancient" }, new Date(Date.now() - 30 * 86_400_000).toISOString());
+    const response = await sync(w.cookie.techA1, [future, ancient]);
+    expect(response.json.data.results.map((result: { status: string }) => result.status)).toEqual(["REJECTED", "REJECTED"]);
+  });
+});

@@ -2197,3 +2197,98 @@ collected amounts and a payment belong to SOLD; the quote may accompany any outc
 - **Purpose**: edit `name`, `description`, `appliesTo`, `recoverable`, `sortOrder` or retire / restore with `active`. Reasons are never deleted and the `code` never changes;
   outcomes keep a retired reason.
 - **Permission**: tenant-wide `job_outcomes.configure`. **Response**: `200 { data: lostReason }`. **Audit**: `lost_reason.update`.
+
+## Field execution (`/api/v1/jobs/{id}/...`, `/api/v1/completion-forms`) - Phase 3
+
+What a technician records during a visit (§8.5, §8.6). Module `field-execution`; design in `DECISIONS.md` "Phase 3 Task 4".
+
+**Common rules.** Writes need `jobs.edit` over the job (a Technician: the job must be assigned to them, else `404`), reads `jobs.view`; the job must be
+`EN_ROUTE` or later and not `CLOSED` / `CANCELLED` (`409`, detail `job_field.not_in_field_state`). Every write takes the offline envelope `clientEventId` (UUID) and
+`occurredAt` (ISO, at most 5 minutes ahead and 7 days back) and `deviceId`: with a `clientEventId` the write is idempotent per employee through the shared
+field-event gate: a repeat answers `200` with `replayed: true` and the first result (access is re-checked), the same id with different content is
+`409` (`CLIENT_EVENT_ID_REUSED`), a business refusal is remembered. Success is `201 { data: { <record>, replayed: false } }`. Lists are `{ data, page }`, newest first.
+Free text appears only in the record itself; events, audit and the offline log carry ids and kinds. Amounts are integer minor units.
+
+### GET /api/v1/jobs/{id}/notes
+
+- The job's notes (record shape as in the POST below), newest first: `200 { data: [...], page }`. **Permission**: `jobs.view` over the job (`404` outside scope). Query `cursor`, `limit`.
+
+### POST /api/v1/jobs/{id}/notes
+
+- **Body** (strict): `kind` (`NOTE` default | `WORK_PERFORMED` | `ADDITIONAL_WORK_REQUESTED` | `CUSTOMER_APPROVAL`), `body` (1-4000), `amountMinor` (only for additional
+  work and approval; needs the `financial` set of `job_outcomes.view`, else `403`; hidden from readers without it), `currency` (must be the job's), `customerApproved`
+  (required for `CUSTOMER_APPROVAL`, forbidden otherwise), envelope. **Response**: `{ note: { id, jobId, employeeId, kind, body, amountMinor?, currency?, customerApproved, occurredAt, recordedAt, clientEventId }, replayed }`.
+- **Audit** `job_note.record`; job events `job.field_note.<kind>` (ids only). Labels: `FIELD.NOTE.KIND.*`.
+
+### GET /api/v1/jobs/{id}/materials
+
+- The job's materials (record shape as in the POST below), newest first: `200 { data: [...], page }`. **Permission**: `jobs.view` over the job (`404` outside scope). Query `cursor`, `limit`.
+
+### POST /api/v1/jobs/{id}/materials
+
+- **Body** (strict): `name`, `quantity` (positive, at most 3 decimals), `unit` (default `each`), `materialRef` (placeholder for the Phase 4 catalog), `note`, envelope.
+  **Response**: `{ material: { id, jobId, completionId, name, materialRef, quantity, unit, note, occurredAt, ... }, replayed }`. `completionId` is set when the visit's completion is submitted.
+
+### GET /api/v1/jobs/{id}/attachments
+
+- The job's attachments (record shape as in the POST below), newest first: `200 { data: [...], page }`. **Permission**: `jobs.view` over the job (`404` outside scope). Query `cursor`, `limit`.
+
+### POST /api/v1/jobs/{id}/attachments
+
+- **Purpose**: metadata of a photo, signature or document captured on the device. **No file is stored**: no storage provider is configured, so every row is `PENDING_UPLOAD` and `storageConfigured` is `false`.
+- **Body** (strict): `kind` (`PHOTO` default | `SIGNATURE` | `DOCUMENT`), `fileName`, `contentType` (`type/subtype`), `sizeBytes` (1 - 104857600), `checksumSha256`, `caption`, `capturedAt`, envelope.
+  **Response**: `{ attachment: { id, jobId, kind, status, fileName, contentType, sizeBytes, checksumSha256, caption, capturedAt, recordedAt, storageConfigured }, replayed }`. Labels `FIELD.ATTACHMENT.KIND.*`, `FIELD.ATTACHMENT.STATUS.*`.
+
+### POST /api/v1/jobs/{id}/attachments/{attachmentId}/upload
+
+- **Purpose**: ask the storage provider for an upload target. With no provider configured this is refused: `409`, detail code `storage.not_configured` (translate `FIELD.STORAGE_NOT_CONFIGURED`), nothing changes.
+  With a provider: `200 { data: { url, storageKey, expiresAt } }`. `404` for an attachment of another job. **Permission**: `jobs.edit` over the job.
+
+### GET /api/v1/jobs/{id}/completion/form
+
+- The ACTIVE form for the job's type (its own, else its category's) `{ form: { id, version, name, schema }, visitNumber, alreadySubmitted, progress: { hasOutcome, materialCount, photoCount } }`.
+  `404` when the type has no active form. Needs `completion_forms.view`. `schema.fields[]` is `{ key, type, required, labelKey }`; keys: `outcome, quotedAmount, approvedAmount, finalChargedAmount, amountCollected, paymentMethod, paymentStatus, materials, photos, notes, customerSignature, followUpRequired` (labels `COMPLETION_FORM.FIELD.*`).
+### POST /api/v1/jobs/{id}/completion
+
+- Needs `completion_forms.view` too; job `IN_PROGRESS` or `COMPLETED`): **Body** (strict): `notes`, `workPerformed`, `followUpRequired`, `signatureAttachmentId` (a SIGNATURE attachment of this job), envelope.
+  The form states which FACTS must exist: the visit's outcome and amounts (record the outcome first), materials, photo metadata, a signature. Missing required ones: `400` with one detail per key (`completion.field_required`, `field` = the key).
+  Money, payment, materials and signature fields are enforced only for a `SOLD` visit. Answers for fields the form does not contain: `400 completion.field_not_in_form`. Errors: `409` `completion.no_active_form`, `completion.already_submitted` (one per visit), `completion.not_ready`.
+  **Response** `201 { data: { completion: { id, jobId, visitNumber, employeeId, formDefinitionId, formVersion, values, workPerformed, followUpRequired, signatureAttachmentId, occurredAt, submittedAt }, replayed } }`.
+  It does not change the job status. **Audit** `job_completion.submit`; job event `job.completion_submitted`.
+### GET /api/v1/jobs/{id}/completion
+
+- The completions of the job (one per visit), newest visit first (`jobs.view` over the job): `{ data: [completion], page }`.
+
+### GET /api/v1/completion-forms
+
+- Form definitions, newest first. Query: `jobTypeId`, `category`, `status` (`DRAFT | ACTIVE | RETIRED`), `cursor`, `limit`. **Permission**: `completion_forms.view`.
+- Definitions are versioned per job type XOR category; writing needs a tenant-wide `completion_forms.configure` (the role requires MFA). **Audit**: `completion_form.create | update | publish`.
+
+### POST /api/v1/completion-forms
+
+- Body: `jobTypeId` XOR `category`, `name`, `schema { fields[] }` -> `201` a DRAFT with `version` = highest + 1. The schema is validated (closed key vocabulary, type per key, unique keys, `labelKey` an i18n key): `400` with `completion_form.*` detail codes. Idempotency-Key supported.
+
+### GET /api/v1/completion-forms/{id}
+
+- One definition version (`completion_forms.view`; `404` for another tenant's id).
+
+### PATCH /api/v1/completion-forms/{id}
+
+- Edits a DRAFT (`name`, `schema`); a published version is immutable: `409 completion_form.not_a_draft` (create a new version).
+
+### POST /api/v1/completion-forms/{id}/publish
+
+- Makes the DRAFT the ACTIVE version and RETIRES the previous one atomically. Every completion keeps the `(formDefinitionId, formVersion)` it was filled in with.
+
+## Offline sync (`/api/v1/field-sync`) - Phase 3
+
+### POST /api/v1/field-sync
+
+- **Purpose**: apply a batch of offline field events (§8.7, §25.3). **Auth**: session of an employee (`403` otherwise). There is no endpoint-level permission: each event is authorized by the module that owns its type, exactly like its REST endpoint.
+- **Body** (strict): `batchId` (client-generated, 8-100 of `A-Za-z0-9_-`), `events` (1-100) of `{ clientEventId (UUID), type, occurredAt (ISO), jobId?, payload }`. `payload` is what the type's REST endpoint takes as a body without `clientEventId` / `occurredAt`.
+  Types today: `job.note`, `job.material`, `job.attachment`, `job.completion`, `job.outcome` (need `jobId`), `shift.start`, `shift.end` (the caller's own shift), `location.departure`, `location.navigation_opened` (need `jobId`). Arrival (Task 3) and others register later; an unknown type is reported per event as `UNSUPPORTED`.
+- **Processing**: events are applied in `occurredAt` order (ties keep the order sent), each through its module and the shared idempotency gate, each in its own transaction. One failing event never stops the batch. The `batchId` is stored on every event's `FieldEvent` row (a replay keeps its first batch).
+- **Response**: always `200` for a well-formed batch: `{ data: { batchId, receivedAt, summary: { total, accepted, replayed, rejected, conflict, forbidden, unsupported, failed }, results: [ { index, clientEventId, type, sequence, status, code?, message?, details?, retryable, result? } ] } }`
+  in the order sent (`index`); `sequence` is the order applied. `status`: `ACCEPTED` (applied; `result` = what the endpoint would answer), `REPLAYED` (already applied earlier, same answer), `REJECTED` (validation / state refusal, remembered: send a corrected event with a new id),
+  `CONFLICT` (the id was used for different content, or the module refused with a conflict), `FORBIDDEN` (not allowed or not visible; not remembered, `retryable: true`), `UNSUPPORTED`, `FAILED` (server problem, `retryable: true`). Labels `FIELD.SYNC.STATUS.*`.
+- **Errors** (whole request): `400` malformed batch (empty, over 100 events, bad ids / times / type), `401`, `403` caller is not an employee. Sending the same batch again is safe.

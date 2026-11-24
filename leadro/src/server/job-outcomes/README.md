@@ -5,10 +5,10 @@ outcome of its current visit. Routes: `/api/v1/jobs/{id}/outcome(s)`, `/api/v1/j
 (`docs/API_REFERENCE.md` "Job outcomes and lost reasons"). Pure rules: `src/lib/job-outcome-rules.ts`.
 
 Public API (`index.ts`):
-- `recordJobOutcome(actor, ctx, jobId, input)`: the API entry. Offline envelope: `clientEventId` + `occurredAt`; a `FieldEvent`
-  (`type job.outcome`, payload hash) makes it idempotent per (tenant, employee, clientEventId): same content = replay, different = 409.
+- `recordJobOutcome(actor, ctx, jobId, input)`: the API entry. Offline envelope: `clientEventId` + `occurredAt`; the shared gate (`src/server/field-events`, type `job.outcome`)
+  makes it idempotent per (tenant, employee, clientEventId): same content = replay, different = 409 `field_event.payload_mismatch`.
 - **`recordOutcomeInTx(tx, actor, audit, jobId, input)`**: the domain work inside the caller's transaction, for the offline sync
-  (Task 4), which wraps it in its own `FieldEvent` handling. Locks the job, checks `job_outcomes.create` over it, validates, stores the
+  (Task 4) and the gate's `apply` step. Locks the job, checks `job_outcomes.create` over it, validates, stores the
   outcome, applies the job status through jobs' `changeJobStatus`, writes events + audit, publishes the domain event, notifies.
 - `correctJobOutcome` (`job_outcomes.edit`; audits full previous/new values), `getOutcomeCorrections` (history; edit + financial set), `getJobOutcome`, `listJobOutcomes` (scope through the job).
 - Retroactive outcome: a job already past its visit (COMPLETED, FAILED, REQUIRES_RETURN_VISIT, AWAITING_REVIEW, CUSTOMER_UNAVAILABLE) takes one from a create OR edit holder with no status change, so it can close.
