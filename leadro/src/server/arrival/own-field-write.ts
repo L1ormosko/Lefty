@@ -1,9 +1,8 @@
-import { checkOccurredAt } from "@/lib/location-rules";
 import { enforceInTx, type ResourceRef } from "@/server/authz";
-import { ForbiddenError, NotFoundError, ValidationError, type Actor } from "@/server/core";
+import { ForbiddenError, NotFoundError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { jobResourceRef } from "@/server/jobs";
-import { runFieldEvent, type FieldEventEntity } from "@/server/field-events";
+import { assertBelievableEventTime, runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 
 /**
  * Shared shell of the technician's job field writes (arrive, start work): the caller must be an employee, the job
@@ -25,7 +24,7 @@ export function requireEmployee(actor: Actor): EmployeeActor {
  */
 export function eventTime(occurredAt: Date | undefined, now: Date, judgedByGate = false): Date {
   const at = occurredAt ?? now;
-  if (!judgedByGate && checkOccurredAt(at, now) !== null) throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
+  if (!judgedByGate) assertBelievableEventTime(at, now);
   // The tolerance above is only for ACCEPTING a device clock that runs ahead; what is stored is never later than the server clock.
   return at.getTime() > now.getTime() ? now : at;
 }

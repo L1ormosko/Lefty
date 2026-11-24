@@ -1,11 +1,11 @@
-import { MAX_CLOCK_SKEW_MS, checkOccurredAt, hashFieldEventContent } from "@/lib/location-rules";
+import { MAX_CLOCK_SKEW_MS, hashFieldEventContent } from "@/lib/location-rules";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx, LOCATION_EVENT_FIELD_MAP, projectFields, type AccessDecision } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { jobResourceRef } from "@/server/jobs";
 import { withoutCoordinates } from "./audit-values";
-import { runFieldEvent } from "@/server/field-events";
+import { assertBelievableEventTime, runFieldEvent } from "@/server/field-events";
 import { recordLocationEventInTx } from "./record";
 import type { RecordLocationEventInput } from "./schemas";
 import { locationEventSelect, locationEventView } from "./views";
@@ -64,9 +64,7 @@ export async function recordLocationEvent(actor: Actor, ctx: RequestContext, inp
   }
   const occurredAt = input.occurredAt ?? input.position?.deviceTime ?? now;
   // With a clientEventId the shared gate judges the time on first delivery only (a late replay must still answer).
-  if (!input.clientEventId && checkOccurredAt(occurredAt, now) !== null) {
-    throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
-  }
+  if (!input.clientEventId) assertBelievableEventTime(occurredAt, now);
 
   const write = async (tx: TenantTx, fieldEventId: string | undefined): Promise<{ event: Record<string, unknown>; id: string }> => {
     const decision = await ownEventDecision(tx, self, input.jobId);

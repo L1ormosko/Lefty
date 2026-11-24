@@ -139,6 +139,19 @@ async function claim(tx: TenantTx, request: FieldEventRequest, result: "ACCEPTED
   return { row, inserted: count === 1 };
 }
 
+
+/**
+ * The ONE rule for a device-supplied event time: not ahead of the server clock beyond drift (retryable: it becomes valid
+ * later) and not older than a week (a stored verdict). Every write that accepts an `occurredAt` asks here, so the answer
+ * never differs between arrival, shifts, location, field records and the gate itself.
+ */
+export function assertBelievableEventTime(occurredAt: Date | undefined, now: Date): void {
+  if (!occurredAt) return;
+  const problem = checkOccurredAt(occurredAt, now);
+  if (problem === null) return;
+  throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
+}
+
 /**
  * Runs `apply` at most once per `(employee, clientEventId)` and answers repeats from the stored result (see the file
  * comment). `apply` runs in the same transaction as the claim, so a failure leaves nothing behind.
@@ -155,10 +168,7 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
       }
       // The device time is judged on FIRST delivery only: a late replay of an accepted event must still be answered.
       // A time ahead of the server clock is retryable (it becomes valid); one older than a week is a stored verdict.
-      const problem = checkOccurredAt(request.occurredAt, new Date());
-      if (problem !== null) {
-        throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
-      }
+      assertBelievableEventTime(request.occurredAt, new Date());
       const { result, entity } = await handlers.apply(tx, row.id);
       await tx.fieldEvent.update({
         where: { id: row.id },

@@ -1,5 +1,5 @@
-import { checkOccurredAt } from "@/lib/location-rules";
 import { assessCapture, type CaptureAssessment } from "@/lib/shift-rules";
+import { assertBelievableEventTime } from "@/server/field-events";
 import { ValidationError } from "@/server/core";
 import type { TenantTx } from "@/server/db";
 import type { LocationExceptionInput, PositionInput } from "@/server/location";
@@ -20,9 +20,7 @@ export async function lockEmployee(tx: TenantTx, tenantId: string, employeeId: s
  */
 export function boundaryTime(occurredAt: Date | undefined, now: Date, judgedByGate = false): Date {
   const at = occurredAt ?? now;
-  if (!judgedByGate && checkOccurredAt(at, now) !== null) {
-    throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
-  }
+  if (!judgedByGate) assertBelievableEventTime(at, now);
   return at;
 }
 

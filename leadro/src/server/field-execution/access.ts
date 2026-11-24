@@ -1,9 +1,9 @@
-import { checkOccurredAt, hashFieldEventContent } from "@/lib/location-rules";
+import { hashFieldEventContent } from "@/lib/location-rules";
 import type { JobStatusValue } from "@/lib/job-lifecycle";
 import { enforceInTx, type ResourceRef } from "@/server/authz";
 import { InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { runFieldEvent, type FieldEventEntity } from "@/server/field-events";
+import { assertBelievableEventTime, runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 import { jobResourceRef, loadJobForChange, type JobForChange } from "@/server/jobs";
 import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 
@@ -94,18 +94,6 @@ export interface JobFieldWriteSpec<T> {
 }
 
 /**
- * The device time must be believable: not ahead of the server clock beyond drift (retryable: it becomes valid later) and
- * not older than a week (§8.7). Judged on FIRST delivery only, inside the work: a late replay of an event that was already
- * accepted must still be answered from the stored result, not refused because it is now "too old".
- */
-function assertBelievableTime(occurredAt: Date | undefined, now: Date): void {
-  if (!occurredAt) return;
-  const problem = checkOccurredAt(occurredAt, now);
-  if (problem === null) return;
-  throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
-}
-
-/**
  * Runs one job-scoped field write, through the shared offline gate when it carries a `clientEventId` (idempotent per
  * employee, a changed payload under a reused id is a 409, a content refusal is remembered), plainly otherwise.
  */
@@ -114,7 +102,7 @@ export async function runJobFieldWrite<T>(actor: Actor, spec: JobFieldWriteSpec<
   const occurredAt = spec.envelope.occurredAt ?? now;
   const { clientEventId } = spec.envelope;
   if (!clientEventId) {
-    assertBelievableTime(spec.envelope.occurredAt, now);
+    assertBelievableEventTime(spec.envelope.occurredAt, now);
     const done = await withTenant(actor.tenantId, (tx) => spec.apply(tx, occurredAt));
     return { result: done.result, replayed: false };
   }
