@@ -38,6 +38,11 @@ export interface FieldEventRequest {
   deviceId?: string;
   batchId?: string;
   jobId?: string;
+  /**
+   * Detail code of the 409 raised when this id was already used for different content. Defaults to
+   * `CLIENT_EVENT_ID_REUSED`; job-outcomes keeps its published `field_event.payload_mismatch`.
+   */
+  reusedIdCode?: string;
 }
 
 /** What the event created or changed, recorded so a replay can find it again. */
@@ -74,12 +79,20 @@ function refusalFromCode(code: string): Error {
   return new ValidationError({ message });
 }
 
-const sameContentConflict = () =>
-  new ConflictError({
+/** Conflicts raised for a reused id are not stored as refusals (the stored event is the first one, and stays valid). */
+const reusedIdConflicts = new WeakSet<AppError>();
+
+const DEFAULT_REUSED_ID_CODE = "CLIENT_EVENT_ID_REUSED";
+
+function sameContentConflict(code: string = DEFAULT_REUSED_ID_CODE): ConflictError {
+  const error = new ConflictError({
     message: "This clientEventId was already used for a different event.",
     field: "clientEventId",
-    details: [{ field: "clientEventId", code: "CLIENT_EVENT_ID_REUSED", message: "Use a new clientEventId for a different event." }],
+    details: [{ field: "clientEventId", code, message: "Use a new clientEventId for a different event." }],
   });
+  reusedIdConflicts.add(error);
+  return error;
+}
 
 /** Inserts the event row if nobody has; returns the row either way and whether this call inserted it. */
 async function claim(tx: TenantTx, request: FieldEventRequest, result: "ACCEPTED" | "REJECTED", resultCode?: string): Promise<{ row: FieldEvent; inserted: boolean }> {
@@ -120,7 +133,7 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
     return await withTenant(request.tenantId, async (tx) => {
       const { row, inserted } = await claim(tx, request, "ACCEPTED");
       if (!inserted) {
-        if (row.payloadHash !== request.payloadHash) throw sameContentConflict();
+        if (row.payloadHash !== request.payloadHash) throw sameContentConflict(request.reusedIdCode);
         if (row.result !== "ACCEPTED") throw refusalFromCode(row.resultCode ?? "VALIDATION_FAILED");
         if (!row.entityType || !row.entityId) throw new ConflictError({ message: "This event is still being processed. Retry shortly.", retryable: true });
         return { result: await handlers.replay(tx, { type: row.entityType, id: row.entityId, shiftId: row.shiftId ?? undefined }), replayed: true };
@@ -138,7 +151,7 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
   }
 }
 
-const isReusedIdConflict = (error: AppError): boolean => error.details?.some((detail) => detail.code === "CLIENT_EVENT_ID_REUSED") === true;
+const isReusedIdConflict = (error: AppError): boolean => reusedIdConflicts.has(error);
 
 /** Stores the refusal in its own transaction; a failure here must not hide the original error. */
 async function rememberRefusal(request: FieldEventRequest, code: StoredRefusal): Promise<void> {

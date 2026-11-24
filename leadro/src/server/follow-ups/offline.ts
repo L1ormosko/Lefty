@@ -1,30 +1,16 @@
-import { createHash } from "node:crypto";
-import type { FieldEvent, Prisma } from "@prisma/client";
-import {
-  AppError,
-  ConflictError,
-  InvalidStateTransitionError,
-  ValidationError,
-  isUniqueViolation,
-  type Actor,
-  type ErrorCode,
-} from "@/server/core";
+import { hashFieldEventContent } from "@/lib/location-rules";
+import { ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
+import { runFieldEvent } from "@/server/field-events";
 import { deliverAfterCommit } from "@/server/notifications";
 
 /**
- * Offline-safe field writes (§8.7, §25.3). A write that carries a `clientEventId` is recorded in `FieldEvent`, idempotent per
- * (tenant, employee, clientEventId):
- *
- *  - first time: the write runs and its `FieldEvent` (ACCEPTED) commits in the SAME transaction;
- *  - the same id again with the same content: nothing runs, the stored result is returned (`replay`);
- *  - the same id with different content (`payloadHash` differs): 409, nothing changes;
- *  - a write refused for a business reason (invalid transition, validation, conflict) is stored as REJECTED, so a replay
- *    answers with the same error code instead of being re-evaluated against a state that has moved on. Permission failures
- *    are NOT stored: they can be fixed (a role granted) and the device may retry the same event.
- *
- * Without a `clientEventId` the write simply runs. Coordinates never go here (they live in `LocationEvent` only); the
- * payload holds ids and codes, free text stays in the domain row.
+ * Offline-safe field writes for follow-ups (§8.7, §25.3). A write that carries a `clientEventId` goes through the shared
+ * field-event gate (`src/server/field-events`: idempotent per (tenant, employee, clientEventId), same id with different
+ * content is a 409, business refusals are stored REJECTED and replayed identically, permission failures are not stored).
+ * This file only adapts follow-up writes to it: the future-time rule, the content hash and notification delivery.
+ * Without a `clientEventId` the write simply runs. Coordinates never go here; the payload holds ids and codes, free text
+ * stays in the domain row.
  */
 
 export interface OfflineFields {
@@ -52,33 +38,10 @@ export interface FieldWriteOutcome<T> {
 
 /** Clock skew tolerated for a client-supplied `occurredAt`. */
 const FUTURE_SKEW_MS = 60_000;
-/** Errors that are a verdict on the event, not on the caller's rights: stored as REJECTED. */
-const STORED_REJECTIONS: readonly ErrorCode[] = ["VALIDATION_FAILED", "CONFLICT", "INVALID_STATE_TRANSITION"];
-
-/** The error a stored REJECTED verdict is answered with on replay (same class and code as the first answer). */
-function rejectionError(code: string | null): AppError {
-  const options = { message: "This event was rejected when it was first received." };
-  if (code === "VALIDATION_FAILED") return new ValidationError(options);
-  if (code === "INVALID_STATE_TRANSITION") return new InvalidStateTransitionError(options);
-  return new ConflictError(options);
-}
-
-/** JSON with sorted keys, so the same content always hashes the same. Dates become ISO strings. */
-function canonicalJson(value: unknown): string {
-  if (value instanceof Date) return JSON.stringify(value.toISOString());
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : 1));
-    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
-  }
-  return JSON.stringify(value ?? null);
-}
 
 /** `occurredAt` is the CLIENT's time (undefined when it sent none: "now" differs on every retry and must not enter the hash). */
 export const hashFieldEvent = (spec: FieldWriteSpec, occurredAt: Date | undefined): string =>
-  createHash("sha256").update(canonicalJson({ type: spec.type, content: spec.content, occurredAt })).digest("hex");
+  hashFieldEventContent({ type: spec.type, content: spec.content, occurredAt });
 
 /**
  * Runs a field write. `run(tx, occurredAt)` does the work inside the transaction and returns the outcome; `replay(tx, entityId)`
@@ -105,81 +68,28 @@ export async function runFieldWrite<T>(
   if (!actor.employeeId) {
     throw new ValidationError({ message: "Offline events need an employee record.", field: "clientEventId" });
   }
-  const identity = { tenantId: actor.tenantId, employeeId: actor.employeeId, clientEventId: offline.clientEventId };
-  const payloadHash = hashFieldEvent(spec, offline.occurredAt);
 
-  // A concurrent twin can win the unique (tenant, employee, clientEventId) between our lookup and insert: it aborts this
-  // transaction, and the second attempt then finds the twin's row and replays it.
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      return await attemptOnce();
-    } catch (error) {
-      if (!(isUniqueViolation(error) && attempt === 1)) throw error;
-    }
-  }
-
-  async function attemptOnce(): Promise<T> {
-    // Filled inside the transaction callback (a holder object, so TypeScript does not narrow the fields to their initial null).
-    const state: { outcome: FieldWriteOutcome<T> | null; existing: FieldEvent | null } = { outcome: null, existing: null };
-    try {
-      await withTenant(actor.tenantId, async (tx) => {
-        state.existing = await tx.fieldEvent.findFirst({ where: identity });
-        if (state.existing) return;
-        const outcome = await run(tx, occurredAt);
-        state.outcome = outcome;
-        await tx.fieldEvent.create({
-          data: {
-            ...identity,
-            actorUserId: actor.userId,
-            type: spec.type,
-            occurredAt,
-            payload: spec.payload as Prisma.InputJsonObject,
-            payloadHash,
-            result: "ACCEPTED",
-            entityType: outcome.entityType,
-            entityId: outcome.entityId,
-          },
-        });
-      });
-    } catch (error) {
-      if (error instanceof AppError && STORED_REJECTIONS.includes(error.code)) {
-        // A twin of this event may have committed while we waited on its row lock: its verdict stands, ours is moot.
-        const twin = await storeRejection(error.code);
-        if (twin) return answerReplay(twin);
-      }
-      throw error;
-    }
-    if (state.outcome) {
-      await deliverAfterCommit(actor.tenantId, state.outcome.notificationIds);
-      return state.outcome.value;
-    }
-    return answerReplay(state.existing);
-  }
-
-  /** Stores the verdict; returns the event that already exists when a twin got there first, else null. */
-  async function storeRejection(code: ErrorCode): Promise<FieldEvent | null> {
-    try {
-      await withTenant(actor.tenantId, (tx) =>
-        tx.fieldEvent.create({
-          data: { ...identity, actorUserId: actor.userId, type: spec.type, occurredAt, payload: spec.payload as Prisma.InputJsonObject, payloadHash, result: "REJECTED", resultCode: code },
-        }),
-      );
-      return null;
-    } catch (error) {
-      if (!isUniqueViolation(error)) throw error;
-      return withTenant(actor.tenantId, (tx) => tx.fieldEvent.findFirst({ where: identity }));
-    }
-  }
-
-  async function answerReplay(event: FieldEvent | null): Promise<T> {
-    if (!event) throw new ConflictError({ message: "The event could not be recorded. Retry it." });
-    if (event.payloadHash !== payloadHash || event.type !== spec.type) {
-      throw new ConflictError({ message: "This clientEventId was already used for a different event.", field: "clientEventId" });
-    }
-    if (event.result === "ACCEPTED" && event.entityId) {
-      const entityId = event.entityId;
-      return withTenant(actor.tenantId, (tx) => replay(tx, entityId));
-    }
-    throw rejectionError(event.resultCode);
-  }
+  const notificationIds: string[] = [];
+  const outcome = await runFieldEvent<T>(
+    {
+      tenantId: actor.tenantId,
+      employeeId: actor.employeeId,
+      actorUserId: actor.userId,
+      type: spec.type,
+      clientEventId: offline.clientEventId,
+      occurredAt,
+      payload: spec.payload,
+      payloadHash: hashFieldEvent(spec, offline.occurredAt),
+    },
+    {
+      apply: async (tx) => {
+        const done = await run(tx, occurredAt);
+        notificationIds.push(...done.notificationIds);
+        return { result: done.value, entity: { type: done.entityType, id: done.entityId } };
+      },
+      replay: (tx, entity) => replay(tx, entity.id),
+    },
+  );
+  await deliverAfterCommit(actor.tenantId, notificationIds);
+  return outcome.result;
 }

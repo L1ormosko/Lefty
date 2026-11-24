@@ -1,3 +1,4 @@
+import { hashFieldEventContent } from "@/lib/location-rules";
 import { NOT_CONVERTED_OUTCOMES, RETROACTIVE_OUTCOME_STATUSES, outcomeProblem, outcomeTargetStatus, type JobOutcomeTypeValue } from "@/lib/job-outcome-rules";
 import { auditContextFields, recordAudit, type AuditContextFields } from "@/server/audit";
 import { canInTx, enforceInTx, projectFields, type AccessDecision, type ResourceRef } from "@/server/authz";
@@ -8,11 +9,11 @@ import {
   NotFoundError,
   ValidationError,
   conflictOnUniqueViolation,
-  hashIdempotentRequest,
   type Actor,
   type RequestContext,
 } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
+import { runFieldEvent } from "@/server/field-events";
 import { changeJobStatus, jobResourceRef, loadJobForChange, recordJobEvent } from "@/server/jobs";
 import { deliverAfterCommit } from "@/server/notifications";
 import { OUTCOME_FIELD_MAP, OUTCOME_FINANCIAL_KEYS, outcomeRowSelect, type OutcomeRow } from "./fields";
@@ -264,66 +265,59 @@ function normalizedSubmission(input: RecordOutcomeInput, jobCurrency: string): R
 /**
  * `POST /jobs/{id}/outcome`: reports the outcome of the job's current visit.
  *
- * Offline envelope (§8.7, §25.3): with a `clientEventId` and an employee actor, the submission is stored as a
- * `FieldEvent` (idempotent per tenant, employee and id). Sending the same id with the same content again returns
- * the original result with `replayed: true`; the same id with DIFFERENT content is a 409 (the device is confused,
- * and silently picking one would hide data). Two copies arriving at once are serialized by the job lock; the same
- * id used on two different jobs at once loses at the unique key and also answers 409.
+ * Offline envelope (§8.7, §25.3): with a `clientEventId` and an employee actor, the submission goes through the shared
+ * field-event gate (`field-events`, type `job.outcome`): the same id with the same content returns the original result
+ * with `replayed: true`; the same id with DIFFERENT content (or on another job) is a 409 `field_event.payload_mismatch`.
+ * Two copies arriving at once serialise on the gate's unique key. A replay is still a read of the outcome, so the
+ * caller must hold the permission over the job NOW.
  */
 export async function recordJobOutcome(actor: Actor, ctx: RequestContext, jobId: string, input: RecordOutcomeInput): Promise<RecordedOutcome> {
   const notificationIds: string[] = [];
-  const result = await conflictOnUniqueViolation("This clientEventId was already used for a different submission.", () =>
-    withTenant(actor.tenantId, async (tx) => {
-      const gate = input.clientEventId && actor.employeeId ? { clientEventId: input.clientEventId, employeeId: actor.employeeId } : null;
+  const audit = auditContextFields(ctx);
 
-      if (gate) {
-        // Lock the job first so two copies of one submission arriving together are serialized, then judge by the stored event.
-        await loadJobForChange(tx, actor.tenantId, jobId);
-        const earlier = await tx.fieldEvent.findFirst({
-          where: { tenantId: actor.tenantId, employeeId: gate.employeeId, clientEventId: gate.clientEventId },
-          select: { payloadHash: true, entityId: true, result: true, jobId: true },
-        });
-        if (earlier) {
-          // A replay is still a read of the outcome: the caller must hold the permission over the job NOW.
-          const resource = await jobResourceRef(tx, actor.tenantId, jobId);
-          if (!resource) throw new NotFoundError();
-          const { decision } = await authorizeRecording(tx, actor, resource);
-          const jobCurrency = (await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } })).currency;
-          const payloadHash = hashIdempotentRequest({ actorUserId: gate.employeeId, method: "JOB_OUTCOME", path: jobId, body: normalizedSubmission(input, jobCurrency) });
-          if (earlier.payloadHash !== payloadHash || earlier.result !== "ACCEPTED" || !earlier.entityId || earlier.jobId !== jobId) {
-            throw new ConflictError({
-              message: "This clientEventId was already used for a different submission.",
-              details: [{ field: "clientEventId", code: "field_event.payload_mismatch", message: "This clientEventId was already used for a different submission." }],
-            });
-          }
-          return viewRecorded(tx, actor, earlier.entityId, decision, true);
-        }
-      }
+  if (!input.clientEventId || !actor.employeeId) {
+    const result = await conflictOnUniqueViolation("This clientEventId was already used for a different submission.", () =>
+      withTenant(actor.tenantId, async (tx) => {
+        const recorded = await recordOutcomeInTx(tx, actor, audit, jobId, input);
+        notificationIds.push(...recorded.notificationIds);
+        return viewRecorded(tx, actor, recorded.outcomeId, recorded.decision, recorded.replayed);
+      }),
+    );
+    await deliverAfterCommit(actor.tenantId, notificationIds);
+    return result;
+  }
 
-      const recorded = await recordOutcomeInTx(tx, actor, auditContextFields(ctx), jobId, input);
-      if (gate && !recorded.replayed) {
-        const jobCurrency = (await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } })).currency;
-        await tx.fieldEvent.create({
-          data: {
-            tenantId: actor.tenantId,
-            employeeId: gate.employeeId,
-            actorUserId: actor.userId,
-            clientEventId: gate.clientEventId,
-            type: "job.outcome",
-            jobId,
-            occurredAt: input.occurredAt ?? new Date(),
-            payload: { outcomeId: recorded.outcomeId, outcome: input.outcome },
-            payloadHash: hashIdempotentRequest({ actorUserId: gate.employeeId, method: "JOB_OUTCOME", path: jobId, body: normalizedSubmission(input, jobCurrency) }),
-            result: "ACCEPTED",
-            entityType: "JobOutcome",
-            entityId: recorded.outcomeId,
-          },
-        });
-      }
-      notificationIds.push(...recorded.notificationIds);
-      return viewRecorded(tx, actor, recorded.outcomeId, recorded.decision, recorded.replayed);
-    }),
+  const employeeId = actor.employeeId;
+  const job = await withTenant(actor.tenantId, (tx) => tx.job.findFirst({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } }));
+  if (!job) throw new NotFoundError();
+  const outcome = await runFieldEvent<RecordedOutcome>(
+    {
+      tenantId: actor.tenantId,
+      employeeId,
+      actorUserId: actor.userId,
+      type: "job.outcome",
+      clientEventId: input.clientEventId,
+      occurredAt: input.occurredAt ?? new Date(),
+      jobId,
+      payload: { outcome: input.outcome },
+      // The job id is part of the meaning: one id used on two jobs is a conflict, not a second outcome.
+      payloadHash: hashFieldEventContent({ type: "job.outcome", jobId, submission: normalizedSubmission(input, job.currency) }),
+      reusedIdCode: "field_event.payload_mismatch",
+    },
+    {
+      apply: async (tx) => {
+        const recorded = await recordOutcomeInTx(tx, actor, audit, jobId, input);
+        notificationIds.push(...recorded.notificationIds);
+        return { result: await viewRecorded(tx, actor, recorded.outcomeId, recorded.decision, recorded.replayed), entity: { type: "JobOutcome", id: recorded.outcomeId } };
+      },
+      replay: async (tx, entity) => {
+        const resource = await jobResourceRef(tx, actor.tenantId, jobId);
+        if (!resource) throw new NotFoundError();
+        const { decision } = await authorizeRecording(tx, actor, resource);
+        return viewRecorded(tx, actor, entity.id, decision, true);
+      },
+    },
   );
   await deliverAfterCommit(actor.tenantId, notificationIds);
-  return result;
+  return outcome.replayed ? { ...outcome.result, replayed: true } : outcome.result;
 }

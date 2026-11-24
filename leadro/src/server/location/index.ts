@@ -14,10 +14,6 @@ export type { PurgeResult } from "./retention";
 export { loadLocationSettings, DEFAULT_LOCATION_SETTINGS } from "./settings";
 export type { LocationSettings } from "./settings";
 
-// Offline gate shared by every field write (shifts, location, arrival, notes, ...)
-export { runFieldEvent } from "./field-events";
-export type { FieldEventRequest, FieldEventEntity, FieldEventHandlers, FieldEventOutcome } from "./field-events";
-
 // Guard for audit values written by modules that handle locations
 export { withoutCoordinates } from "./audit-values";
 

@@ -5,7 +5,7 @@ import { ForbiddenError, NotFoundError, ValidationError, type Actor, type Reques
 import { withTenant, type TenantTx } from "@/server/db";
 import { jobResourceRef } from "@/server/jobs";
 import { withoutCoordinates } from "./audit-values";
-import { runFieldEvent } from "./field-events";
+import { runFieldEvent } from "@/server/field-events";
 import { recordLocationEventInTx } from "./record";
 import type { RecordLocationEventInput } from "./schemas";
 import { locationEventSelect, locationEventView } from "./views";
