@@ -134,9 +134,9 @@ async function createLeadOnce(actor: Actor, ctx: RequestContext, input: CreateLe
 
       const contactPhoneE164 = input.contactPhone ? normalizePhoneE164(input.contactPhone) : null;
       const addressNormalizedKey = addressKeyOf(input);
-      // The number comes from a SEPARATE short transaction so the counter-row lock is not held for the whole create.
-      // A failed create leaves a gap in the numbers, never a repeat.
-      const number = await withTenant(actor.tenantId, (numberTx) => nextNumber(numberTx, actor.tenantId, "lead"));
+      // The number is taken IN this transaction (a nested `withTenant` would hold a second pooled connection
+      // per request and starve the pool under bursts).
+      const number = await nextNumber(tx, actor.tenantId, "lead");
 
       const lead = await tx.lead.create({
         data: {
