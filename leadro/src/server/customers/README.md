@@ -31,7 +31,7 @@ that org unit (teams are leaf units); an archived team unit expands to nobody.
 ## How scopes apply to customers (`customer-access.ts`)
 - ORG_UNIT / LEGAL_ENTITY follow `Customer.orgUnitId` (service-area branch/city). No unit = tenant-level (TENANT scope only).
 - ASSIGNED = a lead/job of the customer is assigned to the caller. OWN matches nothing.
-- Grants qualified by a record set: `job_related` (customer has a job; Dispatcher), `lead_related` (has a lead; Lead Ops).
+- Grants qualified by a record set: `job_related` (customer has a job; Dispatcher), `lead_related` (has a lead or a recovery case; Lead Ops).
   Lists express this as a union of per-set query fragments; any other set matches nothing (fail closed).
 - `customerResourceRef(tx, tenantId, id)` builds the `ResourceRef` (use it as the `requirePermission` resolver); it always
   carries `assignedEmployeeIds` and `sets`, so a denial is a 404 and never leaks existence as a 403.

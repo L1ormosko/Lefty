@@ -1281,7 +1281,7 @@ ORG_UNIT scope; a customer without one is tenant-level.
 Data scope: `ORG_UNIT` / `LEGAL_ENTITY` follow `orgUnitId`; `ASSIGNED` means a lead or job of the customer is
 assigned to the caller (directly, or through a team assignment to a team the caller belongs to); `OWN` matches
 nothing. A grant qualified by a record set covers only customers of the set: `job_related` (has a job),
-`lead_related` (has a lead). Outside the scope a customer is `404`, never `403`.
+`lead_related` (has a lead or a recovery case). Outside the scope a customer is `404`, never `403`.
 
 ### GET /api/v1/customers
 

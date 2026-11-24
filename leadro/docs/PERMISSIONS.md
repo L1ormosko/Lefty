@@ -314,8 +314,8 @@ Code: `src/server/customers/customer-access.ts` and `assignment-access.ts`.
 - **ASSIGNED**: a non-archived lead or job of the customer has an ACTIVE assignment to the caller; a job assigned to a team
   (`JobAssignment.teamOrgUnitId`) reaches every employee with an active placement in that team. Leads and jobs reuse the same
   where-fragments (`leadAssignedToWhere`, `jobAssignedToWhere`) for their own ASSIGNED scope. **OWN** matches nothing.
-- **Record sets**: `job_related` (the customer has a non-archived job; Dispatcher), `lead_related` (has a non-archived lead; Lead
-  Operations). Unknown sets match nothing. `customer_history` is a JOB set passed only by the customer history view.
+- **Record sets**: `job_related` (the customer has a non-archived job; Dispatcher), `lead_related` (has a non-archived lead or a lead recovery case; Lead
+  Operations, so the customer of a case without a lead opens). Unknown sets match nothing. `customer_history` is a JOB set passed only by the customer history view.
 - **Fields**: billing columns are the opt-in `billing` set (written only by grants naming it, never in audit values). A grant
   limited to `billing` (Finance) sees only billing columns and cannot search or filter by base columns. Technician (plain
   ASSIGNED grant) gets every non-billing field and cannot write.

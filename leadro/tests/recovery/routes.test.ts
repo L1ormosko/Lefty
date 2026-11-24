@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { POST as assignJobRoute } from "@/app/api/v1/jobs/[id]/assign/route";
 import { POST as recordOutcomeRoute } from "@/app/api/v1/jobs/[id]/outcome/route";
 import { POST as rescheduleRoute } from "@/app/api/v1/jobs/[id]/reschedule/route";
+import { GET as getCustomerRoute } from "@/app/api/v1/customers/[id]/route";
 import { GET as getJobRoute } from "@/app/api/v1/jobs/[id]/route";
 import { POST as transitionRoute } from "@/app/api/v1/jobs/[id]/transition/route";
 import { POST as createLostReasonRoute } from "@/app/api/v1/lost-reasons/route";
@@ -20,6 +21,7 @@ import { GET as summaryRoute } from "@/app/api/v1/lead-recovery/summary/route";
 import { GET as listFollowUpsRoute, POST as createFollowUpRoute } from "@/app/api/v1/follow-ups/route";
 import { withTenant } from "@/server/db";
 import { createPerson, disconnect, grantTemplate, type Person } from "../authz/fixtures";
+import { makeCustomer } from "../customers/fixtures";
 import { buildJobsWorld, createJobViaApi, type JobsWorld } from "../jobs/fixtures";
 import { call, sessionCookie } from "../org/org-helpers";
 
@@ -84,6 +86,11 @@ describe("the full flow over HTTP: rule -> outcome -> case -> work -> recovery",
     expect((await call(getJobRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: job.id } })).status).toBe(200);
     const other = await createJobViaApi(w, {});
     expect((await call(getJobRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: other.id } })).status).toBe(404);
+
+    // The customer of a case opens for Lead Ops even without a lead (recovery_related); a customer without a case stays closed.
+    expect((await call(getCustomerRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: caseRow.customerId } })).status).toBe(200);
+    const bystander = await makeCustomer(w.tenantId, { orgUnitId: w.units.cityA });
+    expect((await call(getCustomerRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: bystander.id } })).status).toBe(404);
 
     // A follow-up about that job: the list agrees with the single-record check (the job is open to Lead Ops only through its case).
     const jobTask = await call(createFollowUpRoute, "POST", "/x", { cookie: leadOpsCookie, body: { targetType: "JOB", targetId: job.id, title: "Job note", dueAt: new Date(Date.now() + 3_600_000).toISOString() } });

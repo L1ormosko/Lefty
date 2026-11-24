@@ -23,8 +23,9 @@ import type { OpenDuplicate } from "./duplicate-detection";
  *  - `ASSIGNED`: some lead or job of the customer is assigned to the caller (`assignment-access.ts`).
  *  - `OWN` has no meaning for customers and contributes nothing.
  *  - Record-set qualifiers on a grant (`conditions.set`): `job_related` (Dispatcher) = the customer
- *    has a job; `lead_related` (Lead Operations) = the customer has a lead. Archived leads and jobs
- *    do not count. A grant with any other set matches no customer (fail closed).
+ *    has a job; `lead_related` (Lead Operations) = the customer has a lead OR a lead recovery case (a
+ *    case can exist without a lead, and Lead Ops must still open its customer; a role holds one grant per permission, so the
+ *    one `lead_related` grant covers both). Archived leads and jobs do not count. A grant with any other set matches no customer (fail closed).
  */
 
 export type CustomerRecordSet = "job_related" | "lead_related";
@@ -39,7 +40,7 @@ const customerScopeColumns: ScopeColumns<Prisma.CustomerWhereInput> = {
 /** The customer rows a set-qualified grant may cover: only customers that belong to the set. */
 const recordSetWhere: Record<CustomerRecordSet, Prisma.CustomerWhereInput> = {
   job_related: { jobs: { some: { archivedAt: null } } },
-  lead_related: { leads: { some: { archivedAt: null } } },
+  lead_related: { OR: [{ leads: { some: { archivedAt: null } } }, { recoveryCases: { some: {} } }] },
 };
 
 /** What the scope engine needs to know about one customer row. */
@@ -86,11 +87,14 @@ export async function customerRowAttributes(
       .map((group) => group.customerId)
       .filter((customerId): customerId is string => customerId !== null),
   );
+  const withCases = new Set(
+    (await tx.leadRecoveryCase.groupBy({ by: ["customerId"], where: { tenantId, customerId: { in: ids } } })).map((group) => group.customerId),
+  );
 
   for (const row of rows) {
     const sets: CustomerRecordSet[] = [];
     if (withJobs.has(row.id)) sets.push("job_related");
-    if (withLeads.has(row.id)) sets.push("lead_related");
+    if (withLeads.has(row.id) || withCases.has(row.id)) sets.push("lead_related");
     result.set(row.id, {
       orgUnitIds: row.orgUnitId ? [row.orgUnitId] : [],
       legalEntityIds: row.orgUnit?.legalEntityId ? [row.orgUnit.legalEntityId] : [],
