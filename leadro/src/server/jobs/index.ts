@@ -16,7 +16,7 @@ export type { WorkflowSettingsView } from "./settings";
 
 // Contracts with other modules: the qualification engine, ASSIGNED scope (customers, notifications) and routes
 export { getJobEligibilityInputs } from "./eligibility-inputs";
-export { assignedEmployeeIdsByJob, jobResourceRef, resolveJobListAccess, teamMembers } from "./job-access";
+export { assignedEmployeeIdsByJob, jobResourceRef, resolveJobListAccess } from "./job-access";
 export { registerJobNotificationTarget } from "./notify";
 export { assignJobInTx, lockJob } from "./dispatch-port";
 export { changeJobStatus, loadJobForChange, recordJobEvent } from "./field-port";

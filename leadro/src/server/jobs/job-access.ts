@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { activePlacementWhere, buildScopeWhere, resolveScope, type ResourceRef, type RowScopeAttributes } from "@/server/authz";
-import { jobScopeColumns } from "@/server/customers";
+import { buildScopeWhere, resolveScope, type ResourceRef, type RowScopeAttributes } from "@/server/authz";
+import { jobScopeColumns, teamMembers } from "@/server/customers";
 import type { TenantTx } from "@/server/db";
 import type { ActiveAssignmentView, JobRow } from "./fields";
 
@@ -74,20 +74,6 @@ export async function loadJobAccessFacts(
     if (entry) entry.assignedEmployeeIds = [...employees];
   }
   return facts;
-}
-
-/** Current members of each team org unit (active placement now, unit not archived). Teams that are archived or empty map to nothing. */
-export async function teamMembers(tx: TenantTx, tenantId: string, teamOrgUnitIds: readonly string[], now: Date = new Date()): Promise<Map<string, string[]>> {
-  const membersByTeam = new Map<string, string[]>();
-  if (teamOrgUnitIds.length === 0) return membersByTeam;
-  const placements = await tx.organizationalAssignment.findMany({
-    where: { tenantId, orgUnitId: { in: [...teamOrgUnitIds] }, orgUnit: { active: true }, ...activePlacementWhere(now) },
-    select: { orgUnitId: true, employeeId: true },
-  });
-  for (const placement of placements) {
-    membersByTeam.set(placement.orgUnitId, [...(membersByTeam.get(placement.orgUnitId) ?? []), placement.employeeId]);
-  }
-  return membersByTeam;
 }
 
 /** `assignedEmployeeIds` per job (the `ResourceRef` form of ASSIGNED). Jobs with nobody assigned map to `[]`. */
