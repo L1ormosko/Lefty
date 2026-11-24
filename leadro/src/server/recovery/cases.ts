@@ -348,7 +348,7 @@ export async function recoverySummary(actor: Actor, query: SummaryQuery): Promis
     const byStatus = await tx.leadRecoveryCase.groupBy({ by: ["status"], where: withinScope(base, inRange), _count: { _all: true } });
     const confirmed = await tx.leadRecoveryCase.groupBy({
       by: ["currency"],
-      where: withinScope(base, { ...inRange, status: { in: ["RECOVERED", "CLOSED"] }, recoveredAt: { not: null } }),
+      where: withinScope(base, { status: { in: ["RECOVERED", "CLOSED"] }, recoveredAt: Object.keys(created).length > 0 ? created : { not: null } }),
       _sum: { recoveredAmountMinor: true, collectedAmountMinor: true },
       _count: { _all: true },
     });

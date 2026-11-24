@@ -243,16 +243,19 @@ async function applyActions(
   const patch: Prisma.LeadRecoveryCaseUncheckedUpdateInput = {};
   for (const action of byType("set_priority")) {
     if (action.type !== "set_priority") continue;
+    let changed = false;
     const next = higherPriority(state.priority, action.priority);
     if (next !== state.priority) {
       patch.priority = next as WorkPriority;
       state.priority = next;
+      changed = true;
     }
     if (action.score !== undefined && (state.priorityScore === null || action.score > state.priorityScore)) {
       patch.priorityScore = action.score;
       state.priorityScore = action.score;
+      changed = true;
     }
-    taken.push("set_priority");
+    if (changed) taken.push("set_priority");
   }
   for (const action of byType("recommend")) {
     // Rules run in priority order, so the first recommendation (the most important rule's) stands.

@@ -816,3 +816,15 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
   standard `Idempotency-Key` header.
 - **i18n**: machine codes map to `RECOVERY.*` keys with the code UPPERCASED (`RECOVERY.PRESENCE.REASON.NO_LOCATION`), as the key format requires.
 - **Not built**: UI, a scheduler for re-evaluating old outcomes, listing jobs by `recovery_related`.
+
+### Phase 3 Task 6, fix round 1
+
+- **Content-wise SoD**: the approver of a high-impact rule must not be its author, any editor of that version, or its submitter. Read from the audit trail
+  (`recovery_rule.create | new_version | update | submit` on the rule id) plus `createdById`; no migration. Deactivating / rejecting is not restricted.
+- **Money in dry runs**: case values stay visible to case viewers (§9.4 / §9.7; recorded as a product decision for the owner). A dry run is different: its
+  `checks[].actual` for `minValueMinor` / `maxValueMinor` is `null` with `redacted: true` unless the caller holds the `financial` field set of
+  `job_outcomes.view` over that job (Lead Ops do not). Whether the rule matched is still shown (a boundary can be probed with definitions; accepted).
+- **Version rollback**: refused. A version cannot be activated while a newer non-draft version of the key exists (`409`); to go back, create a new version
+  from the old content (`new-version` on the old row) and activate that.
+- Summary: confirmed revenue is filtered by `recoveredAt` in the range, estimates by `outcomeAt`. `set_priority` is listed in `actionsTaken` only when it
+  changed priority or score. Duplicate `ruleKey` (also under a race) is `409`.

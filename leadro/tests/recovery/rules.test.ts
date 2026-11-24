@@ -81,7 +81,7 @@ describe("approval and separation of duties (§21.3)", () => {
   it("the author cannot approve their own rule even when they hold recovery.approve", async () => {
     const rule = String((await create(w.ceo, { orgUnitId: undefined, actions: [{ type: "notify", audience: "lead_operations" }, { type: "create_case" }] })).id);
     await submitRule(w.ceo.actor, ctx(w.ceo), rule);
-    await expect(activateRule(w.ceo.actor, ctx(w.ceo), rule)).rejects.toThrow(/someone other than its author/);
+    await expect(activateRule(w.ceo.actor, ctx(w.ceo), rule)).rejects.toThrow(/approved by someone who did not write/);
     // The database refuses it as well: a direct write cannot bypass the service.
     await expect(
       withTenant(w.tenantId, (tx) => tx.recoveryRule.update({ where: { id: rule }, data: { status: "ACTIVE", activatedAt: new Date(), approvedById: w.ceo.userId, approvedAt: new Date() } })),
@@ -171,5 +171,40 @@ describe("dry run (§9.6 testable)", () => {
     await expect(dryRunRule(w.leadOps.actor, dryRunSchema.parse({ jobOutcomeId: outcomeId, definition: { actions: [{ type: "give_discount" }] } }))).rejects.toBeInstanceOf(ValidationError);
     await expect(dryRunRule(w.leadOpsB.actor, dryRunSchema.parse({ jobOutcomeId: outcomeId, ruleId: rule }))).rejects.toBeInstanceOf(NotFoundError);
     expect(() => dryRunSchema.parse({ jobOutcomeId: outcomeId })).toThrow();
+  });
+});
+
+describe("fix round 1: content-wise separation of duties, money redaction, versions", () => {
+  it("an approver who edited or submitted a draft cannot approve it", async () => {
+    const edited = String((await create(w.leadOps, { actions: [{ type: "notify", audience: "lead_operations" }, { type: "create_case" }] })).id);
+    await updateRule(w.ceo.actor, ctx(w.ceo), edited, updateRuleSchema.parse({ name: "Tweaked by the approver" }));
+    await submitRule(w.leadOps.actor, ctx(w.leadOps), edited);
+    await expect(activateRule(w.ceo.actor, ctx(w.ceo), edited)).rejects.toBeInstanceOf(ForbiddenError);
+
+    const submitted = String((await create(w.leadOps, { actions: [{ type: "notify", audience: "lead_operations" }, { type: "create_case" }] })).id);
+    await submitRule(w.ceo.actor, ctx(w.ceo), submitted);
+    await expect(activateRule(w.ceo.actor, ctx(w.ceo), submitted)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("a duplicate ruleKey is a 409 even under a race, and an older version cannot be reactivated", async () => {
+    const results = await Promise.allSettled([create(w.leadOps, { ruleKey: "race-key" }), create(w.leadOps, { ruleKey: "race-key" })]);
+    expect(results.filter((r) => r.status === "rejected").every((r) => (r as PromiseRejectedResult).reason instanceof ConflictError)).toBe(true);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+
+    const v1 = await makeActiveRule(w, { ruleKey: "no-rollback" });
+    const v2 = String((await newRuleVersion(w.leadOps.actor, ctx(w.leadOps), v1)).id);
+    await activateRule(w.leadOps.actor, ctx(w.leadOps), v2);
+    await deactivateRule(w.leadOps.actor, ctx(w.leadOps), v2);
+    await expect(activateRule(w.leadOps.actor, ctx(w.leadOps), v1)).rejects.toBeInstanceOf(InvalidStateTransitionError);
+  });
+
+  it("dry run withholds the visit's quote from Lead Ops (no outcome financial set) but shows it to the Owner", async () => {
+    const { outcomeId } = await makeOutcome(w, await makeSiteJob(w), { run: false, quotedAmountMinor: 424_242 });
+    const body = dryRunSchema.parse({ jobOutcomeId: outcomeId, definition: { conditions: { minValueMinor: 1 }, actions: [{ type: "create_case" }] } });
+    const asLeadOps = await dryRunRule(w.leadOps.actor, body);
+    expect(JSON.stringify(asLeadOps)).not.toContain("424242");
+    expect(asLeadOps.checks).toMatchObject([{ condition: "minValueMinor", passed: true, actual: null, redacted: true }]);
+    const asOwner = await dryRunRule(w.ceo.actor, body);
+    expect(asOwner.checks).toMatchObject([{ condition: "minValueMinor", actual: 424_242 }]);
   });
 });

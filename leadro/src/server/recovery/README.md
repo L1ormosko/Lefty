@@ -19,7 +19,9 @@ Public API (`index.ts`):
 Invariants:
 1. **The engine never throws and is fast.** It runs INSIDE the transaction that records the visit outcome. The whole handler and each rule
    run in a SAVEPOINT; a failure rolls back to it, is logged, and leaves a `RecoveryRuleRun` with `skippedReason = "error"`. The outcome
-   always commits.
+   always commits. A handler-level failure (before any rule is reached, e.g. the rules cannot be loaded) is only logged: there is no
+   rule to attach a `RecoveryRuleRun` to. Notifications created in that transaction are delivered by the pending sweep (the handler cannot
+   return notification ids).
 2. **No discounts, ever (§9.6).** The action vocabulary is closed (`create_case`, `set_priority`, `notify`, `create_follow_up`, `recommend`),
    every object is strict, and any key or value that mentions a discount is refused at authoring and dry-run. A stored rule that no
    longer validates is skipped, not run.

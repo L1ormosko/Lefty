@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { isHighImpact, validateRuleDefinition } from "@/lib/recovery-rules";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, projectFields, resolveScope, withinScope } from "@/server/authz";
-import { ConflictError, ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
+import { ConflictError, ForbiddenError, conflictOnUniqueViolation, InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { assertRuleAccess, loadRuleRow, ruleScopeColumns } from "./access";
 import { RULE_FIELD_MAP, ruleRowSelect, ruleView } from "./fields";
@@ -37,6 +37,10 @@ async function assertOrgUnit(tx: TenantTx, tenantId: string, orgUnitId: string):
 const json = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJsonValue;
 
 export async function createRule(actor: Actor, ctx: RequestContext, input: CreateRuleInput): Promise<Record<string, unknown>> {
+  return conflictOnUniqueViolation("A rule with this key exists. Create a new version of it instead.", () => createRuleOnce(actor, ctx, input));
+}
+
+async function createRuleOnce(actor: Actor, ctx: RequestContext, input: CreateRuleInput): Promise<Record<string, unknown>> {
   return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "recovery.manage", input.orgUnitId ? { orgUnitId: input.orgUnitId } : {});
     const definition = parseDefinition(input);
@@ -111,6 +115,23 @@ export async function updateRule(actor: Actor, ctx: RequestContext, ruleId: stri
     });
     return projectFields(ruleView(updated), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
+}
+
+/**
+ * Separation of duties (§21.3), content-wise: the people who shaped THIS version are its author (`createdById`), everyone who
+ * edited its content and whoever submitted it, as the audit trail records them (no extra column needed). None of them may
+ * approve it, so a manager cannot edit a colleague's draft, submit it and approve it themselves.
+ */
+async function assertNotContributor(tx: TenantTx, tenantId: string, rule: { id: string; createdById: string | null }, actorUserId: string): Promise<void> {
+  const events = await tx.auditEvent.findMany({
+    where: { tenantId, targetType: "RecoveryRule", targetId: rule.id, action: { in: ["recovery_rule.create", "recovery_rule.new_version", "recovery_rule.update", "recovery_rule.submit"] } },
+    select: { actorUserId: true },
+  });
+  const contributors = new Set<string>(events.flatMap((event) => (event.actorUserId ? [event.actorUserId] : [])));
+  if (rule.createdById) contributors.add(rule.createdById);
+  if (contributors.has(actorUserId)) {
+    throw new ForbiddenError({ message: "A high-impact rule must be approved by someone who did not write, edit or submit it." });
+  }
 }
 
 async function lockRule(tx: TenantTx, tenantId: string, ruleId: string): Promise<void> {
@@ -190,9 +211,15 @@ export async function activateRule(actor: Actor, ctx: RequestContext, ruleId: st
     }
     if (current.highImpact) {
       if (current.status === "DRAFT") throw new InvalidStateTransitionError({ message: "A high-impact rule must be submitted for approval first." });
-      // Separation of duties (§21.3): the author never approves their own rule.
-      if (current.createdById === actor.userId) throw new ForbiddenError({ message: "A high-impact rule must be approved by someone other than its author." });
+      // Separation of duties (§21.3): neither the author, nor any editor of this version, nor the submitter approves it.
+      await assertNotContributor(tx, actor.tenantId, current, actor.userId);
     }
+    // Rolling back to an older version is a new version of the old content (`newRuleVersion` from it), never a reactivation.
+    const newer = await tx.recoveryRule.findFirst({
+      where: { tenantId: actor.tenantId, ruleKey: current.ruleKey, version: { gt: current.version }, status: { in: ["ACTIVE", "INACTIVE", "SUPERSEDED"] } },
+      select: { version: true },
+    });
+    if (newer) throw new ConflictError({ message: `Version ${newer.version} of this rule exists. To go back, create a new version from this one.` });
     const now = new Date();
     // The newest version wins: the previously ACTIVE version of this key retires in the same transaction (one ACTIVE per key).
     await tx.recoveryRule.updateMany({ where: { tenantId: actor.tenantId, ruleKey: current.ruleKey, status: "ACTIVE", id: { not: ruleId } }, data: { status: "SUPERSEDED" } });
