@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTenant } from "@/server/db";
-import { disconnect } from "../authz/fixtures";
+import { createPerson, disconnect, grantTemplate, makeRole } from "../authz/fixtures";
+import { createJobViaApi } from "../jobs/fixtures";
+import { assignJob } from "../customers/fixtures";
+import { sessionCookie } from "../org/org-helpers";
 import type { JobsWorld } from "../jobs/fixtures";
 import { auditEvents } from "../org/org-helpers";
 import {
@@ -134,6 +137,20 @@ describe("confirming arrival (POST /jobs/{id}/arrive)", () => {
     const again = await arrive(w.cookie.techA1, jobId, { position: positionNear() });
     expect(again.status).toBe(409); // already ARRIVED
     expect(await storedArrivals(w, jobId)).toHaveLength(1);
+  });
+
+  it("needs the right to change the job's status too: a location grant alone is not enough", async () => {
+    const roleId = await makeRole(w.tenantId, "arrive without jobs.edit", [{ permission: "location.create" }, { permission: "jobs.view" }]);
+    const person = await createPerson(w.tenantId, "no-edit", { orgUnitId: w.units.cityA, legalEntityId: w.legalEntityId });
+    await grantTemplate(w.tenantId, person, roleId, [{ type: "ASSIGNED" }]);
+    const cookie = await sessionCookie(person, w.tenantId);
+    const job = await createJobViaApi(w);
+    await assignJob(w.tenantId, job.id, { employeeId: person.employeeId as string });
+    await withTenant(w.tenantId, (tx) => tx.job.update({ where: { id: job.id }, data: { status: "EN_ROUTE", statusChangedAt: new Date(Date.now() - 600_000) } }));
+    const refused = await arrive(cookie, job.id, { position: positionNear() });
+    expect([403, 404]).toContain(refused.status);
+    expect((await jobRow(w, job.id)).status).toBe("EN_ROUTE");
+    expect(await storedArrivals(w, job.id)).toHaveLength(0);
   });
 
   it("is idempotent per clientEventId (offline replays) and refuses a reused id with different content", async () => {
