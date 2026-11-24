@@ -122,7 +122,7 @@ export async function storeLocation(
       data: {
         tenantId: w.tenantId,
         employeeId,
-        kind: "DEPARTURE",
+        kind: "VERIFICATION",
         source: "DEVICE_GPS",
         latitude: options.latitude,
         longitude: options.longitude,
