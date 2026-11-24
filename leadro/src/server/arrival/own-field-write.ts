@@ -22,7 +22,8 @@ export function requireEmployee(actor: Actor): EmployeeActor {
 export function eventTime(occurredAt: Date | undefined, now: Date): Date {
   const at = occurredAt ?? now;
   if (checkOccurredAt(at, now) !== null) throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
-  return at;
+  // The tolerance above is only for ACCEPTING a device clock that runs ahead; what is stored is never later than the server clock.
+  return at.getTime() > now.getTime() ? now : at;
 }
 
 /** The job's scope attributes, after checking the job is assigned to the caller. 404 when it is not theirs. */

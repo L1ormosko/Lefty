@@ -39,24 +39,39 @@ export const navigationOpened = (cookie: string, jobId: string, body: Record<str
 export const verify = (cookie: string, jobId: string, arrivalId: string, body: Record<string, unknown>) =>
   call(verifyRoute, "POST", "/x", { cookie, params: { id: jobId, arrivalId }, body });
 export const listArrivals = (cookie: string, jobId: string) => call(arrivalsRoute, "GET", "/x", { cookie, params: { id: jobId } });
-export const move = (cookie: string, jobId: string, toStatus: string) => post(transitionRoute, cookie, jobId, { toStatus });
+export const move = (cookie: string, jobId: string, toStatus: string, reason?: string) => post(transitionRoute, cookie, jobId, reason ? { toStatus, reason } : { toStatus });
 
-/** A job assigned to techA1, scheduled and marked EN_ROUTE by the technician: ready for "I have arrived". */
-export async function enRouteJob(w: JobsWorld): Promise<string> {
-  const job = await createJobViaApi(w);
-  const assigned = await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, body: { employeeId: w.techA1.employeeId } });
-  if (assigned.status !== 200) throw new Error(`assign failed: ${assigned.status}`);
+/** Gives the job a scheduled slot (a dispatcher's reschedule; an ASSIGNED / RESCHEDULED / CUSTOMER_UNAVAILABLE job becomes SCHEDULED). */
+export async function scheduleJob(w: JobsWorld, jobId: string): Promise<void> {
   const start = Date.now() + 2 * 86_400_000;
   const scheduled = await call(rescheduleRoute, "POST", "/x", {
     cookie: w.cookie.dispatcher,
-    params: { id: job.id },
+    params: { id: jobId },
     body: { scheduledSlot: { start: new Date(start).toISOString(), end: new Date(start + 2 * 3_600_000).toISOString() } },
   });
   if (scheduled.status !== 200) throw new Error(`schedule failed: ${scheduled.status}`);
-  const enRoute = await move(w.cookie.techA1, job.id, "EN_ROUTE");
-  if (enRoute.status !== 200) throw new Error(`en route failed: ${enRoute.status}`);
+}
+
+/** A job assigned to techA1 and SCHEDULED, not yet on the way. */
+export async function scheduledJobFor(w: JobsWorld): Promise<string> {
+  const job = await createJobViaApi(w);
+  const assigned = await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, body: { employeeId: w.techA1.employeeId } });
+  if (assigned.status !== 200) throw new Error(`assign failed: ${assigned.status}`);
+  await scheduleJob(w, job.id);
   return job.id;
 }
+
+/** A job assigned to techA1, scheduled and marked EN_ROUTE by the technician: ready for "I have arrived". */
+export async function enRouteJob(w: JobsWorld): Promise<string> {
+  const jobId = await scheduledJobFor(w);
+  const enRoute = await move(w.cookie.techA1, jobId, "EN_ROUTE");
+  if (enRoute.status !== 200) throw new Error(`en route failed: ${enRoute.status}`);
+  return jobId;
+}
+
+/** Pretends the job reached its current status `minutes` ago (offline tests need a past EN_ROUTE moment to arrive after). */
+export const backdateStatus = (w: JobsWorld, jobId: string, minutes: number) =>
+  withTenant(w.tenantId, (tx) => tx.job.update({ where: { id: jobId }, data: { statusChangedAt: new Date(Date.now() - minutes * 60_000) } }));
 
 export const newClientEventId = (): string => randomUUID();
 

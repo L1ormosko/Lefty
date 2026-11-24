@@ -20,6 +20,15 @@ describe("judgeArrival", () => {
   it("never confirms with a vague fix, even when it lies on the address", () => {
     expect(judgeArrival({ ...base, position: { latitude: 40, longitude: -89, accuracyM: 500 } })).toMatchObject({ verification: "UNVERIFIED", reviewReason: "POOR_ACCURACY", distanceM: 0 });
   });
+  it("does not confirm when the accuracy circle is not inside the radius", () => {
+    const small = { ...base, radiusM: 30 };
+    // 20 m away, but a 90 m accuracy radius: the device could be anywhere around the site.
+    expect(judgeArrival({ ...small, position: { latitude: 40 + 20 / 111_200, longitude: -89, accuracyM: 90 } })).toMatchObject({ verification: "UNVERIFIED", reviewReason: "POOR_ACCURACY" });
+    // 20 m away with 15 m accuracy: 35 m > 30 m.
+    expect(judgeArrival({ ...small, position: { latitude: 40 + 20 / 111_200, longitude: -89, accuracyM: 15 } })).toMatchObject({ reviewReason: "POOR_ACCURACY" });
+    // 20 m away with 10 m accuracy: inside.
+    expect(judgeArrival({ ...small, position: { latitude: 40 + 20 / 111_200, longitude: -89, accuracyM: 10 } })).toMatchObject({ verification: "WITHIN_RADIUS", reviewReason: null });
+  });
   it("cannot measure without a position or without address coordinates", () => {
     expect(judgeArrival({ ...base, position: null })).toEqual({ distanceM: null, verification: "UNVERIFIED", reviewReason: "NO_POSITION" });
     expect(judgeArrival({ ...base, address: { latitude: null, longitude: null }, position: { latitude: 40, longitude: -89, accuracyM: 5 } })).toMatchObject({

@@ -6,6 +6,7 @@ import { auditEvents } from "../org/org-helpers";
 import {
   SITE,
   arrive,
+  backdateStatus,
   buildArrivalWorld,
   enRouteJob,
   jobRow,
@@ -14,6 +15,8 @@ import {
   navigationOpened,
   newClientEventId,
   positionNear,
+  scheduleJob,
+  scheduledJobFor,
   setAddress,
   startWork,
   storedArrivals,
@@ -150,6 +153,7 @@ describe("confirming arrival (POST /jobs/{id}/arrive)", () => {
 
   it("keeps the device time of an offline arrival", async () => {
     const jobId = await enRouteJob(w);
+    await backdateStatus(w, jobId, 60);
     const arrivedAt = new Date(Date.now() - 20 * 60_000);
     const response = await arrive(w.cookie.techA1, jobId, { clientEventId: newClientEventId(), occurredAt: arrivedAt.toISOString(), position: positionNear({ deviceTime: arrivedAt.toISOString() }) });
     expect(new Date(response.json.data.arrival.arrivedAt).toISOString()).toBe(arrivedAt.toISOString());
@@ -198,6 +202,7 @@ describe("start work (POST /jobs/{id}/start-work)", () => {
 
   it("is idempotent per clientEventId and honors the device time (never before the arrival)", async () => {
     const jobId = await enRouteJob(w);
+    await backdateStatus(w, jobId, 60);
     const arrivedAt = new Date(Date.now() - 30 * 60_000);
     await arrive(w.cookie.techA1, jobId, { occurredAt: arrivedAt.toISOString(), position: positionNear({ deviceTime: arrivedAt.toISOString() }) });
     const clientEventId = newClientEventId();
@@ -277,5 +282,64 @@ describe("listing arrivals (GET /jobs/{id}/arrivals)", () => {
     expect(listed.json.data[0]).toMatchObject({ status: "PENDING_MANAGER_REVIEW", confidence: "NEEDS_MANAGER_REVIEW" });
     expect(containsCoordinates(listed.json)).toBe(false);
     expect([403, 404]).toContain((await listArrivals(w.cookie.cityManagerB, jobId)).status);
+  });
+});
+
+describe("device clocks and ordering (offline)", () => {
+  it("never stores an arrival or work start later than the server clock, even when the device runs a few minutes ahead", async () => {
+    const jobId = await enRouteJob(w);
+    const ahead = new Date(Date.now() + 3 * 60_000).toISOString();
+    const arrived = await arrive(w.cookie.techA1, jobId, { occurredAt: ahead, position: positionNear({ deviceTime: ahead }) });
+    expect(arrived.status).toBe(201);
+    expect(new Date(arrived.json.data.arrival.arrivedAt).getTime()).toBeLessThanOrEqual(Date.now());
+    const started = await startWork(w.cookie.techA1, jobId, { occurredAt: ahead });
+    expect(started.status).toBe(200);
+    expect(new Date(started.json.data.job.startedAt).getTime()).toBeLessThanOrEqual(Date.now());
+    expect((await startWork(w.cookie.techA1, await enRouteJob(w), { occurredAt: new Date(Date.now() + 10 * 60_000).toISOString() })).status).toBe(400);
+  });
+
+  it("does not let an arrival predate the moment the job went EN_ROUTE", async () => {
+    const jobId = await enRouteJob(w);
+    const early = new Date(Date.now() - 3 * 3_600_000);
+    const arrived = await arrive(w.cookie.techA1, jobId, { occurredAt: early.toISOString(), position: positionNear({ deviceTime: early.toISOString() }) });
+    expect(new Date(arrived.json.data.arrival.arrivedAt).getTime()).toBeGreaterThan(Date.now() - 120_000);
+  });
+
+  it("does not store an ordering refusal: the same clientEventId succeeds once the earlier event has synced", async () => {
+    const jobId = await scheduledJobFor(w);
+    const arriveId = newClientEventId();
+    const body = { clientEventId: arriveId, position: positionNear() };
+    const tooEarly = await arrive(w.cookie.techA1, jobId, body);
+    expect(tooEarly.status).toBe(409);
+    expect(tooEarly.json.error.retryable).toBe(true);
+    expect((await move(w.cookie.techA1, jobId, "EN_ROUTE")).status).toBe(200);
+    expect((await arrive(w.cookie.techA1, jobId, body)).status).toBe(201);
+
+    const startId = newClientEventId();
+    const other = await enRouteJob(w);
+    expect((await startWork(w.cookie.techA1, other, { clientEventId: startId })).status).toBe(409); // not arrived yet
+    expect((await arrive(w.cookie.techA1, other, { position: positionNear() })).status).toBe(201);
+    expect((await startWork(w.cookie.techA1, other, { clientEventId: startId })).status).toBe(200);
+  });
+
+  it("re-checks access when a start-work is replayed", async () => {
+    const jobId = await enRouteJob(w);
+    await arrive(w.cookie.techA1, jobId, { position: positionNear() });
+    const body = { clientEventId: newClientEventId() };
+    expect((await startWork(w.cookie.techA1, jobId, body)).status).toBe(200);
+    await withTenant(w.tenantId, (tx) => tx.jobAssignment.updateMany({ where: { tenantId: w.tenantId, jobId }, data: { state: "ENDED", endedAt: new Date() } }));
+    expect((await startWork(w.cookie.techA1, jobId, body)).status).toBe(404);
+  });
+
+  it("judges a later visit by its own arrival: an old visit's rejected arrival does not block the new visit", async () => {
+    const jobId = await enRouteJob(w);
+    const first = (await arrive(w.cookie.techA1, jobId, { position: positionNear({}, 2_000) })).json.data.arrival.id as string;
+    expect((await verify(w.cookie.cityManagerA, jobId, first, { decision: "REJECTED", note: "Wrong address." })).status).toBe(200);
+    expect((await move(w.cookie.dispatcher, jobId, "CUSTOMER_UNAVAILABLE", "Nobody home")).status).toBe(200);
+    await scheduleJob(w, jobId); // CUSTOMER_UNAVAILABLE + a slot = SCHEDULED again
+    expect((await move(w.cookie.techA1, jobId, "EN_ROUTE")).status).toBe(200);
+    expect((await arrive(w.cookie.techA1, jobId, { position: positionNear() })).status).toBe(201);
+    expect((await startWork(w.cookie.techA1, jobId)).status).toBe(200);
+    expect((await storedArrivals(w, jobId)).map((row) => row.status)).toEqual(["MANAGER_REJECTED", "RECORDED"]);
   });
 });

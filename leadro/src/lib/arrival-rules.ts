@@ -35,8 +35,10 @@ export function judgeArrival(input: ArrivalJudgementInput): ArrivalJudgement {
   const distanceM = Math.round(haversineKm(position, { latitude: address.latitude, longitude: address.longitude }) * 1000);
   // A vague fix proves nothing either way (it is recorded with its accuracy, §17.2).
   if (!isAccurateEnough(position.accuracyM, input.maxAccuracyM)) return { distanceM, verification: "UNVERIFIED", reviewReason: "POOR_ACCURACY" };
-  if (distanceM <= input.radiusM) return { distanceM, verification: "WITHIN_RADIUS", reviewReason: null };
-  return { distanceM, verification: "OUTSIDE_RADIUS", reviewReason: "OUTSIDE_RADIUS" };
+  if (distanceM > input.radiusM) return { distanceM, verification: "OUTSIDE_RADIUS", reviewReason: "OUTSIDE_RADIUS" };
+  // A fix whose uncertainty circle is not inside the radius cannot confirm presence: accuracy larger than the radius, or distance + accuracy beyond it.
+  if (position.accuracyM > input.radiusM || distanceM + position.accuracyM > input.radiusM) return { distanceM, verification: "UNVERIFIED", reviewReason: "POOR_ACCURACY" };
+  return { distanceM, verification: "WITHIN_RADIUS", reviewReason: null };
 }
 
 /** The `LocationException` stored for a review reason. */

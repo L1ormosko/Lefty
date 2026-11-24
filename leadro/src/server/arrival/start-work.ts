@@ -35,16 +35,20 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     const decision = await enforceInTx(tx, self, "jobs.edit", ref);
     assertWritableFields(decision, ["status"], JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
     if (job.status !== "ARRIVED") {
-      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).` });
+      // retryable: the arrival may not have synced yet.
+      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: true });
     }
     const latest = await tx.arrivalVerification.findFirst({ where: { tenantId: actor.tenantId, jobId, employeeId: self.employeeId }, orderBy: [{ arrivedAt: "desc" }, { id: "desc" }], select: { status: true, arrivedAt: true } });
     if (latest?.status === "MANAGER_REJECTED") {
       throw new InvalidStateTransitionError({ message: "A manager rejected your arrival. Ask them to review it before starting work." });
     }
+    // The job is ARRIVED now, so its statusChangedAt is when it got there: the floor when no arrival row exists.
+    const { statusChangedAt: arrivedStatusAt } = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { statusChangedAt: true } });
     await changeJobStatus(tx, actor, auditContextFields(ctx), job, "IN_PROGRESS");
     if (job.startedAt === null) {
       // The work started when the device says it did, but never before the arrival it follows.
-      const effective = latest && latest.arrivedAt > startedAt ? latest.arrivedAt : startedAt;
+      const floor = latest?.arrivedAt ?? arrivedStatusAt;
+      const effective = floor > startedAt ? floor : startedAt;
       await tx.job.update({ where: { id: jobId }, data: { startedAt: effective } });
     }
     return { result: await viewJob(tx, actor.tenantId, jobId), entity: { type: "Job", id: jobId } };
@@ -59,7 +63,11 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     deviceId: input.deviceId,
     payloadHash: hashFieldEventContent({ type: "job.start_work", jobId, occurredAt: input.occurredAt }),
     apply,
-    replay: (tx) => viewJob(tx, actor.tenantId, jobId),
+    // A replay re-checks access (assignment and `jobs.edit`) and answers with the job's CURRENT state, like the outcome replay.
+    replay: async (tx) => {
+      await enforceInTx(tx, self, "jobs.edit", await assignedJobRef(tx, self, jobId));
+      return viewJob(tx, actor.tenantId, jobId);
+    },
   });
   return { ...outcome.result, replayed: outcome.replayed };
 }

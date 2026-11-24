@@ -46,7 +46,7 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
   if (input.occurredAt && input.position && Math.abs(input.occurredAt.getTime() - input.position.deviceTime.getTime()) > MAX_CLOCK_SKEW_MS) {
     throw new ValidationError({ message: "occurredAt and the position's device time disagree.", field: "occurredAt" });
   }
-  const arrivedAt = eventTime(input.occurredAt ?? input.position?.deviceTime, now);
+  const reportedAt = eventTime(input.occurredAt ?? input.position?.deviceTime, now);
   const notificationIds: string[] = [];
 
   const apply = async (tx: TenantTx, fieldEventId: string | undefined) => {
@@ -54,8 +54,12 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
     await enforceInTx(tx, self, "location.create", { employeeId: self.employeeId, ownerEmployeeId: self.employeeId });
     await assignedJobRef(tx, self, jobId);
     if (job.status !== "EN_ROUTE") {
-      throw new InvalidStateTransitionError({ message: `Arrival can only be confirmed while the job is EN_ROUTE (it is ${job.status}).` });
+      // retryable: an earlier event (marking the job EN_ROUTE) may simply not have synced yet.
+      throw new InvalidStateTransitionError({ message: `Arrival can only be confirmed while the job is EN_ROUTE (it is ${job.status}).`, retryable: true });
     }
+    // Arrival cannot predate the moment the job went EN_ROUTE (statusChangedAt is that moment: the job is EN_ROUTE now).
+    const { statusChangedAt: enRouteAt } = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { statusChangedAt: true } });
+    const arrivedAt = enRouteAt > reportedAt ? enRouteAt : reportedAt;
 
     const address = await tx.job.findFirstOrThrow({
       where: { id: jobId, tenantId: actor.tenantId },
@@ -84,7 +88,7 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
         kind: "ARRIVAL",
         source: input.trigger === "GEOFENCE" ? "GEOFENCE" : input.position ? "DEVICE_GPS" : "MANUAL",
         position: input.position,
-        deviceTime: input.position?.deviceTime ?? arrivedAt,
+        deviceTime: input.position?.deviceTime ?? reportedAt,
         jobId,
         shiftId: shift?.id,
         deviceId: input.deviceId,
@@ -141,7 +145,7 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
     jobId,
     type: "job.arrive",
     clientEventId: input.clientEventId,
-    occurredAt: arrivedAt,
+    occurredAt: reportedAt,
     deviceId: input.deviceId,
     // What the event MEANS as sent. Coordinates are hashed (one-way): a changed position under a reused id is a CONFLICT.
     payloadHash: hashFieldEventContent({ type: "job.arrive", jobId, trigger: input.trigger, occurredAt: input.occurredAt, position: input.position, exception: input.exception }),
