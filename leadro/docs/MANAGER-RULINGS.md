@@ -57,3 +57,58 @@ Every decision the project manager (Claude) took on the product owner's behalf d
 - one follow-up round (load-bearing breakage) combining: 415 fix (enforce only when bytes present), role-history projection (API-REF finding), date-only format, docs consistency, clone MFA, API_REFERENCE update — then scoped re-review. Exceeds "no second fix wave" because the breakage blocks API logout — cost: one extra round.
 - Technician seeing own row on /admin/employees accepted (nav hides it; own record only). Ruling: deep import of secret-box in e2e → follow-up should export encryptSecret via auth index or a test-support entry.
 - fix in round 1 with minors: encryption key ??=, city-manager assert specific other-city employee absent, sanitize execSync error, local-host guard.
+
+## Phase 2 + Phase 3 (backend) rulings
+
+- Technician app = mobile-first web workspace in the Next app; React Native deferred to END decisions — no device/simulator here; spec §2.4 RN is "candidate, subject to review" — cost: RN wrapper later.
+- qualification engine core pulled from Phase 5 into Phase 2 — §7.3 hard eligibility depends on it — cost: none.
+- no maps provider → straight-line distance labelled as estimate; map panel says "not configured" — §28.3 — cost: travel-time quality until provider chosen (END decision).
+- Phase 4 commission formulas stay blocked (§28.4); non-formula finance infra (materials, revenue/payment records, ledger, approvals) scheduled after Phase 3 — cost: none.
+- Phase 1 read-grant "operational"/"necessary" conditions dropped (they returned no fields); write-field limits kept, enforced by owning services — cost: Dispatcher/Technician read base fields of employees/customers in scope.
+- catalog additions job_types.view, customers.manage, leads.manage, qualifications.*, notifications.* accepted.
+- fold minors into round 1 (schema cheap now): recommendation composite FK to same job; Job.leadId↔customer consistency; OperationsSettings.updatedById FK; cert kind composite FK; TRAINING kind; authz LEAD_STATUS_FIELDS/JOB_EXECUTION_FIELDS write allowlists; JSON/polymorphic id contract doc; PERMISSIONS doc "necessary"; intake must set sourceId (doc). Fixes go in a NEW migration (the first was applied to shared leadro_test).
+- no scheduler — deliverPending sweep needs a worker (Phase 7 background jobs); document as limitation. Ruling: mark-read/preferences not audited — low-value own-data actions; accepted.
+- both write-time filter (canInTx with targetType/targetId/orgUnitId) AND read-time redaction; fold minors: README notes notifyInTx can fail caller tx; enforce declared params per event + targetId ID_LIKE; recordOutcome status guard; document at-least-once.
+- no availability/territory/permission rows ⇒ not eligible (strict hard requirements §7.3) — cost: tenants must configure before dispatch; add to END decisions as a configurable default question.
+- job-category permissions require qualifications.approve; self-verification forbidden; material edit resets verification — accepted.
+- fold minors #1 (archived-unit territories treated as ended + test), #2 (status gate only for windows starting now; ON_LEAVE future ok if exception rows don't block — document+test), #4 (tenant zone), #5 (time-off params coarse; availability.note in a restricted field set). #8: qualifications use audit as history — accepted (constraint targets §6.3/§7.2 entities).
+- duplicate flags shown only to callers who can see both customers (isolation over convenience) — cost: cross-city duplicates surface only to state/tenant roles.
+- leads/jobs must refuse new work for archived customers (added to T5/T6 briefs); nextNumber in core accepted and mandatory for leads/jobs.
+- eligibility override needs jobs.approve + reason (Owner/COO default; Dispatcher lacks it) — employment failures never overridable — cost: dispatchers must escalate overrides; END decision whether Dispatcher should hold it.
+- team passes if ≥1 eligible current member — accepted for Phase 2.
+- central notification-target registration file (src/server/notification-targets.ts imported from instrumentation/route bootstrap) — do at T5+T6 merge integration.
+- conversion needs leads.view + jobs.create (Lead Ops can't convert by default) — §4.5 Lead Ops has no Jobs create; END decision.
+- Dispatcher dispatch_related lead set = QUALIFIED/SCHEDULED/DISPATCHED/CONVERTED — accepted.
+- fold minors 1 (jobs.assign on CANCELLED/CLOSED), 2 (lock before authz), 3 (expectedAssignmentId precondition), 4 (drop includeFinished), 5 (per-member override), 6 (clear slot on RESCHEDULED; ON_HOLD>ASSIGNED slot), 7 (override reason only to jobs.assign/approve), 9 (use constants) into the T5+T6 integration step. 8/10/11 deferred (documented).
+- T5 fix round = integration round: merge main (jobs) into T5 worktree, wire port to real createJobFromLead, fix T5 findings, central globalThis-backed resolver registry, plus T6 minors 1,2,3,4,5,6,7,9 and T5 minors (filter collisions, racing webhook replay, restored lead owner, unassign own attempt, locked open-attempt check, noisy test).
+- defer T8 (ops UI) and T9 (tech UI) to a later UI/UX phase; continue backend. T7 re-dispatched (a94e99a62c8f923cb). T5 resumed.
+- non-atomic approve accepted only until jobs exposes an in-tx assign — fix at merge (T5 merged jobs changes) — cost: crash window leaves rec PENDING (repeat completes).
+- assign target employee must be within the caller's employee scope (employees.view any field set) — enforce in jobs assignJob — cost: cross-unit assignment needs a wider-scoped user.
+- coordinates field set Owner-only; Lead Ops gets presence only as derived status — privacy (§17.1, §22.2) — END decision candidate.
+- fold minors 5–12,14 (schema is cheap now); migration not yet applied to shared DBs → may be edited in place.
+- SOLD/NOT_SOLD from ARRIVED refused until "start work" (arrival task adds it) — no invented startedAt.
+- closing guard on every path to CLOSED (needs outcome for current visit); managers hold only job_outcomes.edit — END decision whether managers may record outcomes.
+- runFieldEvent + T5 local gate → consolidate into src/server/field-events in Task 4.
+- (a) retroactive outcome without status change for job_outcomes.create/edit holders; visit advances on entering EN_ROUTE when current visit has outcome; correction originals kept in the audit row (audit.view-gated) — no new table (no migrations after T1); currency must equal job currency; outcome amounts/payment in financial field set gated like jobs.financial_fields. Fold minors 2,3,4,5,8; minor 6 → T6 must isolate handler failures.
+- fold minors 1,2(ESLint restriction),3,4,5,6,7,9. Delay threshold tenant default 15 min via code constant (no schema change).
+- Technician holds job_outcomes.financial_fields (they enter amounts on site) — END decision candidate.
+- arrival never blocks the job (doubt → manager review) — accepted. Pause/resume (ON_HOLD→IN_PROGRESS) → END decision.
+- T3 design wins — revert in T4; sync job.arrive/job.start_work handled by arrival's registered handlers.
+- store only content verdicts; state/ordering/config refusals retryable (AppError flag); add job.en_route sync type via jobs offline envelope; window check only on first delivery; fold minors (batchId via claim, replayed flag, store detail code in resultCode, completion facts scoped to visit, FORBIDDEN retryable only when it can change, category validation, DECISIONS note on hash change). Pause/resume → END decision.
+- set_priority action accepted; recovery money all base → review to judge.
+
+## Open END decisions for the owner
+
+- Approve MANAGER-RULINGS.md (Phase 1).
+- Provisional role templates (Regional Mgr, Team Leader, Customer Relations, HR); HR financial visibility.
+- Compensation spec (unblocks Phase 4 formulas).
+- Email/SMS/push/telephony providers; maps provider (Google Maps per §2.4?).
+- React Native app vs PWA.
+- Should Dispatcher hold jobs.approve (override ineligible assignment) or only Owner/COO?
+- Should Lead Operations be able to convert leads into jobs (needs jobs.create)?
+- Eligibility strictness: should missing availability/territory/job-permission rows block dispatch (current) or be treated as "unrestricted" per tenant setting?
+- Should Lead Operations see recovery case value (initial/estimated = outcome quote)? Currently yes.
+- Should managers be able to record outcomes (job_outcomes.create)? Currently only edit/retroactive.
+- Technician holds job_outcomes financial fields (enters amounts on site) — confirm.
+- Precise coordinates visible to Owner only — confirm.
+- Pause/resume of work in progress (ON_HOLD→IN_PROGRESS edge) — add or not.
