@@ -2,6 +2,7 @@ import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
 import { registerJobNotificationTarget } from "@/server/jobs";
 import { registerLeadNotifications } from "@/server/leads";
+import { registerRecoveryEngine, registerRecoveryFollowUpTarget, registerRecoveryNotificationTarget } from "@/server/recovery";
 
 /**
  * The ONE place that teaches the notifications engine how to authorize the records its notifications link to
@@ -15,6 +16,10 @@ export function registerNotificationTargets(): void {
   registerJobNotificationTarget();
   registerFollowUpNotificationTarget();
   registerJobOutcomeNotificationTarget();
+  // Lead recovery: the case notification resolver, the follow-up target access, and the outcome subscription (the engine).
+  registerRecoveryNotificationTarget();
+  registerRecoveryFollowUpTarget();
+  registerRecoveryEngine();
 }
 
 registerNotificationTargets();

@@ -2241,3 +2241,118 @@ collected amounts and a payment belong to SOLD; the quote may accompany any outc
 - **Purpose**: edit `name`, `description`, `appliesTo`, `recoverable`, `sortOrder` or retire / restore with `active`. Reasons are never deleted and the `code` never changes;
   outcomes keep a retired reason.
 - **Permission**: tenant-wide `job_outcomes.configure`. **Response**: `200 { data: lostReason }`. **Audit**: `lost_reason.update`.
+
+## Lead recovery (`/api/v1/lead-recovery`) - Phase 3
+
+Code: `src/server/recovery` (README there), routes `src/app/api/v1/lead-recovery/**`, pure rules `src/lib/recovery-rules.ts`, case status machine
+`src/lib/recovery-lifecycle.ts`. Design decisions: `DECISIONS.md` "Phase 3 Task 6".
+
+The engine subscribes to `job.not_converted` (a `NOT_SOLD` / `WORK_NOT_POSSIBLE` outcome). Inside the outcome's own transaction it evaluates the
+tenant's ACTIVE rules (priority order, scope = the rule's unit and below), creates at most one case per outcome and runs the rule actions. It
+never blocks the outcome: a failing rule is rolled back to a savepoint and recorded as `skippedReason: "error"`. **There is no discount
+action**: rules may create a case, set its priority, notify Lead Operations, create a follow-up task, or recommend a next step (`call_customer |
+send_quote_reminder | schedule_revisit | review_manually`). Any key or value that mentions a discount is `400`.
+
+**Rule content** (`conditions`, all optional, strict): `outcomes` (`NOT_SOLD | WORK_NOT_POSSIBLE`), `lostReasonIds`, `jobTypeIds`, `presence`
+(`AT_LOCATION | LEFT_LOCATION | UNKNOWN`), `minValueMinor`, `maxValueMinor` (the visit's quote; never matches an unknown value),
+`recoverableReason` (the reason's flag), `customerRequestedFollowUp`. `actions` (1-10): `{type:"create_case", priority?}`,
+`{type:"set_priority", priority, score?}`, `{type:"notify", audience:"lead_operations"}`, `{type:"create_follow_up", dueInMinutes, priority?}`,
+`{type:"recommend", code}`. `cooldownMinutes`: the same rule (any version of its key) does not fire again for the same customer inside the window.
+
+**Rule lifecycle**: `DRAFT -> PENDING_APPROVAL -> ACTIVE <-> INACTIVE`, `ACTIVE -> SUPERSEDED` by a newer version. A rule is immutable once it leaves
+DRAFT (edit = new version). `highImpact` is derived from the actions (notify, create_follow_up, a HIGH / URGENT case or URGENT priority) and cannot be
+lowered by the author; such a rule must be submitted and approved with `recovery.approve` by someone OTHER than its author (`403`, also a database CHECK).
+Other rules are activated directly with `recovery.manage`. Rule fields (`base`): `id, ruleKey, version, name, description, status, priority, trigger,
+conditions, actions, orgUnitId, highImpact, cooldownMinutes, createdById, submittedAt, approvedById, approvedAt, activatedAt, createdAt, updatedAt`,
+derived `needsApproval`.
+
+**Case fields** (`base`): `id, number, jobOutcomeId, jobId, customerId, leadId, technicianId, orgUnitId, lostReasonId, status, statusChangedAt, priority,
+priorityScore, assignedToId, assignedAt, ruleId, ruleVersion, recommendation, outcomeAt, presenceStatus, presenceEvaluatedAt, presenceAccuracyM,
+presenceReason, presenceAgeMinutes, initialValueMinor, estimatedValueMinor, currency, recoveredAt, recoveredAmountMinor, collectedAmountMinor,
+recoveredJobId, recoveredLeadId, recoveredById, attemptCount, lastAttemptAt, closedAt, closeReason, createdAt, updatedAt`, derived `nextStatuses` and
+`revenue { currency, confirmed (null until recovered), estimated }`. **Presence is a status only**: `AT_LOCATION | LEFT_LOCATION | UNKNOWN` plus
+accuracy, age and (when UNKNOWN) a reason `no_location | stale_location | inaccurate_location | no_coordinates`. It is derived from the technician's latest
+fresh and accurate location event and is an estimate, never proof; coordinates, the evidence event id and distances are never returned.
+
+**Case statuses** (§9.5): `NEW -> ASSIGNED -> CONTACTING -> CUSTOMER_REACHED -> FOLLOW_UP_REQUIRED -> RECOVERED -> CLOSED`, with `NOT_RECOVERED` (reopenable to
+`CONTACTING`) and `CLOSED` (final) as the other ends. Every change writes status history. Access: `recovery.view | edit | assign` over the case's service area
+(ASSIGNED / OWN = the assigned recovery employee); out of scope is `404`. Lead Operations also gets `jobs.view` on a job that has a recovery case
+(`recovery_related`), so the original job opens from the case.
+
+### GET /api/v1/lead-recovery/rules
+
+- **Permission**: `recovery.view`. **Purpose**: rules in scope, evaluation order; query `status`, `ruleKey`, `latestOnly` (default true), `cursor`, `limit`
+
+### POST /api/v1/lead-recovery/rules
+
+- **Permission**: `recovery.manage` over the unit. **Purpose**: create a DRAFT (`ruleKey`, `name`, `priority`, `conditions`, `actions`, `orgUnitId?`, `cooldownMinutes`); `409` duplicate key; audit `recovery_rule.create`
+
+### GET /api/v1/lead-recovery/rules/{id}
+
+- **Permission**: `recovery.view`. **Purpose**: one rule
+
+### PATCH /api/v1/lead-recovery/rules/{id}
+
+- **Permission**: `recovery.manage`. **Purpose**: edit a DRAFT in place; `409` otherwise; audit `recovery_rule.update`
+
+### POST /api/v1/lead-recovery/rules/{id}/new-version
+
+- **Permission**: `recovery.manage`. **Purpose**: copy into a new DRAFT (version + 1); `409` while another working version exists
+
+### POST /api/v1/lead-recovery/rules/{id}/submit
+
+- **Permission**: `recovery.manage`. **Purpose**: DRAFT -> PENDING_APPROVAL (high impact only)
+
+### POST /api/v1/lead-recovery/rules/{id}/activate
+
+- **Permission**: `recovery.approve` (high impact, not the author) / `recovery.manage`. **Purpose**: activate; supersedes the older ACTIVE version; audit `recovery_rule.approve` / `.activate`
+
+### POST /api/v1/lead-recovery/rules/{id}/deactivate
+
+- **Permission**: `recovery.manage` (ACTIVE) / `recovery.approve` (reject PENDING_APPROVAL). **Purpose**: audit `recovery_rule.deactivate` / `.reject`
+
+### POST /api/v1/lead-recovery/rules/dry-run
+
+- **Permission**: `recovery.manage`. **Purpose**: body `jobOutcomeId` + exactly one of `ruleId` / `definition`, optional `presence` what-if; answers `matched, wouldFire, skippedReason, checks[], cooldown, presence (status only), existingCaseId, highImpact, actions`; writes nothing
+
+### GET /api/v1/lead-recovery/cases
+
+- **Permission**: `recovery.view`. **Purpose**: the queue, newest outcome first; query `status`, `open`, `priority`, `assignedToId` (id, `me`, `none`), `customerId`, `jobId`, `orgUnitId`, `presenceStatus`
+
+### GET /api/v1/lead-recovery/cases/{id}
+
+- **Permission**: `recovery.view`. **Purpose**: the case plus `attempts`, `statusHistory`, `followUps`
+
+### PATCH /api/v1/lead-recovery/cases/{id}
+
+- **Permission**: `recovery.edit`. **Purpose**: `estimatedValueMinor` (an estimate), `priority` of an open case
+
+### POST /api/v1/lead-recovery/cases/{id}/assign
+
+- **Permission**: `recovery.assign`. **Purpose**: `{ assigneeId }` (`null` unassigns); the assignee must be an active employee with a login who can view the case; notified
+
+### POST /api/v1/lead-recovery/cases/{id}/status
+
+- **Permission**: `recovery.edit`. **Purpose**: `status` in `CONTACTING, CUSTOMER_REACHED, FOLLOW_UP_REQUIRED, NOT_RECOVERED, CLOSED`; the last two need `reason`; `409` for an invalid move
+
+### POST /api/v1/lead-recovery/cases/{id}/attempts
+
+- **Permission**: `recovery.edit`. **Purpose**: one communication attempt (`channel`, `outcome?`, `occurredAt?`, `durationSeconds?`, `notes?`, `offeredAmountMinor?` entered by the employee); first attempt moves NEW / ASSIGNED to CONTACTING
+
+### POST /api/v1/lead-recovery/cases/{id}/recover
+
+- **Permission**: `recovery.edit`. **Purpose**: confirm: `recoveredAmountMinor`, `collectedAmountMinor?`, `recoveredJobId?`, `recoveredLeadId?` (same customer, not the original job), `recoveredAt?`; status RECOVERED; the estimate is untouched
+
+### POST /api/v1/lead-recovery/cases/{id}/refresh-presence
+
+- **Permission**: `recovery.edit`. **Purpose**: re-evaluate presence now (status snapshot)
+
+### GET /api/v1/lead-recovery/summary
+
+- **Permission**: `recovery.view`. **Purpose**: cases by status; CONFIRMED recovered revenue and ESTIMATED value of open cases per currency, never added together; query `from`, `to`, `orgUnitId`
+
+Errors: `400` validation (discount, unknown key, bad range), `403` missing permission or SoD, `404` missing or out of scope, `409` conflict or invalid
+transition. Audit actions: `recovery.case_create` (system), `recovery.case_annotate`, `recovery.case_assign`, `recovery.case_status_change`,
+`recovery.case_update`, `recovery.attempt_record` (no notes), `recovery.case_recover`, `recovery.presence_refresh`, plus the `recovery_rule.*` actions above.
+Notifications: `recovery.case_created` (to holders of `recovery.assign`, else `recovery.view`, over the case's unit, created in the outcome transaction and
+delivered by the pending-notification sweep) and `recovery.case_assigned` (to the new owner).

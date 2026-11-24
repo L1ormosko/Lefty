@@ -1,7 +1,7 @@
 import type { TenantTx } from "@/server/db";
 
 /** Sequence names in `NumberSequence.name`: one counter per tenant and kind of record. */
-export type NumberSequenceName = "customer" | "lead" | "job";
+export type NumberSequenceName = "customer" | "lead" | "job" | "recovery_case";
 
 /**
  * The next human-friendly number (`Customer|Lead|Job.number`) of a tenant, 1, 2, 3...

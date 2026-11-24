@@ -23,6 +23,9 @@ export const NOTIFICATION_EVENTS = {
   "follow_up.overdue": { templateKey: "NOTIFICATION.FOLLOW_UP_OVERDUE", critical: false, targetType: "follow_up", params: [] },
   "job.arrival_unverified": { templateKey: "NOTIFICATION.JOB_ARRIVAL_UNVERIFIED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.not_converted": { templateKey: "NOTIFICATION.JOB_NOT_CONVERTED", critical: false, targetType: "job_outcome", params: ["jobNumber"] },
+  // Lead recovery (§9.3): Lead Operations hear about a new case. Links to the case; the text carries only its number.
+  "recovery.case_created": { templateKey: "NOTIFICATION.RECOVERY_CASE_CREATED", critical: false, targetType: "recovery_case", params: ["caseNumber"] },
+  "recovery.case_assigned": { templateKey: "NOTIFICATION.RECOVERY_CASE_ASSIGNED", critical: false, targetType: "recovery_case", params: ["caseNumber"] },
   "qualification.expiring": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRING", critical: false, targetType: "employee_qualification", params: ["daysRemaining"] },
   "qualification.expired": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRED", critical: true, targetType: "employee_qualification", params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
