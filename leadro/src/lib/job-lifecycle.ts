@@ -169,11 +169,12 @@ export const REASON_REQUIRED_STATUSES: readonly JobStatusValue[] = [
 ];
 
 /**
- * What an execution-only grant (Technician `jobs.edit {fields:"execution"}`) may move a job to in
- * Phase 2. Arrival, start and completion are Phase 3 field-execution events (they need location and
- * completion data, §8.3), so they are not offered to technicians yet.
+ * What an execution-only grant (Technician `jobs.edit {fields:"execution"}`) may move a job to: leaving for the job
+ * and starting the work (§8.5). Arrival needs location verification (§8.3, the arrival flow) and completion goes through
+ * the outcome (§9.1), so neither is a plain status move for a technician. The lifecycle graph still decides whether
+ * the edge exists (IN_PROGRESS is only reachable from ARRIVED, or from AWAITING_REVIEW by a reviewer).
  */
-export const TECHNICIAN_TARGET_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE"];
+export const TECHNICIAN_TARGET_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE", "IN_PROGRESS"];
 
 /** Where the work is under way or done: the assignment can no longer be changed by dispatch. */
 export const FIELD_IN_PROGRESS_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"];

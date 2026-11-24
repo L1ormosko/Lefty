@@ -167,14 +167,25 @@ describe("exceptional statuses", () => {
 });
 
 describe("technician limits", () => {
-  it("lets an assigned technician mark EN_ROUTE and nothing else, and not touch a job that is not theirs", async () => {
+  it("lets an assigned technician mark EN_ROUTE and start work, nothing else, and not touch a job that is not theirs", async () => {
     const job = await scheduledJob();
-    for (const target of ["ARRIVED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "ON_HOLD", "CLOSED"]) {
+    for (const target of ["ARRIVED", "COMPLETED", "CANCELLED", "ON_HOLD", "CLOSED"]) {
       expect((await move(w.cookie.techA1, job.id, target, "x")).status, target).toBe(403);
     }
     expect((await move(w.cookie.techA1Other, job.id, "EN_ROUTE")).status).toBe(404);
     expect((await move(w.cookie.techA1, job.id, "EN_ROUTE")).status).toBe(200);
     expect((await move(w.cookie.techA1, job.id, "ARRIVED")).status).toBe(403);
+  });
+
+  it("lets the technician start work only from ARRIVED (the lifecycle graph still decides), and stamps startedAt", async () => {
+    const job = await scheduledJob();
+    expect((await move(w.cookie.techA1, job.id, "EN_ROUTE")).status).toBe(200);
+    expect((await move(w.cookie.techA1, job.id, "IN_PROGRESS")).status).toBe(409); // no arrival yet: no such edge
+    expect((await move(w.cookie.dispatcher, job.id, "ARRIVED")).status).toBe(200);
+    expect((await move(w.cookie.techA1, job.id, "IN_PROGRESS")).json.data.status).toBe("IN_PROGRESS");
+    const row = await withTenant(w.tenantId, (tx) => tx.job.findFirstOrThrow({ where: { id: job.id }, select: { startedAt: true } }));
+    expect(row.startedAt).not.toBeNull();
+    expect((await move(w.cookie.techA1, job.id, "COMPLETED")).status).toBe(403); // completion goes through the outcome
   });
 });
 
