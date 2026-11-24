@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { FieldEvent, Prisma } from "@prisma/client";
-import { findCoordinateKey } from "@/lib/location-rules";
+import { checkOccurredAt, findCoordinateKey } from "@/lib/location-rules";
 import { ConflictError, InvalidStateTransitionError, ValidationError, type AppError } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { logger } from "@/server/logging";
@@ -38,6 +39,11 @@ export interface FieldEventRequest {
   deviceId?: string;
   batchId?: string;
   jobId?: string;
+  /**
+   * Detail code of the 409 raised when this id was already used for different content. Defaults to
+   * `CLIENT_EVENT_ID_REUSED`; job-outcomes keeps its published `field_event.payload_mismatch`.
+   */
+  reusedIdCode?: string;
 }
 
 /** What the event created or changed, recorded so a replay can find it again. */
@@ -67,19 +73,40 @@ type StoredRefusal = (typeof STORED_REFUSALS)[number];
 const isStoredRefusal = (error: unknown): error is AppError & { code: StoredRefusal } =>
   typeof error === "object" && error !== null && "code" in error && STORED_REFUSALS.includes((error as AppError).code as StoredRefusal);
 
-function refusalFromCode(code: string): Error {
+/**
+ * `resultCode` is the error code, plus ":" and the first detail code when the refusal had one (`CONFLICT:completion.already_submitted`),
+ * so a replay answers with the same machine-readable reason the first delivery got.
+ */
+const resultCodeOf = (error: AppError): string => (error.details?.[0]?.code ? `${error.code}:${error.details[0].code}` : error.code);
+
+function refusalFromCode(stored: string): Error {
+  const [code, detailCode] = stored.split(":", 2);
   const message = "This event was refused when it was first received. Send a corrected event with a new clientEventId.";
-  if (code === "INVALID_STATE_TRANSITION") return new InvalidStateTransitionError({ message });
-  if (code === "CONFLICT") return new ConflictError({ message });
-  return new ValidationError({ message });
+  const options = { message, ...(detailCode ? { details: [{ field: "clientEventId", code: detailCode, message }] } : {}) };
+  if (code === "INVALID_STATE_TRANSITION") return new InvalidStateTransitionError(options);
+  if (code === "CONFLICT") return new ConflictError(options);
+  return new ValidationError(options);
 }
 
-const sameContentConflict = () =>
-  new ConflictError({
+/** Conflicts raised for a reused id are not stored as refusals (the stored event is the first one, and stays valid). */
+const reusedIdConflicts = new WeakSet<AppError>();
+
+const DEFAULT_REUSED_ID_CODE = "CLIENT_EVENT_ID_REUSED";
+
+function sameContentConflict(code: string = DEFAULT_REUSED_ID_CODE): ConflictError {
+  const error = new ConflictError({
     message: "This clientEventId was already used for a different event.",
     field: "clientEventId",
-    details: [{ field: "clientEventId", code: "CLIENT_EVENT_ID_REUSED", message: "Use a new clientEventId for a different event." }],
+    details: [{ field: "clientEventId", code, message: "Use a new clientEventId for a different event." }],
   });
+  reusedIdConflicts.add(error);
+  return error;
+}
+
+const batchContext = new AsyncLocalStorage<string>();
+
+/** Runs `work` so every FieldEvent row it CREATES carries `batchId` (used by the sync endpoint). */
+export const withFieldEventBatch = <T>(batchId: string, work: () => Promise<T>): Promise<T> => batchContext.run(batchId, work);
 
 /** Inserts the event row if nobody has; returns the row either way and whether this call inserted it. */
 async function claim(tx: TenantTx, request: FieldEventRequest, result: "ACCEPTED" | "REJECTED", resultCode?: string): Promise<{ row: FieldEvent; inserted: boolean }> {
@@ -95,7 +122,8 @@ async function claim(tx: TenantTx, request: FieldEventRequest, result: "ACCEPTED
         type: request.type,
         jobId: request.jobId,
         deviceId: request.deviceId,
-        batchId: request.batchId,
+        // The batch of the sync call in progress labels the rows IT creates (a replayed event keeps its first batch).
+        batchId: request.batchId ?? batchContext.getStore(),
         occurredAt: request.occurredAt,
         payload: request.payload,
         payloadHash: request.payloadHash,
@@ -120,10 +148,16 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
     return await withTenant(request.tenantId, async (tx) => {
       const { row, inserted } = await claim(tx, request, "ACCEPTED");
       if (!inserted) {
-        if (row.payloadHash !== request.payloadHash) throw sameContentConflict();
+        if (row.payloadHash !== request.payloadHash) throw sameContentConflict(request.reusedIdCode);
         if (row.result !== "ACCEPTED") throw refusalFromCode(row.resultCode ?? "VALIDATION_FAILED");
         if (!row.entityType || !row.entityId) throw new ConflictError({ message: "This event is still being processed. Retry shortly.", retryable: true });
         return { result: await handlers.replay(tx, { type: row.entityType, id: row.entityId, shiftId: row.shiftId ?? undefined }), replayed: true };
+      }
+      // The device time is judged on FIRST delivery only: a late replay of an accepted event must still be answered.
+      // A time ahead of the server clock is retryable (it becomes valid); one older than a week is a stored verdict.
+      const problem = checkOccurredAt(request.occurredAt, new Date());
+      if (problem !== null) {
+        throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
       }
       const { result, entity } = await handlers.apply(tx, row.id);
       await tx.fieldEvent.update({
@@ -134,15 +168,15 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
     });
   } catch (error) {
     // A refusal marked retryable depends on the ORDER events arrive in (e.g. "job not EN_ROUTE yet"): it must not stick to the id.
-    if (isStoredRefusal(error) && !isReusedIdConflict(error) && !error.retryable) await rememberRefusal(request, error.code);
+    if (isStoredRefusal(error) && !isReusedIdConflict(error) && !error.retryable) await rememberRefusal(request, resultCodeOf(error));
     throw error;
   }
 }
 
-const isReusedIdConflict = (error: AppError): boolean => error.details?.some((detail) => detail.code === "CLIENT_EVENT_ID_REUSED") === true;
+const isReusedIdConflict = (error: AppError): boolean => reusedIdConflicts.has(error);
 
 /** Stores the refusal in its own transaction; a failure here must not hide the original error. */
-async function rememberRefusal(request: FieldEventRequest, code: StoredRefusal): Promise<void> {
+async function rememberRefusal(request: FieldEventRequest, code: string): Promise<void> {
   try {
     await withTenant(request.tenantId, async (tx) => {
       // A row already exists when this refusal is itself a replay (or a concurrent copy stored it): nothing to add.

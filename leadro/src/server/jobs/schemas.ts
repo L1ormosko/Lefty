@@ -72,7 +72,26 @@ export const updateJobSchema = z
   .refine((value) => Object.keys(value).length > 0, "Nothing to change");
 export type UpdateJobInput = z.infer<typeof updateJobSchema>;
 
-export const transitionJobSchema = z.object({ toStatus: z.enum(JOB_STATUSES), reason: reason.optional() }).strict();
+/**
+ * `clientEventId` + `occurredAt` are the offline envelope (§8.7) and exist for the technician's EN_ROUTE move only
+ * (the one status change a device queues without a position check): the service refuses them for any other target.
+ */
+export const transitionJobSchema = z
+  .object({
+    toStatus: z.enum(JOB_STATUSES),
+    reason: reason.optional(),
+    clientEventId: z
+      .string()
+      .uuid()
+      .transform((value) => value.toLowerCase())
+      .optional(),
+    occurredAt: z
+      .string()
+      .datetime({ offset: true })
+      .transform((value) => new Date(value))
+      .optional(),
+  })
+  .strict();
 export type TransitionJobInput = z.infer<typeof transitionJobSchema>;
 
 /** Give the job to ONE employee or ONE team; replaces the current assignment (reassignment). */

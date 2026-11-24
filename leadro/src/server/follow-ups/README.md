@@ -22,6 +22,6 @@ Invariants:
 2. An assignee is an ACTIVE employee with a login who can open the task and its target; giving a task to someone else needs `follow_ups.assign` over
    that employee (outside the scope = "Employee not found").
 3. Every status change goes through the machine, takes the row lock, re-reads after it, and audits (free text is never audited).
-4. Field writes (create, status, complete, cancel) accept `clientEventId` + `occurredAt` and are idempotent through `FieldEvent` (`offline.ts`).
+4. Field writes (create, status, complete, cancel) accept `clientEventId` + `occurredAt` and are idempotent through `FieldEvent` (`offline.ts` adapts them to the shared gate in `src/server/field-events`).
 5. The sweep claims a task with an atomic stamp update before notifying; a task without assignee is never stamped.
 6. No coordinates, no free text in notification params or `FieldEvent.payload`.

@@ -3,7 +3,7 @@ import { enforceInTx, type ResourceRef } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { jobResourceRef } from "@/server/jobs";
-import { runFieldEvent, type FieldEventEntity } from "@/server/location";
+import { runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 
 /**
  * Shared shell of the technician's job field writes (arrive, start work): the caller must be an employee, the job
@@ -18,10 +18,14 @@ export function requireEmployee(actor: Actor): EmployeeActor {
   return { ...actor, employeeId: actor.employeeId };
 }
 
-/** `occurredAt` (device time of an offline event) must not be in the future or ancient; defaults to now. */
-export function eventTime(occurredAt: Date | undefined, now: Date): Date {
+/**
+ * `occurredAt` (device time of an offline event) must not be in the future or ancient; defaults to now. `judgedByGate`: the
+ * write carries a `clientEventId`, so the shared gate judges the RAW time on first delivery only; the value returned here is
+ * clamped to the server clock and is for storage, never for the gate.
+ */
+export function eventTime(occurredAt: Date | undefined, now: Date, judgedByGate = false): Date {
   const at = occurredAt ?? now;
-  if (checkOccurredAt(at, now) !== null) throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
+  if (!judgedByGate && checkOccurredAt(at, now) !== null) throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
   // The tolerance above is only for ACCEPTING a device clock that runs ahead; what is stored is never later than the server clock.
   return at.getTime() > now.getTime() ? now : at;
 }

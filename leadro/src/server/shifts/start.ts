@@ -5,7 +5,8 @@ import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { orgUnitAtInTx } from "@/server/employees";
-import { loadLocationSettings, recordLocationEventInTx, runFieldEvent, withoutCoordinates } from "@/server/location";
+import { runFieldEvent } from "@/server/field-events";
+import { loadLocationSettings, recordLocationEventInTx, withoutCoordinates } from "@/server/location";
 import { assessBoundary, boundaryTime, lockEmployee } from "./boundary";
 import { readShiftInTx } from "./read";
 import type { StartShiftInput } from "./schemas";
@@ -36,7 +37,7 @@ export async function startShift(actor: Actor, ctx: RequestContext, input: Start
   if (!actor.employeeId) throw new ForbiddenError();
   const employeeId = actor.employeeId;
   const now = new Date();
-  const startedAt = boundaryTime(input.occurredAt, now);
+  const startedAt = boundaryTime(input.occurredAt, now, input.clientEventId !== undefined);
 
   const apply = async (tx: TenantTx, fieldEventId: string | undefined): Promise<{ result: StartShiftResult; shiftId: string }> => {
     await enforceInTx(tx, actor, "shifts.create", { employeeId, ownerEmployeeId: employeeId });

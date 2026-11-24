@@ -27,7 +27,7 @@ async function viewJob(tx: TenantTx, tenantId: string, jobId: string): Promise<S
 export async function startWork(actor: Actor, ctx: RequestContext, jobId: string, input: StartWorkInput): Promise<StartWorkResult & { replayed: boolean }> {
   const self: EmployeeActor = requireEmployee(actor);
   const now = new Date();
-  const startedAt = eventTime(input.occurredAt, now);
+  const startedAt = eventTime(input.occurredAt, now, input.clientEventId !== undefined);
 
   const apply = async (tx: TenantTx) => {
     const job = await loadJobForChange(tx, actor.tenantId, jobId); // locks the row
@@ -35,8 +35,8 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     const decision = await enforceInTx(tx, self, "jobs.edit", ref);
     assertWritableFields(decision, ["status"], JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
     if (job.status !== "ARRIVED") {
-      // retryable: the arrival may not have synced yet.
-      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: true });
+      // retryable only while the arrival may still be on its way (the job is EN_ROUTE); otherwise the verdict is stored.
+      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: job.status === "EN_ROUTE" });
     }
     const latest = await tx.arrivalVerification.findFirst({ where: { tenantId: actor.tenantId, jobId, employeeId: self.employeeId }, orderBy: [{ arrivedAt: "desc" }, { id: "desc" }], select: { status: true, arrivedAt: true } });
     if (latest?.status === "MANAGER_REJECTED") {
@@ -59,7 +59,8 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     jobId,
     type: "job.start_work",
     clientEventId: input.clientEventId,
-    occurredAt: startedAt,
+    // The RAW device time goes to the gate (it judges it on first delivery); `startedAt` is clamped, for storage only.
+    occurredAt: input.occurredAt ?? now,
     deviceId: input.deviceId,
     payloadHash: hashFieldEventContent({ type: "job.start_work", jobId, occurredAt: input.occurredAt }),
     apply,

@@ -4,7 +4,8 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { loadLocationSettings, recordLocationEventInTx, runFieldEvent, withoutCoordinates } from "@/server/location";
+import { runFieldEvent } from "@/server/field-events";
+import { loadLocationSettings, recordLocationEventInTx, withoutCoordinates } from "@/server/location";
 import { assessBoundary, boundaryTime, lockEmployee } from "./boundary";
 import { shiftResourceRef, shiftSelect } from "./fields";
 import { readShiftInTx } from "./read";
@@ -54,7 +55,7 @@ async function findShiftToEnd(tx: TenantTx, actor: Actor, shiftId: string | unde
 export async function endShift(actor: Actor, ctx: RequestContext, shiftId: string | undefined, input: EndShiftInput): Promise<EndShiftResult> {
   if (!shiftId && !actor.employeeId) throw new ForbiddenError();
   const now = new Date();
-  const endedAt = boundaryTime(input.occurredAt, now);
+  const endedAt = boundaryTime(input.occurredAt, now, input.clientEventId !== undefined);
 
   const apply = async (tx: TenantTx, fieldEventId: string | undefined): Promise<{ result: EndShiftResult; shiftId: string; employeeId: string }> => {
     await enforceInTx(tx, actor, "shifts.edit");

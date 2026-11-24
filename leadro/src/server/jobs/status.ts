@@ -7,11 +7,13 @@ import {
   transitionProblem,
   type JobStatusValue,
 } from "@/lib/job-lifecycle";
+import { hashFieldEventContent } from "@/lib/location-rules";
 import { VISIT_START_STATUSES } from "@/lib/job-outcome-rules";
 import { auditContextFields, recordAudit, type AuditContextFields } from "@/server/audit";
 import { JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS, assertWritableFields, enforceInTx } from "@/server/authz";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
+import { runFieldEvent } from "@/server/field-events";
 import { deliverAfterCommit } from "@/server/notifications";
 import { recordJobEvent, recordStatusHistory, type TrailActor } from "./events";
 import { loadJobAccessFacts, lockJob, jobResourceRef } from "./job-access";
@@ -80,6 +82,8 @@ export interface StatusChangeOptions {
   automatic?: boolean;
   /** The caller sets a scheduled slot in this same change, so `SCHEDULED` may be entered although none is stored yet. */
   slotWillBeSet?: boolean;
+  /** When the change happened on the device (an offline event); never later than the server clock. Default: now. */
+  occurredAt?: Date;
 }
 
 export interface StatusChangeResult {
@@ -144,7 +148,9 @@ export async function changeJobStatus(
   const releasedEmployeeIds =
     releases && activeAssignments > 0 ? ((await loadJobAccessFacts(tx, tenantId, [job.id], now)).get(job.id)?.assignedEmployeeIds ?? []) : [];
 
-  const data: Prisma.JobUpdateInput = { status: to, statusChangedAt: now, statusReason: reason };
+  // An offline change is stamped with the device time so later events (arrival) are ordered against when it really happened.
+  const changedAt = options.occurredAt && options.occurredAt.getTime() < now.getTime() ? options.occurredAt : now;
+  const data: Prisma.JobUpdateInput = { status: to, statusChangedAt: changedAt, statusReason: reason };
   if (to === "IN_PROGRESS" && job.startedAt === null) data.startedAt = now;
   if (to === "COMPLETED") data.completedAt = now;
   if (to === "CLOSED") data.closedAt = now;
@@ -168,7 +174,7 @@ export async function changeJobStatus(
   }
 
   const trailActor: TrailActor = options.automatic ? null : actor;
-  await recordStatusHistory(tx, tenantId, job.id, { from: job.status, to, actor: trailActor, reason });
+  await recordStatusHistory(tx, tenantId, job.id, { from: job.status, to, actor: trailActor, reason, occurredAt: changedAt });
   await recordJobEvent(tx, tenantId, job.id, { type: "job.status_changed", actor: trailActor, payload: { from: job.status, to } });
   await recordAudit(tx, {
     ...audit,
@@ -193,36 +199,87 @@ export async function changeJobStatus(
  * Cancelling notifies the people the job was assigned to.
  */
 export async function transitionJob(actor: Actor, ctx: RequestContext, jobId: string, input: TransitionJobInput): Promise<Record<string, unknown>> {
+  if (input.clientEventId) return transitionOffline(actor, ctx, jobId, input, input.clientEventId);
   const notificationIds: string[] = [];
-  const result = await withTenant(actor.tenantId, async (tx) => {
-    await enforceInTx(tx, actor, "jobs.edit");
-    // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
-    // concurrent assignment or status change cannot make this check stale (TOCTOU).
-    if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
-    const ref = await jobResourceRef(tx, actor.tenantId, jobId);
-    if (!ref) throw new NotFoundError();
-    const decision = await enforceInTx(tx, actor, "jobs.edit", ref);
-    assertWritableFields(decision, input.reason === undefined ? ["status"] : ["status", "statusReason"], JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
-
-    const job = await loadJobForChange(tx, actor.tenantId, jobId);
-    const rule = JOB_TRANSITIONS.find((candidate) => candidate.from === job.status && candidate.to === input.toStatus);
-    if (!decision.fieldSets.includes("base") && !TECHNICIAN_TARGET_STATUSES.includes(input.toStatus)) {
-      throw new ForbiddenError({ message: `Your access only lets you move a job to: ${TECHNICIAN_TARGET_STATUSES.join(", ")}.` });
-    }
-    if (rule?.permission) await enforceInTx(tx, actor, rule.permission, ref);
-    // Every move that ENDS the assignments (back to the pool, or closing/cancelling the job) takes the job away from its
-    // assignees, so it needs the same authority as unassigning: jobs.assign over the job.
-    const endsAssignments = input.toStatus === "PENDING_ASSIGNMENT" || ASSIGNMENT_ENDING_STATUSES.includes(input.toStatus);
-    if (endsAssignments && (await tx.jobAssignment.count({ where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" } })) > 0) {
-      await enforceInTx(tx, actor, "jobs.assign", ref);
-    }
-
-    const change = await changeJobStatus(tx, actor, auditContextFields(ctx), job, input.toStatus, { reason: input.reason });
-    if (input.toStatus === "CANCELLED") {
-      notificationIds.push(...(await notifyJobEmployees(tx, actor, { eventType: "job.cancelled", job, anchor: "cancelled", employeeIds: change.releasedEmployeeIds, link: false })));
-    }
-    return viewJobAfterWrite(tx, actor, jobId, decision);
-  });
+  const result = await withTenant(actor.tenantId, (tx) => applyTransition(tx, actor, ctx, jobId, input, undefined, notificationIds));
   await deliverAfterCommit(actor.tenantId, notificationIds);
   return result;
+}
+
+/**
+ * The technician's EN_ROUTE move as an offline event (`job.en_route`, §8.7): idempotent per `clientEventId` through the
+ * shared gate, stamped with the device time. A refusal caused by ORDER (the job is not SCHEDULED yet) is retryable and
+ * therefore not remembered. Other targets have no offline form: a device cannot queue a manager's decision.
+ */
+async function transitionOffline(actor: Actor, ctx: RequestContext, jobId: string, input: TransitionJobInput, clientEventId: string): Promise<Record<string, unknown>> {
+  if (input.toStatus !== "EN_ROUTE") {
+    throw new ValidationError({ message: "Only the move to EN_ROUTE can be sent as an offline event.", field: "clientEventId" });
+  }
+  if (!actor.employeeId) throw new ValidationError({ message: "Offline events need an employee record.", field: "clientEventId" });
+  const notificationIds: string[] = [];
+  const outcome = await runFieldEvent<Record<string, unknown>>(
+    {
+      tenantId: actor.tenantId,
+      employeeId: actor.employeeId,
+      actorUserId: actor.userId,
+      type: "job.en_route",
+      clientEventId,
+      occurredAt: input.occurredAt ?? new Date(),
+      jobId,
+      payload: { jobId },
+      payloadHash: hashFieldEventContent({ type: "job.en_route", jobId, occurredAt: input.occurredAt }),
+    },
+    {
+      apply: async (tx) => {
+        const view = await applyTransition(tx, actor, ctx, jobId, input, input.occurredAt, notificationIds);
+        return { result: view, entity: { type: "Job", id: jobId } };
+      },
+      replay: async (tx) => {
+        const ref = await jobResourceRef(tx, actor.tenantId, jobId);
+        if (!ref) throw new NotFoundError();
+        const decision = await enforceInTx(tx, actor, "jobs.edit", ref);
+        return viewJobAfterWrite(tx, actor, jobId, decision);
+      },
+    },
+  );
+  await deliverAfterCommit(actor.tenantId, notificationIds);
+  return { ...outcome.result, replayed: outcome.replayed };
+}
+
+async function applyTransition(
+  tx: TenantTx,
+  actor: Actor,
+  ctx: RequestContext,
+  jobId: string,
+  input: TransitionJobInput,
+  occurredAt: Date | undefined,
+  notificationIds: string[],
+): Promise<Record<string, unknown>> {
+  await enforceInTx(tx, actor, "jobs.edit");
+  // Lock the row BEFORE judging access: the scope attributes (assignees, status) are read after the lock, so a
+  // concurrent assignment or status change cannot make this check stale (TOCTOU).
+  if (!(await lockJob(tx, actor.tenantId, jobId))) throw new NotFoundError();
+  const ref = await jobResourceRef(tx, actor.tenantId, jobId);
+  if (!ref) throw new NotFoundError();
+  const decision = await enforceInTx(tx, actor, "jobs.edit", ref);
+  assertWritableFields(decision, input.reason === undefined ? ["status"] : ["status", "statusReason"], JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
+
+  const job = await loadJobForChange(tx, actor.tenantId, jobId);
+  const rule = JOB_TRANSITIONS.find((candidate) => candidate.from === job.status && candidate.to === input.toStatus);
+  if (!decision.fieldSets.includes("base") && !TECHNICIAN_TARGET_STATUSES.includes(input.toStatus)) {
+    throw new ForbiddenError({ message: `Your access only lets you move a job to: ${TECHNICIAN_TARGET_STATUSES.join(", ")}.` });
+  }
+  if (rule?.permission) await enforceInTx(tx, actor, rule.permission, ref);
+  // Every move that ENDS the assignments (back to the pool, or closing/cancelling the job) takes the job away from its
+  // assignees, so it needs the same authority as unassigning: jobs.assign over the job.
+  const endsAssignments = input.toStatus === "PENDING_ASSIGNMENT" || ASSIGNMENT_ENDING_STATUSES.includes(input.toStatus);
+  if (endsAssignments && (await tx.jobAssignment.count({ where: { tenantId: actor.tenantId, jobId, state: "ACTIVE" } })) > 0) {
+    await enforceInTx(tx, actor, "jobs.assign", ref);
+  }
+
+  const change = await changeJobStatus(tx, actor, auditContextFields(ctx), job, input.toStatus, { reason: input.reason, occurredAt });
+  if (input.toStatus === "CANCELLED") {
+    notificationIds.push(...(await notifyJobEmployees(tx, actor, { eventType: "job.cancelled", job, anchor: "cancelled", employeeIds: change.releasedEmployeeIds, link: false })));
+  }
+  return viewJobAfterWrite(tx, actor, jobId, decision);
 }

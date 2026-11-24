@@ -14,7 +14,7 @@ Invariants:
   reason). An exception, or a position vaguer than `locationMaxAccuracyM`, queues the shift for review (`exceptionReviewStatus PENDING`).
 - Every boundary writes a SHIFT_START / SHIFT_END location event (through `@/server/location`) in the same transaction, and an audit event.
   A shift itself holds no coordinates; audit values never hold them either.
-- Offline: `clientEventId` + `occurredAt` go through `runFieldEvent` (location module): a replay answers with the original shift.
+- Offline: `clientEventId` + `occurredAt` go through `runFieldEvent` (`field-events` module): a replay answers with the original shift.
 - Scope: ORG_UNIT follows the placement SNAPSHOT taken at start (`Shift.orgUnitId`), OWN the technician's own. Out of scope is 404.
 - Nobody reviews their own shift; a review is decided once, with a mandatory note.
 

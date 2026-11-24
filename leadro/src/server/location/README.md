@@ -1,6 +1,6 @@
 # location
 
-Location events (§17, §22.2) and the offline gate for field writes (§8.7, §25.3). Routes `/api/v1/location-events/**`
+Location events (§17, §22.2); offline writes go through the shared gate in `src/server/field-events`. Routes `/api/v1/location-events/**`
 (`docs/API_REFERENCE.md` "Location events"). Pure rules: `src/lib/location-rules.ts`. Design: `DECISIONS.md` "Phase 3 Task 2".
 
 Public API (`index.ts`):
@@ -10,7 +10,7 @@ Public API (`index.ts`):
   INTERNAL: it carries coordinates for arrival (Task 3) and recovery presence (Task 6) to turn into distances / statuses; never return it.
 - `purgeExpiredCoordinates(tenantId)`: retention. Nulls latitude / longitude of events older than `locationRetentionDays` and stamps
   `coordinatesPurgedAt`; rows stay (shifts, arrivals, recovery cases reference them). No scheduler yet; audited as a system event.
-- `runFieldEvent(request, { apply, replay })`: idempotent processing per `(tenant, employee, clientEventId)` through `FieldEvent`.
+- Offline gate: `runFieldEvent` (module `field-events`) gives idempotency per `(tenant, employee, clientEventId)` through `FieldEvent`.
 - `recordLocationEvent` (technician's DEPARTURE / NAVIGATION_OPENED), `listLocationEvents`, `getLocationEvent`, `loadLocationSettings`, schemas.
 
 Invariants:
