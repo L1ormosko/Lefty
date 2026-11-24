@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: end of Milestone 1 (Phase 0 + Phase 1). Full report: `MILESTONE-1.md`.
+Last updated: end of the Phase 3 backend (Milestone 2+3). Reports: `MILESTONE-1.md`, `MILESTONE-2-3.md`.
 
 ## Done
 
@@ -17,11 +17,17 @@ Last updated: end of Milestone 1 (Phase 0 + Phase 1). Full report: `MILESTONE-1.
 - Tests: 60 files, 624 tests passing against the real database; typecheck, lint, i18n check and
   production build pass (numbers in `MILESTONE-1.md`).
 
+## Phase 2 + 3 backend (done, no UI)
+
+- 14 more server modules (customers, leads, jobs, dispatch, qualifications, shifts, location, arrival, field-events, field-execution, field-sync, job-outcomes, recovery, follow-ups), 66 models, 9 migrations, 162 route files.
+- Tests: 132 files, 1788 passing; typecheck, lint, i18n check, build and 9 e2e specs pass (`MILESTONE-2-3.md`).
+- **Deferred**: every Phase 2/3 screen and the field app; providers (storage, geocoding, notification channels); a scheduler/worker; unauthenticated lead intake; a single end-to-end chain test.
+
 ## Not done / next
 
 - **No notifier/email provider**: invitations and password resets cannot reach a real user.
 - **No tenant provisioning** (seed only; `GET/PATCH /tenants/current`) and **no audit-log API/UI**.
-- Phase 2: React Native field app, customers, leads. Phase 3: jobs, dispatch, field operations.
+- UI for Phase 2/3 and the React Native field app (the `/api/v1` and field-sync contracts are ready).
 - **Phase 4 (finance, compensation) is blocked** on an approved compensation spec (spec 28.4).
 - Managed identity provider to replace local credentials; legal review items (spec 22.3).
 - Phase 8 hardening: REVOKE on `Tenant`/`Permission`, DDL owner vs runtime role, shared rate-limit
