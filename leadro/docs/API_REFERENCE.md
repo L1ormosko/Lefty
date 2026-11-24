@@ -1281,7 +1281,7 @@ ORG_UNIT scope; a customer without one is tenant-level.
 Data scope: `ORG_UNIT` / `LEGAL_ENTITY` follow `orgUnitId`; `ASSIGNED` means a lead or job of the customer is
 assigned to the caller (directly, or through a team assignment to a team the caller belongs to); `OWN` matches
 nothing. A grant qualified by a record set covers only customers of the set: `job_related` (has a job),
-`lead_related` (has a lead). Outside the scope a customer is `404`, never `403`.
+`lead_related` (has a lead or a recovery case). Outside the scope a customer is `404`, never `403`.
 
 ### GET /api/v1/customers
 
@@ -2271,7 +2271,7 @@ priorityScore, assignedToId, assignedAt, ruleId, ruleVersion, recommendation, ou
 presenceReason, presenceAgeMinutes, initialValueMinor, estimatedValueMinor, currency, recoveredAt, recoveredAmountMinor, collectedAmountMinor,
 recoveredJobId, recoveredLeadId, recoveredById, attemptCount, lastAttemptAt, closedAt, closeReason, createdAt, updatedAt`, derived `nextStatuses` and
 `revenue { currency, confirmed (null until recovered), estimated }`. **Presence is a status only**: `AT_LOCATION | LEFT_LOCATION | UNKNOWN` plus
-accuracy, age and (when UNKNOWN) a reason `no_location | stale_location | inaccurate_location | no_coordinates`. It is derived from the technician's latest
+accuracy, age and (when UNKNOWN) a reason `no_location | stale_location | inaccurate_location | no_coordinates | refresh_window_closed`. It is derived from the technician's latest
 fresh and accurate location event and is an estimate, never proof; coordinates, the evidence event id and distances are never returned.
 
 **Case statuses** (§9.5): `NEW -> ASSIGNED -> CONTACTING -> CUSTOMER_REACHED -> FOLLOW_UP_REQUIRED -> RECOVERED -> CLOSED`, with `NOT_RECOVERED` (reopenable to
@@ -2345,7 +2345,7 @@ fresh and accurate location event and is an estimate, never proof; coordinates, 
 
 ### POST /api/v1/lead-recovery/cases/{id}/refresh-presence
 
-- **Permission**: `recovery.edit`. **Purpose**: re-evaluate presence now (status snapshot)
+- **Permission**: `recovery.edit`. **Purpose**: re-evaluate presence now (status snapshot). Allowed only within `presenceMaxAgeMinutes` after the outcome and only from the technician's location events recorded for the case job; otherwise the snapshot is `UNKNOWN` with reason `refresh_window_closed` (or `no_location`)
 
 ### GET /api/v1/lead-recovery/summary
 

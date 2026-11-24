@@ -1,5 +1,6 @@
 import { isHighImpact, isInCooldown, matchConditions, validateRuleDefinition, type RuleDefinition } from "@/lib/recovery-rules";
-import { canInTx, enforceInTx } from "@/server/authz";
+import { enforceInTx } from "@/server/authz";
+import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 import { jobResourceRef } from "@/server/jobs";
 import { NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant } from "@/server/db";
@@ -43,8 +44,7 @@ export async function dryRunRule(actor: Actor, input: DryRunInput): Promise<Reco
 
     // The visit's quote is outcome money: Lead Ops see it only with the outcome financial set over this job (the outcomes ruling).
     const jobRef = await jobResourceRef(tx, actor.tenantId, context.jobId);
-    const outcomeView = jobRef ? await canInTx(tx, actor, "job_outcomes.view", jobRef) : null;
-    const mayReadMoney = Boolean(outcomeView?.allowed && outcomeView.fieldSets.includes("financial"));
+    const mayReadMoney = jobRef ? await holdsOutcomeFinancialSet(tx, actor, jobRef) : false;
     const now = new Date();
     const presence = await evaluatePresence(tx, actor.tenantId, { technicianId: context.technicianId, jobId: context.jobId, now });
     const presenceUsed = input.presence ?? presence.status;

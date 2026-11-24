@@ -158,6 +158,27 @@ export const canTransitionJob = (from: JobStatusValue, to: JobStatusValue, disab
 export const allowedNextStatuses = (from: JobStatusValue, disabled: ReadonlySet<string> = new Set()): JobStatusValue[] =>
   JOB_TRANSITIONS.filter((rule) => rule.from === from && findTransition(rule.from, rule.to, disabled)).map((rule) => rule.to);
 
+/**
+ * Can a job in `from` still become `to` by following allowed edges (one or more steps)? Derived from `JOB_TRANSITIONS`, so
+ * "may the missing earlier event still arrive?" (the retryable flag of an out-of-order offline event) never drifts from the
+ * machine.
+ */
+export function canStillReach(from: JobStatusValue, to: JobStatusValue, disabled: ReadonlySet<string> = new Set()): boolean {
+  const seen = new Set<JobStatusValue>([from]);
+  const queue: JobStatusValue[] = [from];
+  while (queue.length > 0) {
+    const current = queue.shift() as JobStatusValue;
+    for (const next of allowedNextStatuses(current, disabled)) {
+      if (next === to) return true;
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return false;
+}
+
 /** Targets that need a reason on the history row (something went wrong, or work stops). */
 export const REASON_REQUIRED_STATUSES: readonly JobStatusValue[] = [
   "CANCELLED",

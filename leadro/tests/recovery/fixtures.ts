@@ -114,7 +114,7 @@ export async function makeActiveRule(w: RecoveryWorld, fields: Record<string, un
 export async function storeLocation(
   w: RecoveryWorld,
   employeeId: string,
-  options: { latitude: number; longitude: number; accuracyM?: number; ageMinutes?: number },
+  options: { latitude: number; longitude: number; accuracyM?: number; ageMinutes?: number; jobId?: string },
 ): Promise<string> {
   const when = new Date(Date.now() - (options.ageMinutes ?? 1) * 60_000);
   return withTenant(w.tenantId, async (tx) => {
@@ -123,6 +123,7 @@ export async function storeLocation(
         tenantId: w.tenantId,
         employeeId,
         kind: "VERIFICATION",
+        jobId: options.jobId ?? null,
         source: "DEVICE_GPS",
         latitude: options.latitude,
         longitude: options.longitude,

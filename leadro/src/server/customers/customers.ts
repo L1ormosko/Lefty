@@ -143,10 +143,9 @@ export async function createCustomer(
     assertWritableFields(decision, definedKeys(fields), CUSTOMER_FIELD_MAP);
 
     const phoneE164 = fields.phone ? normalizePhoneE164(fields.phone) : null;
-    // Numbers come from a SEPARATE short transaction, taken only after every check passed: holding the counter
-    // row lock for the whole create (addresses, duplicate detection) would serialise all customer creation of
-    // the tenant. A failed create leaves a gap in the numbers, never a repeat.
-    const number = await withTenant(actor.tenantId, (numberTx) => nextNumber(numberTx, actor.tenantId, "customer"));
+    // The number is taken IN this transaction, after every check passed (a nested `withTenant` would hold a
+    // second pooled connection per request and starve the pool under bursts).
+    const number = await nextNumber(tx, actor.tenantId, "customer");
     const customer = await tx.customer.create({
       data: {
         tenantId: actor.tenantId,

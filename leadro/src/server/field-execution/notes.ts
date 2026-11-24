@@ -1,9 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
+import { JOB_FIELD_NOTE_FIELD_MAP, projectFields } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { recordJobEvent } from "@/server/jobs";
-import { authorizeFieldRead, authorizeFieldWrite, holdsFinancialSet, runJobFieldWrite } from "./access";
+import { assertWorkedByCaller, authorizeFieldRead, authorizeFieldWrite, runJobFieldWrite } from "./access";
+import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 import type { ListFieldRecordsQuery, RecordFieldNoteInput } from "./schemas";
 
 /**
@@ -30,8 +32,7 @@ type NoteRow = Prisma.JobFieldNoteGetPayload<{ select: typeof NOTE_COLUMNS }>;
 
 /** The amount and currency show only to callers who hold the financial set (§22.2 least privilege). */
 function viewNote(row: NoteRow, mayHandleMoney: boolean): Record<string, unknown> {
-  const { amountMinor, currency, ...rest } = row;
-  return mayHandleMoney ? { ...rest, amountMinor, currency } : rest;
+  return projectFields(row, { allowed: true, fieldSets: mayHandleMoney ? ["base", "financial"] : ["base"] }, JOB_FIELD_NOTE_FIELD_MAP);
 }
 
 export interface RecordedFieldNote {
@@ -44,7 +45,7 @@ async function readNote(tx: TenantTx, actor: Actor, jobId: string, noteId: strin
   const ref = await authorizeFieldRead(tx, actor, jobId);
   const row = await tx.jobFieldNote.findFirst({ where: { id: noteId, jobId, tenantId: actor.tenantId }, select: NOTE_COLUMNS });
   if (!row) throw new NotFoundError();
-  return viewNote(row, await holdsFinancialSet(tx, actor, ref));
+  return viewNote(row, await holdsOutcomeFinancialSet(tx, actor, ref));
 }
 
 /** `POST /jobs/{id}/notes`: records a note of the visit (offline-safe through `clientEventId`). */
@@ -56,7 +57,8 @@ export async function recordFieldNote(actor: Actor, ctx: RequestContext, jobId: 
     content: { ...input, clientEventId: undefined, deviceId: undefined, occurredAt: undefined },
     payload: { kind: input.kind },
     apply: async (tx, occurredAt) => {
-      const { job, currency, mayHandleMoney } = await authorizeFieldWrite(tx, actor, jobId);
+      const { job, currency, mayHandleMoney, ref } = await authorizeFieldWrite(tx, actor, jobId);
+      if (input.kind === "CUSTOMER_APPROVAL") assertWorkedByCaller(ref, actor, "the customer's approval");
       if (input.amountMinor !== undefined && !mayHandleMoney) {
         throw new ForbiddenError({ message: "Your access does not include amounts.", field: "amountMinor" });
       }
@@ -98,7 +100,7 @@ export async function recordFieldNote(actor: Actor, ctx: RequestContext, jobId: 
 export async function listFieldNotes(actor: Actor, jobId: string, query: ListFieldRecordsQuery): Promise<Page<Record<string, unknown>>> {
   return withTenant(actor.tenantId, async (tx) => {
     const ref = await authorizeFieldRead(tx, actor, jobId);
-    const mayHandleMoney = await holdsFinancialSet(tx, actor, ref);
+    const mayHandleMoney = await holdsOutcomeFinancialSet(tx, actor, ref);
     const rows = await tx.jobFieldNote.findMany({
       where: { tenantId: actor.tenantId, jobId },
       select: NOTE_COLUMNS,

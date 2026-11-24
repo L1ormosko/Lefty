@@ -197,8 +197,8 @@ async function insertJob(
       priority: job.priority,
       title: job.title,
       estimatedDurationMinutes,
-      quotedAmountMinor: draft.quotedAmountMinor,
-      currency: draft.currency,
+      // Money stays out of the trail: it records WHICH money fields were set, never the amount (same rule as outcomes).
+      moneyFields: [...(draft.quotedAmountMinor !== undefined && draft.quotedAmountMinor !== null ? ["quotedAmountMinor"] : []), ...(draft.currency ? ["currency"] : [])],
     }),
   });
 
@@ -239,10 +239,10 @@ export async function createJob(actor: Actor, ctx: RequestContext, input: Create
     }
     assertWritableFields(decision, sentColumns(input), JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
 
-    // The number comes from a SEPARATE short transaction, taken after every check passed: holding the
-    // counter row lock for the whole create would serialise all job creation of the tenant (same
-    // reasoning as customers). A failed create leaves a gap in the numbers, never a repeat.
-    const number = await withTenant(actor.tenantId, (numberTx) => nextNumber(numberTx, actor.tenantId, "job"));
+    // The number is taken IN this transaction, after every check passed (a nested `withTenant` would need a
+    // second pooled connection per request and starve the pool under bursts). A rolled-back create rolls
+    // the counter back with it.
+    const number = await nextNumber(tx, actor.tenantId, "job");
     const inserted = await insertJob(tx, actor.tenantId, actor, auditContextFields(ctx), number, draft, context);
     return viewJobAfterWrite(tx, actor, inserted.id, decision, { warnings: inserted.warnings });
   });

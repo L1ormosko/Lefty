@@ -13,12 +13,13 @@ import {
   type FieldIssue,
   type RequestContext,
 } from "@/server/core";
+import { teamMembers } from "@/server/customers";
 import { withTenant, type TenantTx } from "@/server/db";
 import { deliverAfterCommit } from "@/server/notifications";
 import { evaluateCandidates, isEligible, orgUnitAncestry, requirementsFromInputs } from "@/server/qualifications";
 import { getJobEligibilityInputs } from "./eligibility-inputs";
 import { recordJobEvent } from "./events";
-import { jobResourceRef, loadJobAccessFacts, lockJob, teamMembers } from "./job-access";
+import { jobResourceRef, loadJobAccessFacts, lockJob } from "./job-access";
 import { notifyJobEmployees } from "./notify";
 import { viewJobAfterWrite } from "./read";
 import type { AssignJobInput, UnassignJobInput } from "./schemas";

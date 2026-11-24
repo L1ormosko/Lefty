@@ -9,6 +9,9 @@ import { latestValidLocation, loadLocationSettings } from "@/server/location";
  * (`presenceMaxAgeMinutes`) AND accurate (`locationMaxAccuracyM`) AND the site has coordinates; otherwise UNKNOWN with a
  * machine reason. Coordinates are read here and dropped here: only the status, the accuracy and the event id (the evidence
  * link, not exposed by the API) leave this function.
+ *
+ * `onlyJobEvents` (manual refresh): only location events recorded for the case's job count; together with the refresh window
+ * (cases.ts) this stops a manager from polling a technician's whereabouts for as long as the case stays open.
  */
 export interface PresenceSnapshot {
   status: PresenceValue;
@@ -21,7 +24,10 @@ export interface PresenceSnapshot {
 
 const UNKNOWN = (reason: PresenceUnknownReason, evaluatedAt: Date): PresenceSnapshot => ({ status: "UNKNOWN", reason, locationEventId: null, accuracyM: null, distanceM: null, evaluatedAt });
 
-export async function evaluatePresence(tx: TenantTx, tenantId: string, input: { technicianId: string | null; jobId: string; now?: Date }): Promise<PresenceSnapshot> {
+/** The snapshot of a refresh that came too late: nothing is read from the technician's location. */
+export const refreshWindowClosed = (evaluatedAt: Date): PresenceSnapshot => UNKNOWN("refresh_window_closed", evaluatedAt);
+
+export async function evaluatePresence(tx: TenantTx, tenantId: string, input: { technicianId: string | null; jobId: string; now?: Date; onlyJobEvents?: boolean }): Promise<PresenceSnapshot> {
   const now = input.now ?? new Date();
   if (!input.technicianId) return UNKNOWN("no_location", now);
   const settings = await loadLocationSettings(tx, tenantId);
@@ -31,11 +37,12 @@ export async function evaluatePresence(tx: TenantTx, tenantId: string, input: { 
     maxAgeMinutes: settings.presenceMaxAgeMinutes,
     maxAccuracyM: settings.locationMaxAccuracyM,
     now,
+    ...(input.onlyJobEvents ? { jobId: input.jobId } : {}),
   });
   if (!valid) {
     // Say WHY it is unknown (no data at all, too old, too imprecise); only metadata is read.
     const latest = await tx.locationEvent.findFirst({
-      where: { tenantId, employeeId: input.technicianId },
+      where: { tenantId, employeeId: input.technicianId, ...(input.onlyJobEvents ? { jobId: input.jobId } : {}) },
       orderBy: [{ serverTime: "desc" }, { id: "desc" }],
       select: { accuracyM: true, serverTime: true },
     });

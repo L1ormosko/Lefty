@@ -5,6 +5,9 @@ export { correctJobOutcome, getOutcomeCorrections } from "./correct";
 export type { OutcomeCorrectionView } from "./correct";
 export { getJobOutcome, listJobOutcomes } from "./read";
 
+// Who may see outcome money (the one rule every module asks)
+export { decisionHoldsFinancial, holdsOutcomeFinancialSet } from "./financial";
+
 // Lost reasons (§9.2)
 export { listLostReasons, getLostReason, createLostReason, updateLostReason } from "./lost-reasons";
 

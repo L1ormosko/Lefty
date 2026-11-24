@@ -91,16 +91,7 @@ export async function assignedEmployeeIdsByCustomer(
     select: { employeeId: true, teamOrgUnitId: true, job: { select: { customerId: true } } },
   });
   const teamIds = [...new Set(jobRows.map((row) => row.teamOrgUnitId).filter((team): team is string => team !== null))];
-  const membersByTeam = new Map<string, string[]>();
-  if (teamIds.length > 0) {
-    const placements = await tx.organizationalAssignment.findMany({
-      where: { tenantId, orgUnitId: { in: teamIds }, orgUnit: { active: true }, ...activePlacementWhere(now) },
-      select: { orgUnitId: true, employeeId: true },
-    });
-    for (const placement of placements) {
-      membersByTeam.set(placement.orgUnitId, [...(membersByTeam.get(placement.orgUnitId) ?? []), placement.employeeId]);
-    }
-  }
+  const membersByTeam = await teamMembers(tx, tenantId, teamIds, now);
   for (const row of jobRows) {
     const members = assigned.get(row.job.customerId);
     if (!members) continue;
@@ -109,4 +100,18 @@ export async function assignedEmployeeIdsByCustomer(
   }
 
   return new Map([...assigned].map(([customerId, employeeIds]) => [customerId, [...employeeIds]]));
+}
+
+/** Current members of each team org unit (active placement now, unit not archived). Teams that are archived or empty map to nothing. The one copy: jobs and customers both expand team assignments through it. */
+export async function teamMembers(tx: TenantTx, tenantId: string, teamOrgUnitIds: readonly string[], now: Date = new Date()): Promise<Map<string, string[]>> {
+  const membersByTeam = new Map<string, string[]>();
+  if (teamOrgUnitIds.length === 0) return membersByTeam;
+  const placements = await tx.organizationalAssignment.findMany({
+    where: { tenantId, orgUnitId: { in: [...teamOrgUnitIds] }, orgUnit: { active: true }, ...activePlacementWhere(now) },
+    select: { orgUnitId: true, employeeId: true },
+  });
+  for (const placement of placements) {
+    membersByTeam.set(placement.orgUnitId, [...(membersByTeam.get(placement.orgUnitId) ?? []), placement.employeeId]);
+  }
+  return membersByTeam;
 }

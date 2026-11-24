@@ -1,6 +1,6 @@
 import type { TenantTx } from "@/server/db";
 import { notifyInTx, registerNotificationTargetResolver, resolveRecipientsByPermission } from "@/server/notifications";
-import { caseResourceRef, canViewCase } from "./access";
+import { caseResourceRefById, canViewCase } from "./access";
 
 /**
  * Recovery notifications (§14.2). The audience of "a new case needs an owner" is Lead Operations over the case's service area:
@@ -11,10 +11,7 @@ import { caseResourceRef, canViewCase } from "./access";
 
 /** Read-time access for notifications that link to a case: the recipient's CURRENT `recovery.view` over the case decides. */
 export function registerRecoveryNotificationTarget(): void {
-  registerNotificationTargetResolver("recovery_case", "recovery.view", async (tx, subject, caseId) => {
-    const row = await tx.leadRecoveryCase.findFirst({ where: { id: caseId, tenantId: subject.tenantId }, select: { orgUnitId: true, assignedToId: true } });
-    return row ? caseResourceRef(row) : null;
-  });
+  registerNotificationTargetResolver("recovery_case", "recovery.view", (tx, subject, caseId) => caseResourceRefById(tx, subject.tenantId, caseId));
 }
 registerRecoveryNotificationTarget();
 
@@ -48,15 +45,15 @@ export async function notifyCaseAssigned(
   const userId = employee?.userId;
   if (!userId || userId === input.excludeUserId) return [];
   if (!(await canViewCase(tx, { tenantId, userId }, input.caseId))) return [];
-  const row = await tx.leadRecoveryCase.findFirst({ where: { id: input.caseId, tenantId }, select: { orgUnitId: true, assignedToId: true } });
-  if (!row) return [];
+  const resource = await caseResourceRefById(tx, tenantId, input.caseId);
+  if (!resource) return [];
   const result = await notifyInTx(tx, {
     tenantId,
     eventType: "recovery.case_assigned",
     eventId: `${input.caseId}:${input.anchor}`,
     recipientUserIds: [userId],
     params: { caseNumber: input.caseNumber },
-    target: { targetType: "recovery_case", targetId: input.caseId, permission: "recovery.view", resource: caseResourceRef(row) },
+    target: { targetType: "recovery_case", targetId: input.caseId, permission: "recovery.view", resource },
   });
   return result.createdNotificationIds;
 }

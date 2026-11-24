@@ -220,6 +220,15 @@ export const JOB_OUTCOME_FIELD_MAP: FieldMap = buildFieldMap(
 );
 
 /**
+ * Job field notes (`JobFieldNote`): the text, kind and approval are `base`; the estimate and its currency are the
+ * `financial` set of `job_outcomes` (same rule as visit outcome money).
+ */
+export const JOB_FIELD_NOTE_FIELD_MAP: FieldMap = buildFieldMap(
+  ["id", "jobId", "employeeId", "kind", "body", "customerApproved", "occurredAt", "recordedAt", "clientEventId"],
+  { financial: ["amountMinor", "currency"] },
+);
+
+/**
  * Field map for records that have no sensitive field sets (users, org units, roles, ...): every
  * listed field is `base`. Unlisted fields stay hidden, so a new column must be added here on purpose.
  */

@@ -8,6 +8,8 @@ export interface LatestValidLocationOptions {
   /** Positions with a larger accuracy radius are not evidence (spec 17.2). Tenant setting `locationMaxAccuracyM`. */
   maxAccuracyM: number;
   now?: Date;
+  /** Only events recorded for this job count (a manager's refresh must not poll a technician's whereabouts in general). */
+  jobId?: string;
 }
 
 /** A position the server may reason about. INTERNAL: carries coordinates, so it must never be returned by an API. */
@@ -39,6 +41,7 @@ export async function latestValidLocation(tx: TenantTx, employeeId: string, opti
     where: {
       tenantId: options.tenantId,
       employeeId,
+      ...(options.jobId ? { jobId: options.jobId } : {}),
       latitude: { not: null },
       longitude: { not: null },
       accuracyM: { lte: options.maxAccuracyM },

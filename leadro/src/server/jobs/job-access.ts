@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { activePlacementWhere, type ResourceRef, type RowScopeAttributes } from "@/server/authz";
+import { buildScopeWhere, resolveScope, type ResourceRef, type RowScopeAttributes } from "@/server/authz";
+import { jobScopeColumns, teamMembers } from "@/server/customers";
 import type { TenantTx } from "@/server/db";
 import type { ActiveAssignmentView, JobRow } from "./fields";
 
@@ -10,7 +11,8 @@ import type { ActiveAssignmentView, JobRow } from "./fields";
  *    team of an ACTIVE team assignment (team expansion);
  *  - OWN matches nothing. `recovery_related` is expressed here (the reference carries it when the job has a recovery
  *    case); `customer_history` is not: it only counts where a caller passes the set explicitly (the customer history view).
- *    List queries do not apply `recovery_related`: Lead Ops reaches an original job through the case that links to it.
+ *    The jobs module's own list does not apply `recovery_related` (Lead Ops reaches an original job through the case);
+ *    other modules that list jobs under `jobs.view` use `resolveJobListAccess`, so a list agrees with a single-record check.
  *
  * The query-side form of ASSIGNED is `jobAssignedToWhere` in `@/server/customers`; the functions here
  * are the per-record form and a test pins that both agree.
@@ -74,20 +76,6 @@ export async function loadJobAccessFacts(
   return facts;
 }
 
-/** Current members of each team org unit (active placement now, unit not archived). Teams that are archived or empty map to nothing. */
-export async function teamMembers(tx: TenantTx, tenantId: string, teamOrgUnitIds: readonly string[], now: Date = new Date()): Promise<Map<string, string[]>> {
-  const membersByTeam = new Map<string, string[]>();
-  if (teamOrgUnitIds.length === 0) return membersByTeam;
-  const placements = await tx.organizationalAssignment.findMany({
-    where: { tenantId, orgUnitId: { in: [...teamOrgUnitIds] }, orgUnit: { active: true }, ...activePlacementWhere(now) },
-    select: { orgUnitId: true, employeeId: true },
-  });
-  for (const placement of placements) {
-    membersByTeam.set(placement.orgUnitId, [...(membersByTeam.get(placement.orgUnitId) ?? []), placement.employeeId]);
-  }
-  return membersByTeam;
-}
-
 /** `assignedEmployeeIds` per job (the `ResourceRef` form of ASSIGNED). Jobs with nobody assigned map to `[]`. */
 export async function assignedEmployeeIdsByJob(tx: TenantTx, tenantId: string, jobIds: readonly string[], now: Date = new Date()): Promise<Map<string, string[]>> {
   const facts = await loadJobAccessFacts(tx, tenantId, jobIds, now);
@@ -133,4 +121,25 @@ export async function jobResourceRef(tx: TenantTx, tenantId: string, jobId: stri
 export async function lockJob(tx: TenantTx, tenantId: string, jobId: string): Promise<boolean> {
   const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "Job" WHERE id = ${jobId} AND "tenantId" = ${tenantId} FOR UPDATE`;
   return rows.length > 0;
+}
+
+/**
+ * The caller's coverage of jobs for `permission` as ONE where-fragment on `Job`, for other modules that list jobs
+ * (follow-ups). It is the union of the plain grants' scope and, for the `recovery_related` set, the scope of plain +
+ * that set's grants restricted to jobs that have a recovery case: exactly what `toJobResourceRef` makes a per-record
+ * check see, so a list and a single-record check never disagree.
+ */
+export async function resolveJobListAccess(
+  tx: TenantTx,
+  actor: { tenantId: string; userId: string },
+  permission: string,
+  now: Date = new Date(),
+): Promise<{ where: Prisma.JobWhereInput }> {
+  const base = await resolveScope(tx, actor, permission, now);
+  const branches: Prisma.JobWhereInput[] = [buildScopeWhere(base, jobScopeColumns, now)];
+  const related = await resolveScope(tx, actor, permission, now, { satisfiedSets: ["recovery_related"] });
+  if (related.parts.length > base.parts.length) {
+    branches.push({ AND: [buildScopeWhere(related, jobScopeColumns, now), { recoveryCases: { some: {} } }] });
+  }
+  return { where: branches.length === 1 ? branches[0] : { OR: branches } };
 }

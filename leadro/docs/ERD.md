@@ -590,7 +590,7 @@ erDiagram
 | `RecoveryAttempt` | one communication attempt (channel, outcome, duration, notes, amount offered by the employee, never by the system). | recovery |
 | `FollowUpTask` | generic task; `targetType` selects exactly ONE of `leadId` / `customerId` / `jobId` / `recoveryCaseId` (CHECK + composite FKs). `dedupeKey` unique per tenant; `dueSoonNotifiedAt` / `overdueNotifiedAt` make the sweep send each notification once. | follow-ups |
 
-Columns added to Phase 2 tables: `Job.currentVisitNumber` (default 1: the `visitNumber` outcomes and completions of this job use; the jobs lifecycle increments it in the same transaction when a job whose current visit already has a `JobOutcome` returns to SCHEDULED after REQUIRES_RETURN_VISIT / RESCHEDULED / CUSTOMER_UNAVAILABLE), `Job.enRouteAt`, `Job.arrivedAt` (milestones; `startedAt` is work start); `Job` unique `(id, customerId, tenantId)`
+Columns added to Phase 2 tables: `Job.currentVisitNumber` (default 1: the `visitNumber` outcomes and completions of this job use; the jobs lifecycle increments it in the same transaction when a job whose current visit already has a `JobOutcome` moves to a visit-start status (`VISIT_START_STATUSES`, the technician is on the way again) from a status that is not itself one, and not when a reviewer sends AWAITING_REVIEW work back to IN_PROGRESS. **Supersedes the earlier "returns to SCHEDULED after ..." wording.**), `Job.enRouteAt`, `Job.arrivedAt` (milestones; `startedAt` is work start); `Job` unique `(id, customerId, tenantId)`
 (lets a recovery case tie job and customer together); `CustomerAddress.geofenceRadiusM` (per-site override); `OperationsSettings`:
 `arrivalGeofenceRadiusM` (150), `locationMaxAccuracyM` (100), `presenceMaxAgeMinutes` (30), `locationRetentionDays` (90),
 `followUpDueSoonMinutes` (60). `JobType.completionFormSchema` (Phase 2 placeholder) is superseded by `JobCompletionFormDefinition` and must not be read.
@@ -648,11 +648,12 @@ The Phase 2 rules apply (ids only, resolve through tenant-scoped queries and re-
 - `JobCompletion.values`: the ONE documented exception to "ids only": the technician's answers keyed by field key (validated against the form version).
   Amounts and the payment record live in `JobOutcome` columns, materials in `JobMaterialUsage`, photos in `JobAttachment`; `values` repeats none of them.
 - `RecoveryRule.conditions`: an object of ids / enum values / numbers, e.g. `{ "outcomes": ["NOT_SOLD"], "lostReasonIds": ["<id>"], "presence": ["AT_LOCATION"],
-  "minValueMinor": 100000, "jobTypeIds": ["<id>"] }`. `RecoveryRule.actions`: an array of `{ "type": "create_case" | "notify" | "create_follow_up" | "recommend", ... }`
+  "minValueMinor": 100000, "jobTypeIds": ["<id>"] }`. `RecoveryRule.actions`: an array of `{ "type": "create_case" | "set_priority" | "notify" | "create_follow_up" | "recommend", ... }` (`set_priority` was added after this document was written; see DECISIONS "Action vocabulary")
   with codes only (`audience`, `priority`, `code`); there is no discount action and the engine must refuse one.
 
 ## Documented rules not expressible in the database
 
+- Follow-up history is the AUDIT trail only (`follow_up.create | update | assign | unassign | status_change`, with ids and field names, never free text): there is no `FollowUpStatusHistory` table, unlike leads and recovery cases.
 - A job is not allowed to close without an outcome (Task 5, service check; the schema offers `JobOutcome (job, visitNumber)`).
 - The latest non-rejected `ArrivalVerification` of a job is its arrival; `NAVIGATION_OPENED` events never create one.
 - `LocationEvent` rows are immutable by convention (a correction is a new event); the only update is the retention purge of coordinates (never deleted).

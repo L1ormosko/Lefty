@@ -1,14 +1,15 @@
 import type { Prisma, RecoveryStatus } from "@prisma/client";
-import { canTransitionRecovery, isClosedRecoveryStatus, isOpenRecoveryStatus, isRecoveryStatus, type RecoveryStatusValue } from "@/lib/recovery-lifecycle";
+import { canTransitionRecovery, isClosedRecoveryStatus, isOpenRecoveryStatus, isRecoveryStatus, RECOVERY_STATUSES, type RecoveryStatusValue } from "@/lib/recovery-lifecycle";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { canInTx, enforceInTx, projectFields, withinScope } from "@/server/authz";
 import { InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { deliverAfterCommit } from "@/server/notifications";
+import { loadLocationSettings } from "@/server/location";
 import { assertCaseAccess, caseResourceRef, loadCaseRow, resolveCaseListAccess } from "./access";
 import { ATTEMPT_FIELD_MAP, CASE_FIELD_MAP, attemptSelect, caseRowSelect, caseView, type CaseRow } from "./fields";
 import { notifyCaseAssigned } from "./notify";
-import { evaluatePresence } from "./presence";
+import { evaluatePresence, refreshWindowClosed } from "./presence";
 import type { AssignCaseInput, ChangeCaseStatusInput, ListCasesQuery, RecordAttemptInput, RecoverCaseInput, SummaryQuery, UpdateCaseInput } from "./schemas";
 
 /**
@@ -79,6 +80,9 @@ export async function getCase(actor: Actor, caseId: string): Promise<Record<stri
   });
 }
 
+/** Statuses of cases that are no longer open work (derived from the status machine, never listed by hand). */
+const FINISHED_STATUSES = RECOVERY_STATUSES.filter((status) => !isOpenRecoveryStatus(status));
+
 /** Cases in the caller's scope, newest outcome first. */
 export async function listCases(actor: Actor, query: ListCasesQuery): Promise<Page<Record<string, unknown>>> {
   return withTenant(actor.tenantId, async (tx) => {
@@ -86,11 +90,10 @@ export async function listCases(actor: Actor, query: ListCasesQuery): Promise<Pa
     const now = new Date();
     const access = await resolveCaseListAccess(tx, actor, "recovery.view", now);
     const assignee = query.assignedToId === "me" ? (actor.employeeId ?? "none") : query.assignedToId;
-    const closedStatuses: RecoveryStatus[] = ["RECOVERED", "NOT_RECOVERED", "CLOSED"];
     const filters: Prisma.LeadRecoveryCaseWhereInput[] = [
       ...(query.status ? [{ status: query.status }] : []),
-      ...(query.open === "true" ? [{ status: { notIn: closedStatuses } }] : []),
-      ...(query.open === "false" ? [{ status: { in: closedStatuses } }] : []),
+      ...(query.open === "true" ? [{ status: { notIn: FINISHED_STATUSES } }] : []),
+      ...(query.open === "false" ? [{ status: { in: FINISHED_STATUSES } }] : []),
       ...(query.priority ? [{ priority: query.priority }] : []),
       ...(assignee === "none" && query.assignedToId === "none" ? [{ assignedToId: null }] : assignee ? [{ assignedToId: assignee }] : []),
       ...(query.customerId ? [{ customerId: query.customerId }] : []),
@@ -310,7 +313,14 @@ export async function refreshPresence(actor: Actor, ctx: RequestContext, caseId:
     await assertCaseAccess(tx, actor, caseId, "recovery.edit");
     await lockCase(tx, actor.tenantId, caseId);
     const current = await reload(tx, actor.tenantId, caseId);
-    const presence = await evaluatePresence(tx, actor.tenantId, { technicianId: current.technicianId, jobId: current.jobId });
+    // A refresh is allowed only within the presence window after the outcome, and only from the technician's events
+    // for THIS job: otherwise Lead Operations could poll a technician's location for as long as a case stays open.
+    const now = new Date();
+    const settings = await loadLocationSettings(tx, actor.tenantId);
+    const windowOpen = now.getTime() - current.outcomeAt.getTime() <= settings.presenceMaxAgeMinutes * 60_000;
+    const presence = windowOpen
+      ? await evaluatePresence(tx, actor.tenantId, { technicianId: current.technicianId, jobId: current.jobId, now, onlyJobEvents: true })
+      : refreshWindowClosed(now);
     await tx.leadRecoveryCase.update({
       where: { id: caseId },
       data: {
@@ -354,7 +364,7 @@ export async function recoverySummary(actor: Actor, query: SummaryQuery): Promis
     });
     const estimated = await tx.leadRecoveryCase.groupBy({
       by: ["currency"],
-      where: withinScope(base, { ...inRange, status: { notIn: ["RECOVERED", "NOT_RECOVERED", "CLOSED"] } }),
+      where: withinScope(base, { ...inRange, status: { notIn: FINISHED_STATUSES } }),
       _sum: { estimatedValueMinor: true },
       _count: { _all: true },
     });

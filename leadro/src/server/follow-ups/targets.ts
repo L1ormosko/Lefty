@@ -1,9 +1,9 @@
 import type { FollowUpTargetType, Prisma } from "@prisma/client";
-import { buildScopeWhere, resolveScope, type ResourceRef } from "@/server/authz";
+import type { ResourceRef } from "@/server/authz";
 import type { Actor } from "@/server/core";
-import { jobScopeColumns, resolveCustomerListAccess, customerResourceRef } from "@/server/customers";
+import { resolveCustomerListAccess, customerResourceRef } from "@/server/customers";
 import type { TenantTx } from "@/server/db";
-import { jobResourceRef } from "@/server/jobs";
+import { jobResourceRef, resolveJobListAccess } from "@/server/jobs";
 import { leadResourceRef, resolveLeadListAccess } from "@/server/leads";
 
 /**
@@ -63,53 +63,36 @@ const jobTarget: FollowUpTargetAccess = {
   },
   resourceRef: (tx, tenantId, targetId) => jobResourceRef(tx, tenantId, targetId),
   async listWhere(tx, actor, now) {
-    const scope = await resolveScope(tx, actor, "jobs.view", now);
-    return { targetType: "JOB", job: { is: buildScopeWhere(scope, jobScopeColumns, now) } };
+    const access = await resolveJobListAccess(tx, actor, "jobs.view", now);
+    return { targetType: "JOB", job: { is: access.where } };
   },
 };
 
 /**
- * Recovery cases: the recovery module (Phase 3 Task 6) owns the access rules and should register them with
- * `registerFollowUpTargetAccess("RECOVERY_CASE", ...)`. Until it does, this default applies the same shape every other
- * module uses: `recovery.view` over the case's service-area unit, ASSIGNED / OWN = the case's `assignedToId`.
+ * Recovery cases: the recovery module owns the access rules and registers them with
+ * `registerFollowUpTargetAccess("RECOVERY_CASE", ...)` when it loads. Until it has, this default FAILS CLOSED: the case does
+ * not exist for the follow-ups module and no list ever includes one, so a missing registration can only hide follow-ups
+ * about cases, never show one to someone who may not open the case.
  */
-const defaultRecoveryCaseTarget: FollowUpTargetAccess = {
+const failClosedRecoveryCaseTarget: FollowUpTargetAccess = {
   viewPermission: "recovery.view",
-  async facts(tx, tenantId, targetId) {
-    const row = await tx.leadRecoveryCase.findFirst({ where: { id: targetId, tenantId }, select: { orgUnitId: true } });
-    return row ? { orgUnitId: row.orgUnitId, archived: false } : null;
-  },
-  async resourceRef(tx, tenantId, targetId) {
-    const row = await tx.leadRecoveryCase.findFirst({ where: { id: targetId, tenantId }, select: { orgUnitId: true, assignedToId: true } });
-    if (!row) return null;
-    return {
-      ...(row.orgUnitId ? { orgUnitId: row.orgUnitId } : {}),
-      assignedEmployeeIds: row.assignedToId ? [row.assignedToId] : [],
-      ownerEmployeeId: row.assignedToId ?? undefined,
-    };
-  },
-  async listWhere(tx, actor, now) {
-    const scope = await resolveScope(tx, actor, "recovery.view", now);
-    const where = buildScopeWhere<Prisma.LeadRecoveryCaseWhereInput>(
-      scope,
-      {
-        orgUnit: (orgUnitIds) => ({ orgUnitId: { in: orgUnitIds } }),
-        legalEntity: (legalEntityIds) => ({ orgUnit: { legalEntityId: { in: legalEntityIds } } }),
-        own: (employeeId) => ({ assignedToId: employeeId }),
-        assigned: (employeeId) => ({ assignedToId: employeeId }),
-      },
-      now,
-    );
-    return { targetType: "RECOVERY_CASE", recoveryCase: { is: where } };
-  },
+  facts: async () => null,
+  resourceRef: async () => null,
+  listWhere: async () => ({ targetType: "RECOVERY_CASE", id: { in: [] } }),
 };
 
-const targets: Record<FollowUpTargetType, FollowUpTargetAccess> = {
+/**
+ * The registry lives on `globalThis` (same pattern as the notification target registry and the Prisma client): Next.js
+ * bundles instrumentation and route handlers separately, so a module-level object would be registered in one bundle and
+ * empty in the other.
+ */
+const globalForTargets = globalThis as unknown as { leadroFollowUpTargets?: Record<FollowUpTargetType, FollowUpTargetAccess> };
+const targets: Record<FollowUpTargetType, FollowUpTargetAccess> = (globalForTargets.leadroFollowUpTargets ??= {
   LEAD: leadTarget,
   CUSTOMER: customerTarget,
   JOB: jobTarget,
-  RECOVERY_CASE: defaultRecoveryCaseTarget,
-};
+  RECOVERY_CASE: failClosedRecoveryCaseTarget,
+});
 
 /** The access rules of one target type. */
 export const targetAccessFor = (type: FollowUpTargetType): FollowUpTargetAccess => targets[type];

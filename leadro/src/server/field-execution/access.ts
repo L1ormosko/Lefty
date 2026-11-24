@@ -1,10 +1,11 @@
-import { checkOccurredAt, hashFieldEventContent } from "@/lib/location-rules";
-import type { JobStatusValue } from "@/lib/job-lifecycle";
-import { canInTx, enforceInTx, type ResourceRef } from "@/server/authz";
-import { InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
+import { hashFieldEventContent } from "@/lib/location-rules";
+import { canStillReach, type JobStatusValue } from "@/lib/job-lifecycle";
+import { enforceInTx, type ResourceRef } from "@/server/authz";
+import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { runFieldEvent, type FieldEventEntity } from "@/server/field-events";
+import { assertBelievableEventTime, runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 import { jobResourceRef, loadJobForChange, type JobForChange } from "@/server/jobs";
+import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 
 /**
  * Who may do what on a job in the field, and the offline envelope every field write shares (§8.5, §8.7).
@@ -29,8 +30,6 @@ const FIELD_RECORDING_STATUSES: readonly JobStatusValue[] = [
   "RESCHEDULED",
 ];
 
-const PRE_FIELD_STATUSES: readonly JobStatusValue[] = ["CREATED", "PENDING_ASSIGNMENT", "ASSIGNED", "SCHEDULED"];
-
 export interface FieldJobContext {
   ref: ResourceRef;
   /** The locked job (status, current visit). */
@@ -49,12 +48,6 @@ export async function authorizeFieldRead(tx: TenantTx, actor: Actor, jobId: stri
   return ref;
 }
 
-/** Does the caller's `job_outcomes.view` grant over the job include the financial set? */
-export async function holdsFinancialSet(tx: TenantTx, actor: Actor, ref: ResourceRef): Promise<boolean> {
-  const decision = await canInTx(tx, actor, "job_outcomes.view", ref);
-  return decision.allowed && decision.fieldSets.includes("financial");
-}
-
 /**
  * `jobs.edit` over the job, then locks it (concurrent writers queue up) and checks it is in the field phase.
  * @throws NotFoundError (outside scope), ForbiddenError, InvalidStateTransitionError (`job_field.not_in_field_state`).
@@ -68,13 +61,25 @@ export async function authorizeFieldWrite(tx: TenantTx, actor: Actor, jobId: str
   if (!FIELD_RECORDING_STATUSES.includes(job.status)) {
     throw new InvalidStateTransitionError({
       // Before the field phase the earlier events (EN_ROUTE...) may not have synced yet: retryable, never stored.
-      retryable: PRE_FIELD_STATUSES.includes(job.status),
+      retryable: canStillReach(job.status, "EN_ROUTE"),
       message: "Field records can only be added once the job is under way and before it is closed.",
       details: [{ field: "jobId", code: "job_field.not_in_field_state", message: `The job is ${job.status}.` }],
     });
   }
   const { currency } = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } });
-  return { ref, job, currency, mayHandleMoney: await holdsFinancialSet(tx, actor, ref) };
+  return { ref, job, currency, mayHandleMoney: await holdsOutcomeFinancialSet(tx, actor, ref) };
+}
+
+/**
+ * Statements made in the customer's name (their approval of extra work) and the completion form are the act of the person
+ * who worked the visit: only an employee ASSIGNED to the job may make them. Managers can still read and correct records
+ * through the audited paths, but never speak for the customer or sign off the work.
+ * @throws ForbiddenError
+ */
+export function assertWorkedByCaller(ref: ResourceRef, actor: Actor, what: string): void {
+  if (!actor.employeeId || !ref.assignedEmployeeIds?.includes(actor.employeeId)) {
+    throw new ForbiddenError({ message: `Only an employee assigned to the job can record ${what}.` });
+  }
 }
 
 export interface FieldWriteEnvelope {
@@ -99,18 +104,6 @@ export interface JobFieldWriteSpec<T> {
 }
 
 /**
- * The device time must be believable: not ahead of the server clock beyond drift (retryable: it becomes valid later) and
- * not older than a week (§8.7). Judged on FIRST delivery only, inside the work: a late replay of an event that was already
- * accepted must still be answered from the stored result, not refused because it is now "too old".
- */
-function assertBelievableTime(occurredAt: Date | undefined, now: Date): void {
-  if (!occurredAt) return;
-  const problem = checkOccurredAt(occurredAt, now);
-  if (problem === null) return;
-  throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
-}
-
-/**
  * Runs one job-scoped field write, through the shared offline gate when it carries a `clientEventId` (idempotent per
  * employee, a changed payload under a reused id is a 409, a content refusal is remembered), plainly otherwise.
  */
@@ -119,7 +112,7 @@ export async function runJobFieldWrite<T>(actor: Actor, spec: JobFieldWriteSpec<
   const occurredAt = spec.envelope.occurredAt ?? now;
   const { clientEventId } = spec.envelope;
   if (!clientEventId) {
-    assertBelievableTime(spec.envelope.occurredAt, now);
+    assertBelievableEventTime(spec.envelope.occurredAt, now);
     const done = await withTenant(actor.tenantId, (tx) => spec.apply(tx, occurredAt));
     return { result: done.result, replayed: false };
   }

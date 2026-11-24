@@ -5,6 +5,7 @@ import { enforceInTx, projectFields } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
 import { jobResourceRef, lockJob, recordJobEvent } from "@/server/jobs";
+import { decisionHoldsFinancial } from "./financial";
 import { OUTCOME_FIELD_MAP, OUTCOME_FINANCIAL_KEYS, outcomeRowSelect } from "./fields";
 import type { CorrectOutcomeInput } from "./schemas";
 
@@ -35,7 +36,7 @@ export async function correctJobOutcome(actor: Actor, ctx: RequestContext, outco
     const changedKeys = Object.keys(changes);
 
     const touchesMoney = changedKeys.filter((key) => OUTCOME_FINANCIAL_KEYS.includes(key));
-    if (touchesMoney.length > 0 && !decision.fieldSets.includes("financial")) {
+    if (touchesMoney.length > 0 && !decisionHoldsFinancial(decision)) {
       throw new ForbiddenError({ message: "Your access does not include outcome amounts or payment.", field: touchesMoney[0] });
     }
     // The currency is the job's; it is not a thing a correction chooses, so alone it changes nothing meaningful.
@@ -103,7 +104,7 @@ export async function getOutcomeCorrections(actor: Actor, outcomeId: string): Pr
     const resource = await jobResourceRef(tx, actor.tenantId, found.jobId);
     if (!resource) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, "job_outcomes.edit", resource);
-    if (!decision.fieldSets.includes("financial")) throw new ForbiddenError({ message: "Your access does not include outcome amounts or payment." });
+    if (!decisionHoldsFinancial(decision)) throw new ForbiddenError({ message: "Your access does not include outcome amounts or payment." });
 
     const rows = await tx.auditEvent.findMany({
       where: { tenantId: actor.tenantId, action: "job_outcome.correct", targetId: outcomeId },

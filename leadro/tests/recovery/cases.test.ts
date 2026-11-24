@@ -237,13 +237,31 @@ describe("recovery and attribution (§9.7)", () => {
 });
 
 describe("presence refresh", () => {
-  it("re-evaluates from the latest valid event and stores only the status snapshot", async () => {
-    const { caseId } = await newCase();
+  it("re-evaluates from the latest valid event of THIS job and stores only the status snapshot", async () => {
+    const { caseId, jobId } = await newCase();
     const before = await getCase(w.leadOps.actor, caseId);
-    await storeLocation(w, w.techA1.employeeId as string, { latitude: SITE.latitude + 0.2, longitude: SITE.longitude, accuracyM: 8 });
+    await storeLocation(w, w.techA1.employeeId as string, { latitude: SITE.latitude + 0.2, longitude: SITE.longitude, accuracyM: 8, jobId });
     const view = await refreshPresence(w.leadOps.actor, ctx(w.leadOps), caseId);
     expect(view).toMatchObject({ presenceStatus: "LEFT_LOCATION", presenceAccuracyM: 8 });
     expect(before.presenceEvaluatedAt).not.toEqual(view.presenceEvaluatedAt);
     expect(JSON.stringify(view)).not.toMatch(/40\.2/);
+  });
+
+  it("ignores the technician's location events that belong to no job or to another job", async () => {
+    const { caseId } = await newCase();
+    await storeLocation(w, w.techA1.employeeId as string, { latitude: SITE.latitude, longitude: SITE.longitude, accuracyM: 8 });
+    await storeLocation(w, w.techA1.employeeId as string, { latitude: SITE.latitude, longitude: SITE.longitude, accuracyM: 8, jobId: await makeSiteJob(w) });
+    const view = await refreshPresence(w.leadOps.actor, ctx(w.leadOps), caseId);
+    expect(view).toMatchObject({ presenceStatus: "UNKNOWN", presenceReason: "no_location" });
+  });
+
+  it("refuses to look at the technician's location once the presence window after the outcome has closed", async () => {
+    const { caseId, jobId } = await newCase();
+    await storeLocation(w, w.techA1.employeeId as string, { latitude: SITE.latitude, longitude: SITE.longitude, accuracyM: 8, jobId });
+    await withTenant(w.tenantId, (tx) =>
+      tx.leadRecoveryCase.update({ where: { id: caseId }, data: { outcomeAt: new Date(Date.now() - 3 * 3_600_000) } }),
+    );
+    const view = await refreshPresence(w.leadOps.actor, ctx(w.leadOps), caseId);
+    expect(view).toMatchObject({ presenceStatus: "UNKNOWN", presenceReason: "refresh_window_closed" });
   });
 });

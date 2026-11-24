@@ -6,6 +6,7 @@ import { createPerson, disconnect, grantTemplate } from "../authz/fixtures";
 import { makeCustomer, makeJob, makeLead } from "../customers/fixtures";
 import { auditEvents, contextFor } from "../org/org-helpers";
 import { buildFollowUpWorld, followUpRow, hoursFromNow, type FollowUpWorld } from "./fixtures";
+import "@/server/recovery"; // registers the recovery-case follow-up target (the default fails closed)
 
 let w: FollowUpWorld;
 let leadOps: Awaited<ReturnType<typeof createPerson>>;
@@ -101,7 +102,7 @@ describe("createFollowUpTaskInTx for the recovery engine (system caller)", () =>
   });
 });
 
-describe("recovery-case targets (default access until the recovery module registers its own)", () => {
+describe("recovery-case targets (registered by the recovery module; unregistered they fail closed)", () => {
   it("lets Lead Operations follow up a case in their area and see the task", async () => {
     const view = await createFollowUp(leadOps.actor, contextFor(leadOps.actor), createFollowUpSchema.parse({ targetType: "RECOVERY_CASE", targetId: recoveryCaseId, title: "Offer a visit slot", dueAt: hoursFromNow(6) }));
     expect(view).toMatchObject({ targetType: "RECOVERY_CASE", recoveryCaseId });

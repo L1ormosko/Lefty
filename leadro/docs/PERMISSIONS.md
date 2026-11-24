@@ -255,7 +255,9 @@ recovery case (AT_LOCATION / LEFT_LOCATION / UNKNOWN), never as coordinates or h
 the COO and Owner only, so Lead Ops authors rules (`recovery.manage`) but a second person activates them; the database also refuses a high-impact rule that
 is ACTIVE without an approver other than its author. (3) `job_outcomes.configure` and `completion_forms.configure` make a role require MFA (every
 `*.configure` does), which is why only Owner and COO hold them. (4) Technicians record outcomes (`job_outcomes.create`) but cannot correct them
-(`edit` is a manager's action); they hold no approve / manage / configure. (5) Outcome amounts, currency and payment status / method are the opt-in `financial` set (`job_outcomes.financial_fields`): held by Owner, COO, State / Regional / City managers and the Technician (who reports them), and by the Finance Director as a financial-only view. Team Leader, Dispatcher and Lead Operations see the outcome (type, reason, notes, follow-up request) but not the money.
+(`edit` is a manager's action); they hold no approve / manage / configure. (5) Outcome amounts, currency and payment status / method are the opt-in `financial` set (`job_outcomes.financial_fields`): held by Owner, COO, State / Regional / City managers and the Technician (who reports them), and by the Finance Director as a financial-only view. Team Leader, Dispatcher and Lead Operations see the outcome (type, reason, notes, follow-up request) but not the money from `job_outcomes` itself. **Lead Operations see outcome money only through the recovery case value** (`initialValueMinor` / `estimatedValueMinor` and the recovered / collected amounts, read under `recovery.view`): a case copies the quoted amount of its outcome, and that value stays visible to every case viewer by ruling (the END decision on it stays with the Owner). The rule **dry-run** keeps its redaction: it can target outcomes that have no case, so there the quoted value is shown to nobody without the `financial` set (`minValueMinor` / `maxValueMinor` checks come back `actual: null, redacted: true`).
+
+**Disclosed "quote" sensitivities** (where a reader can learn a quoted amount without a dedicated finance grant): (a) a lead's base fields include `quotedAmountMinor`; (b) a job carries its money in the separate `financial` field set, but its base fields still show that it was quoted; (c) outcome money is the `financial` set above; (d) a recovery case carries the outcome's quoted value as the case value, visible to everyone holding `recovery.view` over the case. Whoever must not learn a quote must not hold `leads.view`, `recovery.view` or the matching job grants over that record.
 
 Additional 4.4 role templates not in the 4.5 table are derived by analogy and flagged for
 confirmation in `DECISIONS.md`:
@@ -314,8 +316,8 @@ Code: `src/server/customers/customer-access.ts` and `assignment-access.ts`.
 - **ASSIGNED**: a non-archived lead or job of the customer has an ACTIVE assignment to the caller; a job assigned to a team
   (`JobAssignment.teamOrgUnitId`) reaches every employee with an active placement in that team. Leads and jobs reuse the same
   where-fragments (`leadAssignedToWhere`, `jobAssignedToWhere`) for their own ASSIGNED scope. **OWN** matches nothing.
-- **Record sets**: `job_related` (the customer has a non-archived job; Dispatcher), `lead_related` (has a non-archived lead; Lead
-  Operations). Unknown sets match nothing. `customer_history` is a JOB set passed only by the customer history view.
+- **Record sets**: `job_related` (the customer has a non-archived job; Dispatcher), `lead_related` (has a non-archived lead or a lead recovery case; Lead
+  Operations, so the customer of a case without a lead opens). Unknown sets match nothing. `customer_history` is a JOB set passed only by the customer history view.
 - **Fields**: billing columns are the opt-in `billing` set (written only by grants naming it, never in audit values). A grant
   limited to `billing` (Finance) sees only billing columns and cannot search or filter by base columns. Technician (plain
   ASSIGNED grant) gets every non-billing field and cannot write.
@@ -350,9 +352,9 @@ Code: `src/server/jobs/job-access.ts`, `assignment.ts`, `status.ts`; decisions i
   history view. Denials on a job are 404.
 - **Fields**: money (`quotedAmountMinor`, `currency`) is the opt-in `financial` set. Writes check every field SENT with
   `assertWritableFields` and `JOB_WRITE_ALLOWLISTS`: the Technician's `jobs.edit {fields:"execution"}` covers `status`, `statusReason`,
-  `instructions` only (and, in Phase 2, only a move to EN_ROUTE). Trails (history, events, assignments) need the base field set.
+  `instructions` only (and only a move to EN_ROUTE through the plain transition; arrival and start of work are the field events `/arrive` and `/start-work`, which need the same `jobs.edit` and a writable `status`). *Superseded wording: "in Phase 2".* Trails (history, events, assignments) need the base field set.
 - **Operations**: create `jobs.create` (unit-level; tenant-wide for a customer with no unit); edit / transition / reschedule `jobs.edit`;
-  assign, reassign, unassign `jobs.assign`; closing a job that was AWAITING_REVIEW `jobs.approve`, reopening it `jobs.reject`;
+  assign, reassign, unassign `jobs.assign`; closing a job that was AWAITING_REVIEW `jobs.approve` (**and `jobs.assign` while the job still has active assignments**: the close ends them), reopening it `jobs.reject`;
   workflow switches `job_types.configure` (tenant-wide).
 - **Assignment override** (assigning an employee who fails hard eligibility): `jobs.approve` over the job plus a reason. Default holders: Owner/CEO
   and COO. The Dispatcher template does not hold it on purpose; a tenant may grant it to a custom role. Employment failures cannot be overridden.

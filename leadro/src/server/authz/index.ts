@@ -45,6 +45,7 @@ export {
   JOB_FIELD_MAP,
   LOCATION_EVENT_FIELD_MAP,
   JOB_OUTCOME_FIELD_MAP,
+  JOB_FIELD_NOTE_FIELD_MAP,
   baseFieldMap,
 } from "./field-maps";
 export type { FieldMap } from "./project-fields";

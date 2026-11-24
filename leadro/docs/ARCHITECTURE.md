@@ -1,7 +1,7 @@
-# LEADRO Architecture (Phase 0 + 1, as built)
+# LEADRO Architecture (Phases 0 - 3 backend, as built)
 
 Authority: `SPEC.md` (sections 2, 3, 4, 19-22). This document describes the code as it exists at
-Milestone 1; where the code and an earlier plan differ, this file follows the code. Revise via
+the end of the Phase 3 backend (Milestone 2+3, `MILESTONE-2-3.md`); where the code and an earlier plan differ, this file follows the code. Revise via
 `DECISIONS.md`.
 
 ## 1. Style
@@ -31,11 +31,53 @@ in `src/`); tests may import internals when they need to.
 | Core | `core` | request pipeline (`defineRoute`), `Actor`, error hierarchy, pagination, idempotency |
 | Logging | `logging` | structured JSON logger with redaction |
 | DB | `db` | Prisma client and `withTenant` |
+| Customers | `customers` | customer records, service addresses, notes, preferred employees, service history, duplicate detection; also the shared assignment/scope helpers (`teamMembers`, `jobAssignedToWhere`) |
+| Leads | `leads` | lead intake, lifecycle, ownership, contact attempts, duplicate flags, conversion to a job |
+| Jobs | `jobs` | job creation, the lifecycle machine (`src/lib/job-lifecycle.ts`), assignment with enforced eligibility, rescheduling, trails, job events |
+| Dispatch | `dispatch` | hard eligibility filter, explainable recommendations, dispatcher decisions and overrides, dispatch modes, the dispatch picture |
+| Qualifications | `qualifications` | skills, certifications, licenses, job-category permissions, service territories, availability, the eligibility inputs |
+| Shifts | `shifts` | work shifts and the exceptions around starting / ending them |
+| Location | `location` | location events (verification, departure, navigation), retention settings, presence helpers; coordinates never leave it |
+| Arrival | `arrival` | arrive / start-work field steps and manager verification of arrivals |
+| Field events | `field-events` | the ONE offline gate (`runFieldEvent`): idempotency per (tenant, employee, `clientEventId`), content hash, believable device time, stored verdicts |
+| Field execution | `field-execution` | notes, materials, attachment metadata (storage provider port), versioned completion forms and submissions |
+| Field sync | `field-sync` | the batch endpoint and its handler registry; the meaning of each event type stays with the owning module |
+| Job outcomes | `job-outcomes` | the outcome of every visit, lost reasons, the `job.not_converted` domain event, `holdsOutcomeFinancialSet` |
+| Recovery | `recovery` | recovery rules (versioned, approval for high impact), the engine subscribed to the outcome event, cases, attempts, presence snapshot, recovery summary |
+| Follow-ups | `follow-ups` | follow-up tasks about a lead, customer, job or recovery case; overdue / due-soon sweep; per-target access registry |
 
-Not built yet (spec 2.2 modules for later phases): customers, leads, jobs, dispatch, field
-operations, qualification, performance, lead recovery, finance and compensation (blocked on an
-approved compensation spec, 28.4), notifications, automation, reporting, integrations. There is no
+Not built (spec 2.2 modules for later phases): performance, finance and compensation (blocked on an
+approved compensation spec, 28.4), automation, reporting, integrations, and every UI for the Phase 2
+and 3 modules (the backend is complete behind `/api/v1`; screens are deferred). There is no
 tenant-provisioning module: tenants come from the seed.
+
+**Ports (provider seams) without a provider.** No fake integrations exist (spec 28.3): the storage
+provider (`setStorageProvider`, default `notConfiguredStorage`, so attachment upload targets answer
+"not configured"), the notification channels (email / SMS / push; the in-app inbox works), and
+geocoding (addresses keep their coordinates only when a person supplies them) are interfaces with no
+implementation.
+
+**Registries on `globalThis`.** Next.js bundles `src/instrumentation.ts` and the route handlers
+separately, so a module-level Map would be filled in one bundle and empty in the other. Three
+registries therefore live on `globalThis` (same pattern as the Prisma client): the notification
+target resolvers (`notifications/target-access.ts`), the outcome-recorded handlers
+(`job-outcomes/events.ts`) and the follow-up target access (`follow-ups/targets.ts`; the unregistered
+recovery-case default fails closed). `src/server/notification-targets.ts` is the one place that
+registers them at start-up (called from `src/instrumentation.ts` and the notifications route).
+
+**Shared offline gate.** Every technician write that can arrive late from a device (shifts, location
+events, arrival, start work, notes, materials, attachments, completion, outcomes, follow-up status,
+status transitions to EN_ROUTE) goes through `field-events` `runFieldEvent` or one of its two shells
+(`arrival/own-field-write.ts`, `field-execution/access.ts`), and `assertBelievableEventTime` is the
+single device-time rule. A refusal marked `retryable` (an earlier event has not arrived yet, decided
+by `canStillReach` over the job machine) is never stored, so the same `clientEventId` can succeed
+later; every other verdict is stored with the id.
+
+**Cross-module data access rule.** A module may READ another module's tables only for read models
+(lists, projections, existence checks) and only inside the caller's transaction; a WRITE to another
+module's tables always goes through that module's `index.ts` (service function or `...InTx`
+function taking the caller's `tx`). Reads still go through the owner's index when the owner already
+exports the access rule (for example `resolveJobListAccess`, `resolveCustomerListAccess`).
 
 Shared pure code (no database) is in `src/lib` (`i18n` catalogs and translator, `totp`,
 `changed-fields`, `redact`, `org-hierarchy`). UI is in `src/app` (pages, server actions) and
@@ -147,6 +189,9 @@ branch/org-unit default -> tenant default; time zone likewise. Timestamps are st
 ## 10. Technology and deviations
 
 Stack as in spec 2.4 narrowed per the project rulings (`DECISIONS.md`): local credential auth behind
-an interface instead of a managed IdP; no queue, object storage, maps, or notification providers
-(no fake integrations, spec 28.3, so invitation and reset emails cannot be delivered). The mobile
-app (React Native) is Phase 2.
+an interface instead of a managed IdP; no queue, scheduler or worker process, object storage, maps / geocoding, or notification providers
+(no fake integrations, spec 28.3, so invitation and reset emails cannot be delivered; the overdue
+sweep and the pending-notification delivery are functions a future worker calls). There is no
+unauthenticated integration intake for leads (webhook / API-key sources). The mobile app (React
+Native) and every Phase 2 / 3 screen are not built; the field-sync and `/api/v1` contracts are what
+they will consume.

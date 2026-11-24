@@ -193,7 +193,7 @@ export function isInCooldown(cooldownMinutes: number, lastFiredAt: Date | null, 
 }
 
 /** Why presence is UNKNOWN (machine codes stored on the case). */
-export type PresenceUnknownReason = "no_location" | "stale_location" | "inaccurate_location" | "no_coordinates";
+export type PresenceUnknownReason = "no_location" | "stale_location" | "inaccurate_location" | "no_coordinates" | "refresh_window_closed";
 
 export interface PresenceInput {
   /** Straight-line distance from the latest valid position to the job's address; null when either has no coordinates. */
