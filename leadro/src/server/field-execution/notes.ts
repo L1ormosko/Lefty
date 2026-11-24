@@ -3,7 +3,8 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { ForbiddenError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { recordJobEvent } from "@/server/jobs";
-import { authorizeFieldRead, authorizeFieldWrite, holdsFinancialSet, runJobFieldWrite } from "./access";
+import { authorizeFieldRead, authorizeFieldWrite, runJobFieldWrite } from "./access";
+import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 import type { ListFieldRecordsQuery, RecordFieldNoteInput } from "./schemas";
 
 /**
@@ -44,7 +45,7 @@ async function readNote(tx: TenantTx, actor: Actor, jobId: string, noteId: strin
   const ref = await authorizeFieldRead(tx, actor, jobId);
   const row = await tx.jobFieldNote.findFirst({ where: { id: noteId, jobId, tenantId: actor.tenantId }, select: NOTE_COLUMNS });
   if (!row) throw new NotFoundError();
-  return viewNote(row, await holdsFinancialSet(tx, actor, ref));
+  return viewNote(row, await holdsOutcomeFinancialSet(tx, actor, ref));
 }
 
 /** `POST /jobs/{id}/notes`: records a note of the visit (offline-safe through `clientEventId`). */
@@ -98,7 +99,7 @@ export async function recordFieldNote(actor: Actor, ctx: RequestContext, jobId: 
 export async function listFieldNotes(actor: Actor, jobId: string, query: ListFieldRecordsQuery): Promise<Page<Record<string, unknown>>> {
   return withTenant(actor.tenantId, async (tx) => {
     const ref = await authorizeFieldRead(tx, actor, jobId);
-    const mayHandleMoney = await holdsFinancialSet(tx, actor, ref);
+    const mayHandleMoney = await holdsOutcomeFinancialSet(tx, actor, ref);
     const rows = await tx.jobFieldNote.findMany({
       where: { tenantId: actor.tenantId, jobId },
       select: NOTE_COLUMNS,

@@ -19,6 +19,7 @@ import { changeJobStatus, jobResourceRef, loadJobForChange, recordJobEvent } fro
 import { deliverAfterCommit } from "@/server/notifications";
 import { OUTCOME_FIELD_MAP, OUTCOME_FINANCIAL_KEYS, outcomeRowSelect, type OutcomeRow } from "./fields";
 import { publishOutcomeRecorded } from "./events";
+import { decisionHoldsFinancial } from "./financial";
 import { notifyNotConverted } from "./notify";
 import type { RecordOutcomeInput } from "./schemas";
 
@@ -97,7 +98,7 @@ function assertMayWriteMoney(decision: AccessDecision, input: RecordOutcomeInput
   const sent = Object.entries(input)
     .filter(([key, value]) => value !== undefined && OUTCOME_FINANCIAL_KEYS.includes(key))
     .map(([key]) => key);
-  if (sent.length > 0 && !decision.fieldSets.includes("financial")) {
+  if (sent.length > 0 && !decisionHoldsFinancial(decision)) {
     throw new ForbiddenError({ message: "Your access does not include outcome amounts or payment.", field: sent[0] });
   }
 }

@@ -1,10 +1,11 @@
 import { checkOccurredAt, hashFieldEventContent } from "@/lib/location-rules";
 import type { JobStatusValue } from "@/lib/job-lifecycle";
-import { canInTx, enforceInTx, type ResourceRef } from "@/server/authz";
+import { enforceInTx, type ResourceRef } from "@/server/authz";
 import { InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 import { jobResourceRef, loadJobForChange, type JobForChange } from "@/server/jobs";
+import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 
 /**
  * Who may do what on a job in the field, and the offline envelope every field write shares (§8.5, §8.7).
@@ -49,12 +50,6 @@ export async function authorizeFieldRead(tx: TenantTx, actor: Actor, jobId: stri
   return ref;
 }
 
-/** Does the caller's `job_outcomes.view` grant over the job include the financial set? */
-export async function holdsFinancialSet(tx: TenantTx, actor: Actor, ref: ResourceRef): Promise<boolean> {
-  const decision = await canInTx(tx, actor, "job_outcomes.view", ref);
-  return decision.allowed && decision.fieldSets.includes("financial");
-}
-
 /**
  * `jobs.edit` over the job, then locks it (concurrent writers queue up) and checks it is in the field phase.
  * @throws NotFoundError (outside scope), ForbiddenError, InvalidStateTransitionError (`job_field.not_in_field_state`).
@@ -74,7 +69,7 @@ export async function authorizeFieldWrite(tx: TenantTx, actor: Actor, jobId: str
     });
   }
   const { currency } = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } });
-  return { ref, job, currency, mayHandleMoney: await holdsFinancialSet(tx, actor, ref) };
+  return { ref, job, currency, mayHandleMoney: await holdsOutcomeFinancialSet(tx, actor, ref) };
 }
 
 export interface FieldWriteEnvelope {
