@@ -3,7 +3,7 @@ import { enforceInTx, type ResourceRef } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { jobResourceRef } from "@/server/jobs";
-import { runFieldEvent, type FieldEventEntity } from "@/server/location";
+import { runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 
 /**
  * Shared shell of the technician's job field writes (arrive, start work): the caller must be an employee, the job
