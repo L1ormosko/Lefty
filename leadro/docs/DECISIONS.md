@@ -772,3 +772,47 @@ Code: `src/server/job-outcomes` (README), `src/lib/job-outcome-rules.ts`, additi
 - **Financial field set (ruling)**: new category `job_outcomes.financial_fields` (tag `financial`), `JOB_OUTCOME_FIELD_MAP`. Granted to Owner (all), COO, State / Regional / City managers (`includeFields`), Technician (reports the money; scope ASSIGNED) and Finance Director (`fields: financial`, view). Not to Team Leader, Dispatcher, Lead Operations: they see outcome, reason, notes, follow-up request. Writes: sending or correcting financial fields without the set is 403; responses and lists project per row; filtered lists hide rows seen only through a financial-only grant. This widens "who names sensitive sets" beyond Owner/Finance; `tests/authz/role-templates.test.ts` now states the exception explicitly (job_outcomes only).
 - **Idempotency details**: the payload hash covers the normalized record (defaults applied), so omitting a default and sending it explicitly are the same submission; the whole transaction is wrapped in `conflictOnUniqueViolation` (one clientEventId used on two jobs concurrently: loser gets 409, not 500); a replay re-checks the permission over the job; `occurredAt` may not predate the visit start (or the job's creation when work never started). Concurrent identical submissions are serialized by the job lock (tested).
 
+
+## Phase 3 Task 6: Lead Recovery Engine (§9.3 - 9.7)
+
+Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/recovery-lifecycle.ts`, routes `/api/v1/lead-recovery/**`. No schema change.
+
+- **Subscription and failure isolation**: the engine registers with `onJobOutcomeRecorded`, so it runs inside the outcome transaction (case, follow-up and
+  notification rows commit or roll back with the outcome). It must never fail the outcome: the whole handler and every rule run in a SAVEPOINT; a failing
+  rule rolls back to it, is logged and leaves a run row `skippedReason: "error"` (`matched: false`). A stored rule that no longer validates is skipped.
+- **Registration**: importing `@/server/recovery` subscribes the engine; `notification-targets.ts` (called by `instrumentation.ts` at server start) also
+  calls it, so a deployment where the outcome route loads before any recovery route is still subscribed.
+- **Action vocabulary** (closed): the ERD listed four; a fifth, `set_priority`, is added because the brief names "priority" as its own action. No discount
+  action exists, and a recursive scan refuses any key or value matching discount / coupon / rebate / markdown / promo (so a future field cannot sneak one in).
+- **highImpact is derived**: notify, create_follow_up, a HIGH / URGENT `create_case` or an URGENT `set_priority`. `recommend` and a NORMAL / LOW case do not
+  need a second person. SoD: `recovery.approve` and not the author (service + DB CHECK). A high-impact DRAFT must be submitted first; INACTIVE high-impact
+  rules are re-approved the same way (the approver is re-stamped).
+- **One case per outcome, many rules**: rules run in `priority` order. The first rule with `create_case` creates the case (and its rule / version, priority);
+  later rules only annotate it (priority only ever goes up, the first recommendation stands, follow-ups dedupe on `recovery:<caseId>:<ruleId>`, notification
+  idempotent per case and rule). A rule without `create_case` and without an existing case records `skippedReason: "no_case"`.
+- **Cooldown** is per rule KEY (all versions) and customer, counted from runs that actually did something (not from skipped or non-matching runs).
+- **Presence** (§26.5): `latestValidLocation` (both clocks, accuracy) + the job address coordinates, radius = the address override or the tenant's
+  `arrivalGeofenceRadiusM`. UNKNOWN reasons: `no_location`, `stale_location`, `inaccurate_location`, `no_coordinates`. Stored as a snapshot; the evidence event id
+  and the distance are stored (CHECK requires the evidence) but never returned. The technician is the outcome's employee.
+- **Estimate vs confirmed**: the quote becomes the case's initial value AND its starting estimate; only `recoverCase` writes the confirmed amounts (with
+  `recoveredAt`). `revenue` in the API keeps the groups apart; the summary never adds them.
+- **Recovered work** must be a job / lead of the SAME customer and not the original job (service check plus composite FKs and a CHECK). Existence of such
+  a job is checked within the customer only (no `jobs.view` on the new job is required, so Lead Ops can link work another unit scheduled).
+- **Fields**: recovery has no sensitive field set in the permission catalog; all fields are `base` and visibility is by row scope. Money on a case is visible
+  to anyone who may view the case.
+- **Status machine** (`recovery-lifecycle.ts`): NEW -> ASSIGNED | CONTACTING | CLOSED; ASSIGNED -> NEW (unassign) | CONTACTING | CUSTOMER_REACHED |
+  FOLLOW_UP_REQUIRED | NOT_RECOVERED | CLOSED; CONTACTING -> CUSTOMER_REACHED | FOLLOW_UP_REQUIRED | RECOVERED | NOT_RECOVERED | CLOSED; CUSTOMER_REACHED ->
+  CONTACTING | FOLLOW_UP_REQUIRED | RECOVERED | NOT_RECOVERED; FOLLOW_UP_REQUIRED -> CONTACTING | CUSTOMER_REACHED | RECOVERED | NOT_RECOVERED | CLOSED;
+  RECOVERED -> CLOSED; NOT_RECOVERED -> CONTACTING (reopen) | CLOSED; CLOSED final. ASSIGNED is reached only through assignment; RECOVERED only through
+  `recover`. Closing or NOT_RECOVERED needs a reason (the final outcome, `closeReason`). The first attempt moves NEW / ASSIGNED to CONTACTING.
+- **Notifications**: two new events in the shared registry, `recovery.case_created` (Lead Ops over the case's unit: `recovery.assign`, widening to
+  `recovery.view`) and `recovery.case_assigned`, target `recovery_case` with a resolver. The engine cannot call `deliverAfterCommit` (it runs inside the
+  outcome transaction); the rows are delivered by the pending sweep (`deliverPendingForAllTenants`).
+- **`recovery_related`**: `loadJobAccessFacts` now also reports whether a job has a recovery case; `toJobResourceRef` puts `recovery_related` in `sets`, which
+  is what the Lead Ops `jobs.view` grant matches. The ORG_UNIT scope still bounds it. List queries are not extended (Lead Ops reaches a job through its case);
+  the set does not depend on the caller's case visibility (a case shares its job's unit, so the unit scope gives the same answer).
+- **Number sequence**: `NumberSequenceName` gained `"recovery_case"` (`NumberSequence.name` is free text, no migration).
+- **Offline**: case work is back-office; no `clientEventId` on recovery endpoints (technicians have no `recovery.*` grants). Creation endpoints accept the
+  standard `Idempotency-Key` header.
+- **i18n**: machine codes map to `RECOVERY.*` keys with the code UPPERCASED (`RECOVERY.PRESENCE.REASON.NO_LOCATION`), as the key format requires.
+- **Not built**: UI, a scheduler for re-evaluating old outcomes, listing jobs by `recovery_related`.
