@@ -5,7 +5,6 @@ import {
   isInCooldown,
   matchConditions,
   validateRuleDefinition,
-  type MatchResult,
   type PresenceValue,
   type RecoveryFacts,
   type RecoveryPriority,

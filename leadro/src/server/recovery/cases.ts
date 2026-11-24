@@ -17,7 +17,7 @@ import type { AssignCaseInput, ChangeCaseStatusInput, ListCasesQuery, RecordAtte
  * is locked first, so two people acting on it queue up and the second sees the first one's result.
  */
 
-const open = { allowed: true as const, fieldSets: [] as string[] };
+const open = { allowed: true as const, fieldSets: ["base"] };
 const project = (row: CaseRow) => projectFields(caseView(row), open, CASE_FIELD_MAP);
 
 async function lockCase(tx: TenantTx, tenantId: string, caseId: string): Promise<void> {

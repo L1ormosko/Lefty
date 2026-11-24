@@ -4,8 +4,8 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, projectFields, resolveScope, withinScope } from "@/server/authz";
 import { ConflictError, ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { assertRuleAccess, loadRuleRow, ruleResourceRef, ruleScopeColumns } from "./access";
-import { RULE_FIELD_MAP, ruleRowSelect, ruleView, type RuleRow } from "./fields";
+import { assertRuleAccess, loadRuleRow, ruleScopeColumns } from "./access";
+import { RULE_FIELD_MAP, ruleRowSelect, ruleView } from "./fields";
 import type { CreateRuleInput, ListRulesQuery, RuleDecisionInput, UpdateRuleInput } from "./schemas";
 
 /**
@@ -69,7 +69,7 @@ export async function createRule(actor: Actor, ctx: RequestContext, input: Creat
       targetId: created.id,
       newValue: { ruleKey: created.ruleKey, version: 1, highImpact: created.highImpact, orgUnitId: created.orgUnitId, actionTypes: definition.actions.map((action) => action.type) },
     });
-    return projectFields(ruleView(created), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(created), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
@@ -109,7 +109,7 @@ export async function updateRule(actor: Actor, ctx: RequestContext, ruleId: stri
       previousValue: { highImpact: current.highImpact, orgUnitId: current.orgUnitId },
       newValue: { highImpact: updated.highImpact, orgUnitId: updated.orgUnitId, changed: Object.keys(input) },
     });
-    return projectFields(ruleView(updated), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(updated), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
@@ -152,7 +152,7 @@ export async function newRuleVersion(actor: Actor, ctx: RequestContext, ruleId: 
       targetId: created.id,
       newValue: { ruleKey: created.ruleKey, version: created.version, basedOn: source.id },
     });
-    return projectFields(ruleView(created), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(created), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
@@ -167,7 +167,7 @@ export async function submitRule(actor: Actor, ctx: RequestContext, ruleId: stri
     if (!current.highImpact) throw new InvalidStateTransitionError({ message: "This rule is not high impact: activate it directly." });
     const updated = await tx.recoveryRule.update({ where: { id: ruleId }, data: { status: "PENDING_APPROVAL", submittedAt: new Date() }, select: ruleRowSelect });
     await recordAudit(tx, { ...auditContextFields(ctx), action: "recovery_rule.submit", targetType: "RecoveryRule", targetId: ruleId, previousValue: { status: "DRAFT" }, newValue: { status: "PENDING_APPROVAL" } });
-    return projectFields(ruleView(updated), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(updated), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
@@ -210,7 +210,7 @@ export async function activateRule(actor: Actor, ctx: RequestContext, ruleId: st
       newValue: { status: "ACTIVE", ruleKey: current.ruleKey, version: current.version, highImpact: current.highImpact, createdById: current.createdById },
       reason: input.reason,
     });
-    return projectFields(ruleView(updated), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(updated), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
@@ -236,14 +236,14 @@ export async function deactivateRule(actor: Actor, ctx: RequestContext, ruleId: 
       newValue: { status: "INACTIVE" },
       reason: input.reason,
     });
-    return projectFields(ruleView(updated), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(updated), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
 export async function getRule(actor: Actor, ruleId: string): Promise<Record<string, unknown>> {
   return withTenant(actor.tenantId, async (tx) => {
     const row = await assertRuleAccess(tx, actor, ruleId, "recovery.view");
-    return projectFields(ruleView(row), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP);
+    return projectFields(ruleView(row), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP);
   });
 }
 
@@ -269,6 +269,6 @@ export async function listRules(actor: Actor, query: ListRulesQuery): Promise<Pa
       rows = rows.filter((row) => (seen.has(row.ruleKey) ? false : (seen.add(row.ruleKey), true)));
     }
     const page = toPage(rows, query.limit);
-    return { data: page.data.map((row) => projectFields(ruleView(row), { allowed: true, fieldSets: [] }, RULE_FIELD_MAP)), page: page.page };
+    return { data: page.data.map((row) => projectFields(ruleView(row), { allowed: true, fieldSets: ["base"] }, RULE_FIELD_MAP)), page: page.page };
   });
 }
