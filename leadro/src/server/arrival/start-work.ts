@@ -1,3 +1,4 @@
+import { canStillReach } from "@/lib/job-lifecycle";
 import { hashFieldEventContent } from "@/lib/location-rules";
 import { auditContextFields } from "@/server/audit";
 import { JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS, assertWritableFields, enforceInTx } from "@/server/authz";
@@ -36,7 +37,7 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     assertWritableFields(decision, ["status"], JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
     if (job.status !== "ARRIVED") {
       // retryable only while the arrival may still be on its way (the job is EN_ROUTE); otherwise the verdict is stored.
-      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: job.status === "EN_ROUTE" });
+      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: canStillReach(job.status, "ARRIVED") });
     }
     const latest = await tx.arrivalVerification.findFirst({ where: { tenantId: actor.tenantId, jobId, employeeId: self.employeeId }, orderBy: [{ arrivedAt: "desc" }, { id: "desc" }], select: { status: true, arrivedAt: true } });
     if (latest?.status === "MANAGER_REJECTED") {

@@ -6,6 +6,7 @@ import {
   TERMINAL_JOB_STATUSES,
   allowedNextStatuses,
   appointmentWarnings,
+  canStillReach,
   canTransitionJob,
   effectiveDisabledTransitions,
   invalidDisabledTransitions,
@@ -123,5 +124,21 @@ describe("appointment warnings (§25.2)", () => {
   it("warns when the scheduled slot is shorter than the duration, and stays silent when it fits", () => {
     expect(appointmentWarnings({ estimatedDurationMinutes: 90, slot: { start: at(8), end: at(9) } })[0].code).toBe("SLOT_SHORTER_THAN_DURATION");
     expect(appointmentWarnings({ estimatedDurationMinutes: 60, window: { start: at(8), end: at(10) }, slot: { start: at(8), end: at(9) } })).toEqual([]);
+  });
+});
+
+describe("canStillReach", () => {
+  it("follows the machine: an earlier status can still reach a later one, a terminal one cannot", () => {
+    expect(canStillReach("SCHEDULED", "EN_ROUTE")).toBe(true);
+    expect(canStillReach("ON_HOLD", "EN_ROUTE")).toBe(true);
+    expect(canStillReach("EN_ROUTE", "ARRIVED")).toBe(true);
+    expect(canStillReach("CLOSED", "EN_ROUTE")).toBe(false);
+    expect(canStillReach("CANCELLED", "ARRIVED")).toBe(false);
+  });
+
+  it("honours the switched-off optional edges (core edges cannot be switched off)", () => {
+    const off = new Set(["ON_HOLD>SCHEDULED", "ON_HOLD>ASSIGNED"]);
+    expect(canStillReach("ON_HOLD", "EN_ROUTE", off)).toBe(true); // core ON_HOLD>PENDING_ASSIGNMENT remains
+    expect(canStillReach("EN_ROUTE", "ARRIVED", new Set(["EN_ROUTE>SCHEDULED"]))).toBe(true);
   });
 });

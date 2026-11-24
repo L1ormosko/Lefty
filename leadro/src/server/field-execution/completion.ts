@@ -1,3 +1,4 @@
+import { canStillReach } from "@/lib/job-lifecycle";
 import type { Prisma } from "@prisma/client";
 import { formFields, formSchemaProblems, missingRequiredFields, type CompletionFacts, type CompletionFieldKey } from "@/lib/completion-form-rules";
 import { auditContextFields, recordAudit } from "@/server/audit";
@@ -111,7 +112,7 @@ export async function submitCompletion(actor: Actor, ctx: RequestContext, jobId:
       if (!actor.employeeId) throw new ForbiddenError({ message: "Only an employee can submit a completion form." });
       if (!COMPLETABLE_STATUSES.includes(job.status)) {
         throw new InvalidStateTransitionError({
-          retryable: ["EN_ROUTE", "ARRIVED"].includes(job.status), // ordering: the work-start event may not have synced yet
+          retryable: canStillReach(job.status, "IN_PROGRESS"), // ordering: the work-start event may not have synced yet
           message: "The completion form can be submitted while the work is in progress or just finished.",
           details: [{ field: "jobId", code: "completion.not_ready", message: `The job is ${job.status}.` }],
         });

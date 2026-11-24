@@ -1,3 +1,4 @@
+import { canStillReach } from "@/lib/job-lifecycle";
 import { hashFieldEventContent } from "@/lib/location-rules";
 import { NOT_CONVERTED_OUTCOMES, RETROACTIVE_OUTCOME_STATUSES, outcomeProblem, outcomeTargetStatus, type JobOutcomeTypeValue } from "@/lib/job-outcome-rules";
 import { auditContextFields, recordAudit, type AuditContextFields } from "@/server/audit";
@@ -53,9 +54,6 @@ export interface RecordOutcomeInTxResult {
 
 const refusal = (field: string, code: string, message: string, retryable = false): ValidationError =>
   new ValidationError({ message, field, retryable, details: [{ field, code, message }] });
-
-/** Statuses from which the job may still reach the visit the outcome reports (an earlier offline event may be missing). */
-const CAN_STILL_ADVANCE: readonly string[] = ["ASSIGNED", "SCHEDULED", "RESCHEDULED", "EN_ROUTE", "ARRIVED"];
 
 /** The lost reason must exist, be active and apply to the outcome. */
 async function checkLostReason(tx: TenantTx, tenantId: string, lostReasonId: string, outcome: JobOutcomeTypeValue): Promise<{ id: string; code: string; recoverable: boolean }> {
@@ -146,7 +144,7 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
   if (!normalTarget && !retroactive) {
     // Retryable while the job can still advance (its start-work event may not have synced yet); never stored then.
     throw new InvalidStateTransitionError({
-      retryable: CAN_STILL_ADVANCE.includes(job.status),
+      retryable: canStillReach(job.status, "IN_PROGRESS"),
       message: `The outcome ${input.outcome} cannot be reported while the job is ${job.status}.`,
       details: [{ field: "outcome", code: "job_outcome.not_reportable", message: `The outcome ${input.outcome} cannot be reported while the job is ${job.status}.` }],
     });
