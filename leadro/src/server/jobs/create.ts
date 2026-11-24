@@ -197,8 +197,8 @@ async function insertJob(
       priority: job.priority,
       title: job.title,
       estimatedDurationMinutes,
-      quotedAmountMinor: draft.quotedAmountMinor,
-      currency: draft.currency,
+      // Money stays out of the trail: it records WHICH money fields were set, never the amount (same rule as outcomes).
+      moneyFields: [...(draft.quotedAmountMinor !== undefined && draft.quotedAmountMinor !== null ? ["quotedAmountMinor"] : []), ...(draft.currency ? ["currency"] : [])],
     }),
   });
 

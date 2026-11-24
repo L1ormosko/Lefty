@@ -39,14 +39,24 @@ async function pendingSession(user: TestUser) {
   return { ...login, actor };
 }
 
+/** Returns at once unless fewer than 8 seconds remain in the current 30-second TOTP step; then waits for the next one. */
+async function waitForStepStart(): Promise<void> {
+  const remainingMs = 30_000 - (Date.now() % 30_000);
+  if (remainingMs < 8_000) await new Promise((resolve) => setTimeout(resolve, remainingMs + 50));
+}
+
 /** Enrolls the user and completes the first login; returns a function producing valid codes. */
 async function enrol(user: TestUser) {
   await assignRole(user, { requiresMfa: true });
   const { actor, token } = await pendingSession(user);
   const enrollment = await startMfaEnrollment(actor, testClient());
   const secret = base32Decode(enrollment.secret);
+  // Pin the step: a test that straddled a 30-second boundary used to get a DIFFERENT "current" code halfway through and
+  // flake. Start at the beginning of a fresh step (waiting out the last seconds of one) and derive every code from it.
+  await waitForStepStart();
+  const baseStep = totpTimeStep(Date.now());
   // Codes for the adjacent step avoid the replay guard when the test needs several valid codes.
-  const codeAt = (stepOffset: number) => hotp(secret, totpTimeStep(Date.now()) + stepOffset);
+  const codeAt = (stepOffset: number) => hotp(secret, baseStep + stepOffset);
   const promoted = await confirmMfaEnrollment(actor, codeAt(0), testClient());
   if (!promoted) throw new Error("expected the pending session to be promoted");
   return { actor, pendingToken: token, token: promoted.token, secret, codeAt, enrollment };
@@ -157,14 +167,14 @@ describe("MFA login path", () => {
 
   it("refuses a code that was already used (replay)", async () => {
     const user = await createTenantWithUser();
-    const { secret, codeAt } = await enrol(user);
+    const { codeAt } = await enrol(user);
     const login = await loginAs(user);
     const actor = await authenticateMfaRequest(requestWithToken(login.token));
 
     // codeAt(0) was consumed by the enrollment confirmation.
     await expect(verifyMfaChallenge(actor, codeAt(0), testClient())).rejects.toBeInstanceOf(ValidationError);
     // An older in-window step is refused once a newer one was accepted, so it is refused here too.
-    await expect(verifyMfaChallenge(actor, hotp(secret, totpTimeStep(Date.now()) - 1), testClient())).rejects.toBeInstanceOf(ValidationError);
+    await expect(verifyMfaChallenge(actor, codeAt(-1), testClient())).rejects.toBeInstanceOf(ValidationError);
     const promoted = await verifyMfaChallenge(actor, codeAt(1), testClient());
     await expect(authenticateRequest(requestWithToken(promoted!.token))).resolves.toBeTruthy();
   });
