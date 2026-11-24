@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FieldEvent, Prisma } from "@prisma/client";
-import { findCoordinateKey } from "@/lib/location-rules";
+import { checkOccurredAt, findCoordinateKey } from "@/lib/location-rules";
 import { ConflictError, InvalidStateTransitionError, ValidationError, type AppError } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { logger } from "@/server/logging";
@@ -152,6 +152,12 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
         if (row.result !== "ACCEPTED") throw refusalFromCode(row.resultCode ?? "VALIDATION_FAILED");
         if (!row.entityType || !row.entityId) throw new ConflictError({ message: "This event is still being processed. Retry shortly.", retryable: true });
         return { result: await handlers.replay(tx, { type: row.entityType, id: row.entityId, shiftId: row.shiftId ?? undefined }), replayed: true };
+      }
+      // The device time is judged on FIRST delivery only: a late replay of an accepted event must still be answered.
+      // A time ahead of the server clock is retryable (it becomes valid); one older than a week is a stored verdict.
+      const problem = checkOccurredAt(request.occurredAt, new Date());
+      if (problem !== null) {
+        throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
       }
       const { result, entity } = await handlers.apply(tx, row.id);
       await tx.fieldEvent.update({

@@ -27,7 +27,7 @@ async function viewJob(tx: TenantTx, tenantId: string, jobId: string): Promise<S
 export async function startWork(actor: Actor, ctx: RequestContext, jobId: string, input: StartWorkInput): Promise<StartWorkResult & { replayed: boolean }> {
   const self: EmployeeActor = requireEmployee(actor);
   const now = new Date();
-  const startedAt = eventTime(input.occurredAt, now);
+  const startedAt = eventTime(input.occurredAt, now, input.clientEventId !== undefined);
 
   const apply = async (tx: TenantTx) => {
     const job = await loadJobForChange(tx, actor.tenantId, jobId); // locks the row

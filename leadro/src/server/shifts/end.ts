@@ -55,7 +55,7 @@ async function findShiftToEnd(tx: TenantTx, actor: Actor, shiftId: string | unde
 export async function endShift(actor: Actor, ctx: RequestContext, shiftId: string | undefined, input: EndShiftInput): Promise<EndShiftResult> {
   if (!shiftId && !actor.employeeId) throw new ForbiddenError();
   const now = new Date();
-  const endedAt = boundaryTime(input.occurredAt, now);
+  const endedAt = boundaryTime(input.occurredAt, now, input.clientEventId !== undefined);
 
   const apply = async (tx: TenantTx, fieldEventId: string | undefined): Promise<{ result: EndShiftResult; shiftId: string; employeeId: string }> => {
     await enforceInTx(tx, actor, "shifts.edit");

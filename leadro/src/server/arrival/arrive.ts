@@ -49,7 +49,7 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
   if (input.occurredAt && input.position && Math.abs(input.occurredAt.getTime() - input.position.deviceTime.getTime()) > MAX_CLOCK_SKEW_MS) {
     throw new ValidationError({ message: "occurredAt and the position's device time disagree.", field: "occurredAt" });
   }
-  const reportedAt = eventTime(input.occurredAt ?? input.position?.deviceTime, now);
+  const reportedAt = eventTime(input.occurredAt ?? input.position?.deviceTime, now, input.clientEventId !== undefined);
   const notificationIds: string[] = [];
 
   const apply = async (tx: TenantTx, fieldEventId: string | undefined) => {

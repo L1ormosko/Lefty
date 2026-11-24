@@ -37,7 +37,7 @@ export async function startShift(actor: Actor, ctx: RequestContext, input: Start
   if (!actor.employeeId) throw new ForbiddenError();
   const employeeId = actor.employeeId;
   const now = new Date();
-  const startedAt = boundaryTime(input.occurredAt, now);
+  const startedAt = boundaryTime(input.occurredAt, now, input.clientEventId !== undefined);
 
   const apply = async (tx: TenantTx, fieldEventId: string | undefined): Promise<{ result: StartShiftResult; shiftId: string }> => {
     await enforceInTx(tx, actor, "shifts.create", { employeeId, ownerEmployeeId: employeeId });

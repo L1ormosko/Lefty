@@ -63,7 +63,8 @@ export async function recordLocationEvent(actor: Actor, ctx: RequestContext, inp
     throw new ValidationError({ message: "occurredAt and the position's device time disagree.", field: "occurredAt" });
   }
   const occurredAt = input.occurredAt ?? input.position?.deviceTime ?? now;
-  if (checkOccurredAt(occurredAt, now) !== null) {
+  // With a clientEventId the shared gate judges the time on first delivery only (a late replay must still answer).
+  if (!input.clientEventId && checkOccurredAt(occurredAt, now) !== null) {
     throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
   }
 

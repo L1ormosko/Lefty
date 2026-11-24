@@ -99,18 +99,27 @@ export interface JobFieldWriteSpec<T> {
 }
 
 /**
+ * The device time must be believable: not ahead of the server clock beyond drift (retryable: it becomes valid later) and
+ * not older than a week (§8.7). Judged on FIRST delivery only, inside the work: a late replay of an event that was already
+ * accepted must still be answered from the stored result, not refused because it is now "too old".
+ */
+function assertBelievableTime(occurredAt: Date | undefined, now: Date): void {
+  if (!occurredAt) return;
+  const problem = checkOccurredAt(occurredAt, now);
+  if (problem === null) return;
+  throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt", retryable: problem === "IN_THE_FUTURE" });
+}
+
+/**
  * Runs one job-scoped field write, through the shared offline gate when it carries a `clientEventId` (idempotent per
- * employee, a changed payload under a reused id is a 409, a refusal is remembered), plainly otherwise. A device time in
- * the future (beyond clock drift) or older than a week is refused (§8.7).
+ * employee, a changed payload under a reused id is a 409, a content refusal is remembered), plainly otherwise.
  */
 export async function runJobFieldWrite<T>(actor: Actor, spec: JobFieldWriteSpec<T>): Promise<{ result: T; replayed: boolean }> {
   const now = new Date();
   const occurredAt = spec.envelope.occurredAt ?? now;
-  if (spec.envelope.occurredAt && checkOccurredAt(occurredAt, now) !== null) {
-    throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
-  }
   const { clientEventId } = spec.envelope;
   if (!clientEventId) {
+    assertBelievableTime(spec.envelope.occurredAt, now);
     const done = await withTenant(actor.tenantId, (tx) => spec.apply(tx, occurredAt));
     return { result: done.result, replayed: false };
   }
@@ -129,7 +138,11 @@ export async function runJobFieldWrite<T>(actor: Actor, spec: JobFieldWriteSpec<
       // What the device sent: a defaulted occurredAt is not part of it, so a retry without one still matches.
       payloadHash: hashFieldEventContent({ type: spec.type, jobId: spec.jobId, content: spec.content, occurredAt: spec.envelope.occurredAt }),
     },
-    { apply: (tx) => spec.apply(tx, occurredAt), replay: (tx, entity) => spec.replay(tx, entity.id) },
+    {
+      // The gate judges the device time on first delivery only.
+      apply: (tx) => spec.apply(tx, occurredAt),
+      replay: (tx, entity) => spec.replay(tx, entity.id),
+    },
   );
   return { result: outcome.result, replayed: outcome.replayed };
 }

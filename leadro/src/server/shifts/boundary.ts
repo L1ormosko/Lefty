@@ -15,9 +15,10 @@ export async function lockEmployee(tx: TenantTx, tenantId: string, employeeId: s
 }
 
 /** When the boundary happened: the device's `occurredAt` (offline events) or now. Refuses futures and ancient events. */
-export function boundaryTime(occurredAt: Date | undefined, now: Date): Date {
+/** `judgedByGate`: the write carries a `clientEventId`, so the shared gate judges the time on first delivery only (a late replay must still answer). */
+export function boundaryTime(occurredAt: Date | undefined, now: Date, judgedByGate = false): Date {
   const at = occurredAt ?? now;
-  if (checkOccurredAt(at, now) !== null) {
+  if (!judgedByGate && checkOccurredAt(at, now) !== null) {
     throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });
   }
   return at;

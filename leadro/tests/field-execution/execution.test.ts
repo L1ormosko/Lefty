@@ -138,6 +138,18 @@ describe("field notes (§8.5)", () => {
     expect(stale.status).toBe(400);
   });
 
+  it("judges the device time on first delivery only: a replay of an accepted event that has since become 'too old' still answers", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    const body = { body: "borderline", clientEventId: randomUUID(), occurredAt: new Date(Date.now() - 7 * 86_400_000 + 2000).toISOString() };
+    expect((await note(w.cookie.techA1, job.id, body)).status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 2500)); // the event is now older than the week the server accepts
+    const replay = await note(w.cookie.techA1, job.id, body);
+    expect(replay.status).toBe(200);
+    expect(replay.json.data.replayed).toBe(true);
+    // A new event with the same stale time is refused (a stored verdict: too old will not change).
+    expect((await note(w.cookie.techA1, job.id, { ...body, clientEventId: randomUUID() })).status).toBe(400);
+  });
+
   it("re-checks access on a replay: once the technician lost the job, the answer is refused", async () => {
     const job = await jobAt("IN_PROGRESS");
     const body = { body: "before reassignment", clientEventId: randomUUID() };
