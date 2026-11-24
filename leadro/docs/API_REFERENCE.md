@@ -2106,6 +2106,50 @@ retention period (tenant `locationRetentionDays`, default 90) the coordinates ar
 - **Response**: `201 { data: event }`, `200` for a repeated `clientEventId` (same event). The event is projected to the caller's grant: never coordinates.
 - **Errors**: `400` (no accuracy, bad range, blank departure, time in the future); `403`; `404`; `409 CONFLICT` reused `clientEventId` with different content.
 - **Audit**: `location.record` (kind, source, accuracy, job; never coordinates).
+
+## Arrival and field steps (`/api/v1/jobs/{id}/...`) - Phase 3
+
+Code: `src/server/arrival` (README there), pure rules `src/lib/arrival-rules.ts`, routes `src/app/api/v1/jobs/[id]/{arrive,start-work,navigation-opened,arrivals}`.
+Spec 8.3, 8.4, 17.2, 17.4. Design decisions: `DECISIONS.md` "Phase 3 Task 3". An arrival holds distance, accuracy, radius, codes and a `confidence` code
+(`ARRIVAL.CONFIDENCE.*`): wording is about confidence, never certainty. Coordinates are never returned.
+
+### POST /api/v1/jobs/{id}/arrive
+
+- **Purpose**: the assigned technician confirms arrival at a job that is `EN_ROUTE`. The job moves to `ARRIVED`; the server compares the reported position with the
+  service address (straight-line distance against the address's radius, else the tenant default) and records the verdict with its accuracy.
+- **Auth**: session. **Permission**: `location.create` (own record) and the job assigned to the caller (`404` otherwise).
+- **Request body** (strict): `position { latitude, longitude, accuracyM, deviceTime }` OR `exception { code, note }` (exactly one), `trigger` (`TECHNICIAN` default, or
+  `GEOFENCE` for a device geofence event, which needs a position), `clientEventId`, `occurredAt`, `deviceId`.
+- **Response**: `201 { data: { arrival, job: { id, status } } }`, `200` for a repeated `clientEventId`. `arrival.status` is `RECORDED` (inside the radius with a usable
+  accuracy: a candidate, not proof) or `PENDING_MANAGER_REVIEW` (outside, too vague, no position, address without coordinates; `exceptionReason` says which). Managers
+  with `location.approve` over the job's unit are notified (`job.arrival_unverified`).
+- **Errors**: `400` (neither or both of position / exception, no accuracy, time in the future); `403`; `404`; `409` (job not EN_ROUTE, reused `clientEventId` with different content).
+- **Audit**: `arrival.record` (status, verdict, distance, accuracy; never coordinates). Job event `job.arrival_recorded`.
+
+### POST /api/v1/jobs/{id}/start-work
+
+- **Purpose**: the technician starts the work: `ARRIVED` to `IN_PROGRESS`, stamping `startedAt` (the device time when `occurredAt` is sent, never before the arrival).
+- **Auth**: session. **Permission**: `jobs.edit` over the job with `status` writable (execution grant), job assigned to the caller (`404` otherwise).
+- **Request body** (strict): `clientEventId`, `occurredAt`, `deviceId`. **Response**: `200 { data: { job: { id, status, startedAt } } }` (same answer on a replay).
+- **Errors**: `403`; `404`; `409` (job not ARRIVED, or a manager rejected the arrival, or reused `clientEventId` with different content).
+
+### POST /api/v1/jobs/{id}/navigation-opened
+
+- **Purpose**: record that the technician opened navigation. Informational: never changes the job status and never counts as arrival.
+- **Auth/body/response**: as `POST /location-events` with `kind: NAVIGATION_OPENED` (position or exception optional); `201`, `200` on replay; no coordinates in the response.
+
+### GET /api/v1/jobs/{id}/arrivals
+
+- **Purpose**: the arrivals of the job, newest first. **Permission**: `location.view` over the job. **Response**: `200 { data: [arrival] }`; no coordinates.
+
+### POST /api/v1/jobs/{id}/arrivals/{arrivalId}/verify
+
+- **Purpose**: a manager verifies or rejects an arrival (also one the server accepted: an override), with a mandatory reason.
+- **Permission**: `location.approve` over the job. Nobody decides their own arrival. **Request body** (strict): `decision` (`VERIFIED` | `REJECTED`), `note` (1-500 chars).
+- **Response**: `200 { data: arrival }` with `status` `MANAGER_VERIFIED` / `MANAGER_REJECTED`, `verifiedByUserId`, `verifiedAt`, `verificationNote`. VERIFIED also records a
+  `VERIFICATION` location event by the manager. REJECTED leaves the job status as it is and blocks that technician's `start-work`.
+- **Errors**: `400` (no reason); `403`; `404`; `409` (already decided). **Audit**: `arrival.verify` (status change, reason).
+
 ## Job outcomes and lost reasons (`/api/v1/jobs/{id}/outcome`, `/api/v1/job-outcomes`, `/api/v1/lost-reasons`) - Phase 3
 
 Code: `src/server/job-outcomes` (README there), pure rules `src/lib/job-outcome-rules.ts`, routes `src/app/api/v1/{job-outcomes,lost-reasons}/**`
