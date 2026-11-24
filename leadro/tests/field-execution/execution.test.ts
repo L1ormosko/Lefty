@@ -51,6 +51,17 @@ async function jobAt(upTo: "SCHEDULED" | "EN_ROUTE" | "IN_PROGRESS") {
   return job;
 }
 
+describe("who may speak for the customer or sign off the work", () => {
+  it("lets a manager add plain notes, but only the assigned employee records the customer's approval or the completion form", async () => {
+    const job = await jobAt("IN_PROGRESS");
+    expect((await note(w.cookie.ceo, job.id, { body: "Manager remark" })).status).toBe(201);
+    const approval = await note(w.cookie.ceo, job.id, { kind: "CUSTOMER_APPROVAL", body: "They said yes", customerApproved: true });
+    expect(approval.status).toBe(403);
+    expect((await post(completionRoute, w.cookie.ceo, job.id, { notes: "done" })).status).toBe(403);
+    expect((await note(w.cookie.techA1, job.id, { kind: "CUSTOMER_APPROVAL", body: "Approved on site", customerApproved: true })).status).toBe(201);
+  });
+});
+
 describe("field notes (§8.5)", () => {
   it("records notes, additional work with an estimate and the customer's approval, and keeps free text out of events and audit", async () => {
     const job = await jobAt("IN_PROGRESS");

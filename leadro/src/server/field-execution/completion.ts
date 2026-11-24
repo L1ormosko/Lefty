@@ -6,7 +6,7 @@ import { enforceInTx } from "@/server/authz";
 import { ConflictError, ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { recordJobEvent } from "@/server/jobs";
-import { authorizeFieldRead, authorizeFieldWrite, runJobFieldWrite } from "./access";
+import { assertWorkedByCaller, authorizeFieldRead, authorizeFieldWrite, runJobFieldWrite } from "./access";
 import { resolveActiveFormForJob } from "./form-definitions";
 import type { ListFieldRecordsQuery, SubmitCompletionInput } from "./schemas";
 
@@ -108,8 +108,9 @@ export async function submitCompletion(actor: Actor, ctx: RequestContext, jobId:
     payload: { signature: input.signatureAttachmentId !== undefined },
     apply: async (tx, occurredAt) => {
       await enforceInTx(tx, actor, "completion_forms.view");
-      const { job } = await authorizeFieldWrite(tx, actor, jobId);
+      const { job, ref } = await authorizeFieldWrite(tx, actor, jobId);
       if (!actor.employeeId) throw new ForbiddenError({ message: "Only an employee can submit a completion form." });
+      assertWorkedByCaller(ref, actor, "the completion form");
       if (!COMPLETABLE_STATUSES.includes(job.status)) {
         throw new InvalidStateTransitionError({
           retryable: canStillReach(job.status, "IN_PROGRESS"), // ordering: the work-start event may not have synced yet

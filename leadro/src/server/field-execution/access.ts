@@ -1,7 +1,7 @@
 import { hashFieldEventContent } from "@/lib/location-rules";
-import type { JobStatusValue } from "@/lib/job-lifecycle";
+import { canStillReach, type JobStatusValue } from "@/lib/job-lifecycle";
 import { enforceInTx, type ResourceRef } from "@/server/authz";
-import { InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
+import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { assertBelievableEventTime, runFieldEvent, type FieldEventEntity } from "@/server/field-events";
 import { jobResourceRef, loadJobForChange, type JobForChange } from "@/server/jobs";
@@ -29,8 +29,6 @@ const FIELD_RECORDING_STATUSES: readonly JobStatusValue[] = [
   "ON_HOLD",
   "RESCHEDULED",
 ];
-
-const PRE_FIELD_STATUSES: readonly JobStatusValue[] = ["CREATED", "PENDING_ASSIGNMENT", "ASSIGNED", "SCHEDULED"];
 
 export interface FieldJobContext {
   ref: ResourceRef;
@@ -63,13 +61,25 @@ export async function authorizeFieldWrite(tx: TenantTx, actor: Actor, jobId: str
   if (!FIELD_RECORDING_STATUSES.includes(job.status)) {
     throw new InvalidStateTransitionError({
       // Before the field phase the earlier events (EN_ROUTE...) may not have synced yet: retryable, never stored.
-      retryable: PRE_FIELD_STATUSES.includes(job.status),
+      retryable: canStillReach(job.status, "EN_ROUTE"),
       message: "Field records can only be added once the job is under way and before it is closed.",
       details: [{ field: "jobId", code: "job_field.not_in_field_state", message: `The job is ${job.status}.` }],
     });
   }
   const { currency } = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { currency: true } });
   return { ref, job, currency, mayHandleMoney: await holdsOutcomeFinancialSet(tx, actor, ref) };
+}
+
+/**
+ * Statements made in the customer's name (their approval of extra work) and the completion form are the act of the person
+ * who worked the visit: only an employee ASSIGNED to the job may make them. Managers can still read and correct records
+ * through the audited paths, but never speak for the customer or sign off the work.
+ * @throws ForbiddenError
+ */
+export function assertWorkedByCaller(ref: ResourceRef, actor: Actor, what: string): void {
+  if (!actor.employeeId || !ref.assignedEmployeeIds?.includes(actor.employeeId)) {
+    throw new ForbiddenError({ message: `Only an employee assigned to the job can record ${what}.` });
+  }
 }
 
 export interface FieldWriteEnvelope {

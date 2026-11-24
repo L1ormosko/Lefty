@@ -1,9 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
+import { JOB_FIELD_NOTE_FIELD_MAP, projectFields } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { recordJobEvent } from "@/server/jobs";
-import { authorizeFieldRead, authorizeFieldWrite, runJobFieldWrite } from "./access";
+import { assertWorkedByCaller, authorizeFieldRead, authorizeFieldWrite, runJobFieldWrite } from "./access";
 import { holdsOutcomeFinancialSet } from "@/server/job-outcomes";
 import type { ListFieldRecordsQuery, RecordFieldNoteInput } from "./schemas";
 
@@ -31,8 +32,7 @@ type NoteRow = Prisma.JobFieldNoteGetPayload<{ select: typeof NOTE_COLUMNS }>;
 
 /** The amount and currency show only to callers who hold the financial set (§22.2 least privilege). */
 function viewNote(row: NoteRow, mayHandleMoney: boolean): Record<string, unknown> {
-  const { amountMinor, currency, ...rest } = row;
-  return mayHandleMoney ? { ...rest, amountMinor, currency } : rest;
+  return projectFields(row, { allowed: true, fieldSets: mayHandleMoney ? ["base", "financial"] : ["base"] }, JOB_FIELD_NOTE_FIELD_MAP);
 }
 
 export interface RecordedFieldNote {
@@ -57,7 +57,8 @@ export async function recordFieldNote(actor: Actor, ctx: RequestContext, jobId: 
     content: { ...input, clientEventId: undefined, deviceId: undefined, occurredAt: undefined },
     payload: { kind: input.kind },
     apply: async (tx, occurredAt) => {
-      const { job, currency, mayHandleMoney } = await authorizeFieldWrite(tx, actor, jobId);
+      const { job, currency, mayHandleMoney, ref } = await authorizeFieldWrite(tx, actor, jobId);
+      if (input.kind === "CUSTOMER_APPROVAL") assertWorkedByCaller(ref, actor, "the customer's approval");
       if (input.amountMinor !== undefined && !mayHandleMoney) {
         throw new ForbiddenError({ message: "Your access does not include amounts.", field: "amountMinor" });
       }
