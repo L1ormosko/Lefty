@@ -1,9 +1,9 @@
 import type { FollowUpTargetType, Prisma } from "@prisma/client";
 import { buildScopeWhere, resolveScope, type ResourceRef } from "@/server/authz";
 import type { Actor } from "@/server/core";
-import { jobScopeColumns, resolveCustomerListAccess, customerResourceRef } from "@/server/customers";
+import { resolveCustomerListAccess, customerResourceRef } from "@/server/customers";
 import type { TenantTx } from "@/server/db";
-import { jobResourceRef } from "@/server/jobs";
+import { jobResourceRef, resolveJobListAccess } from "@/server/jobs";
 import { leadResourceRef, resolveLeadListAccess } from "@/server/leads";
 
 /**
@@ -63,8 +63,8 @@ const jobTarget: FollowUpTargetAccess = {
   },
   resourceRef: (tx, tenantId, targetId) => jobResourceRef(tx, tenantId, targetId),
   async listWhere(tx, actor, now) {
-    const scope = await resolveScope(tx, actor, "jobs.view", now);
-    return { targetType: "JOB", job: { is: buildScopeWhere(scope, jobScopeColumns, now) } };
+    const access = await resolveJobListAccess(tx, actor, "jobs.view", now);
+    return { targetType: "JOB", job: { is: access.where } };
   },
 };
 

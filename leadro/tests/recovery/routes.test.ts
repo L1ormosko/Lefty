@@ -17,7 +17,7 @@ import { GET as getCaseRoute } from "@/app/api/v1/lead-recovery/cases/[id]/route
 import { GET as listCasesRoute } from "@/app/api/v1/lead-recovery/cases/route";
 import { POST as statusRoute } from "@/app/api/v1/lead-recovery/cases/[id]/status/route";
 import { GET as summaryRoute } from "@/app/api/v1/lead-recovery/summary/route";
-import { POST as createFollowUpRoute } from "@/app/api/v1/follow-ups/route";
+import { GET as listFollowUpsRoute, POST as createFollowUpRoute } from "@/app/api/v1/follow-ups/route";
 import { withTenant } from "@/server/db";
 import { createPerson, disconnect, grantTemplate, type Person } from "../authz/fixtures";
 import { buildJobsWorld, createJobViaApi, type JobsWorld } from "../jobs/fixtures";
@@ -84,6 +84,12 @@ describe("the full flow over HTTP: rule -> outcome -> case -> work -> recovery",
     expect((await call(getJobRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: job.id } })).status).toBe(200);
     const other = await createJobViaApi(w, {});
     expect((await call(getJobRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: other.id } })).status).toBe(404);
+
+    // A follow-up about that job: the list agrees with the single-record check (the job is open to Lead Ops only through its case).
+    const jobTask = await call(createFollowUpRoute, "POST", "/x", { cookie: leadOpsCookie, body: { targetType: "JOB", targetId: job.id, title: "Job note", dueAt: new Date(Date.now() + 3_600_000).toISOString() } });
+    expect(jobTask.status).toBe(201);
+    const listed = await call(listFollowUpsRoute, "GET", "/x", { cookie: leadOpsCookie });
+    expect(listed.json.data.map((row: { id: string }) => row.id)).toContain(jobTask.json.data.id);
 
     // The follow-up module reaches the case through the recovery module's own access rules.
     const task = await call(createFollowUpRoute, "POST", "/x", { cookie: leadOpsCookie, body: { targetType: "RECOVERY_CASE", targetId: caseRow.id, title: "Call back", dueAt: new Date(Date.now() + 3_600_000).toISOString() } });
