@@ -35,8 +35,8 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     const decision = await enforceInTx(tx, self, "jobs.edit", ref);
     assertWritableFields(decision, ["status"], JOB_FIELD_MAP, JOB_WRITE_ALLOWLISTS);
     if (job.status !== "ARRIVED") {
-      // retryable: the arrival may not have synced yet.
-      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: true });
+      // retryable only while the arrival may still be on its way (the job is EN_ROUTE); otherwise the verdict is stored.
+      throw new InvalidStateTransitionError({ message: `Work can only start after arrival (the job is ${job.status}).`, retryable: job.status === "EN_ROUTE" });
     }
     const latest = await tx.arrivalVerification.findFirst({ where: { tenantId: actor.tenantId, jobId, employeeId: self.employeeId }, orderBy: [{ arrivedAt: "desc" }, { id: "desc" }], select: { status: true, arrivedAt: true } });
     if (latest?.status === "MANAGER_REJECTED") {

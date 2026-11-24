@@ -29,6 +29,8 @@ const FIELD_RECORDING_STATUSES: readonly JobStatusValue[] = [
   "RESCHEDULED",
 ];
 
+const PRE_FIELD_STATUSES: readonly JobStatusValue[] = ["CREATED", "PENDING_ASSIGNMENT", "ASSIGNED", "SCHEDULED"];
+
 export interface FieldJobContext {
   ref: ResourceRef;
   /** The locked job (status, current visit). */
@@ -65,6 +67,8 @@ export async function authorizeFieldWrite(tx: TenantTx, actor: Actor, jobId: str
   const job = await loadJobForChange(tx, actor.tenantId, jobId);
   if (!FIELD_RECORDING_STATUSES.includes(job.status)) {
     throw new InvalidStateTransitionError({
+      // Before the field phase the earlier events (EN_ROUTE...) may not have synced yet: retryable, never stored.
+      retryable: PRE_FIELD_STATUSES.includes(job.status),
       message: "Field records can only be added once the job is under way and before it is closed.",
       details: [{ field: "jobId", code: "job_field.not_in_field_state", message: `The job is ${job.status}.` }],
     });

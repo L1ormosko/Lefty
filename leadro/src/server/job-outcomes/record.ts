@@ -51,8 +51,11 @@ export interface RecordOutcomeInTxResult {
   notificationIds: string[];
 }
 
-const refusal = (field: string, code: string, message: string): ValidationError =>
-  new ValidationError({ message, field, details: [{ field, code, message }] });
+const refusal = (field: string, code: string, message: string, retryable = false): ValidationError =>
+  new ValidationError({ message, field, retryable, details: [{ field, code, message }] });
+
+/** Statuses from which the job may still reach the visit the outcome reports (an earlier offline event may be missing). */
+const CAN_STILL_ADVANCE: readonly string[] = ["ASSIGNED", "SCHEDULED", "RESCHEDULED", "EN_ROUTE", "ARRIVED"];
 
 /** The lost reason must exist, be active and apply to the outcome. */
 async function checkLostReason(tx: TenantTx, tenantId: string, lostReasonId: string, outcome: JobOutcomeTypeValue): Promise<{ id: string; code: string; recoverable: boolean }> {
@@ -128,7 +131,7 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
   if (occurredAt.getTime() > Date.now() + MAX_CLOCK_SKEW_MS) throw refusal("occurredAt", "job_outcome.occurred_in_future", "The time of the outcome cannot be in the future.");
   // The outcome cannot predate the visit it reports: the work start when there was one, else the job itself.
   const earliest = job.startedAt ?? jobFacts.createdAt;
-  if (occurredAt.getTime() < earliest.getTime()) throw refusal("occurredAt", "job_outcome.occurred_too_early", "The time of the outcome cannot be before the visit started.");
+  if (occurredAt.getTime() < earliest.getTime()) throw refusal("occurredAt", "job_outcome.occurred_too_early", "The time of the outcome cannot be before the visit started.", true);
   if (input.currency && input.currency !== jobFacts.currency) throw refusal("currency", "job_outcome.currency_mismatch", "The outcome currency must be the job's currency.");
 
   const existing = await tx.jobOutcome.findFirst({ where: { tenantId, jobId, visitNumber: job.currentVisitNumber }, select: { id: true } });
@@ -141,7 +144,9 @@ export async function recordOutcomeInTx(tx: TenantTx, actor: Actor, audit: Audit
   const normalTarget = outcomeTargetStatus(input.outcome, job.status);
   const retroactive = normalTarget === null && RETROACTIVE_OUTCOME_STATUSES.includes(job.status);
   if (!normalTarget && !retroactive) {
+    // Retryable while the job can still advance (its start-work event may not have synced yet); never stored then.
     throw new InvalidStateTransitionError({
+      retryable: CAN_STILL_ADVANCE.includes(job.status),
       message: `The outcome ${input.outcome} cannot be reported while the job is ${job.status}.`,
       details: [{ field: "outcome", code: "job_outcome.not_reportable", message: `The outcome ${input.outcome} cannot be reported while the job is ${job.status}.` }],
     });

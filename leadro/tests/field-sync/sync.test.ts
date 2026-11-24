@@ -76,7 +76,7 @@ describe("POST /field-sync: ordering, results and isolation of failures", () => 
     expect(byId[unknown.clientEventId]).toMatchObject({ status: "UNSUPPORTED", code: "UNSUPPORTED_EVENT_TYPE" });
     expect(byId[notTheirs.clientEventId]).toMatchObject({ status: "FORBIDDEN", retryable: true });
     expect(byId[missingJob.clientEventId]).toMatchObject({ status: "REJECTED", code: "VALIDATION_FAILED" });
-    expect(byId[badState.clientEventId]).toMatchObject({ status: "CONFLICT", retryable: false });
+    expect(byId[badState.clientEventId]).toMatchObject({ status: "CONFLICT", retryable: true });
     expect(byId[good2.clientEventId].status).toBe("ACCEPTED");
     expect(byId[good2.clientEventId].result.material).toMatchObject({ name: "Pipe", quantity: 2 });
     expect(response.json.data.summary).toEqual({ total: 7, accepted: 2, replayed: 0, rejected: 2, conflict: 1, forbidden: 1, unsupported: 1, failed: 0 });
@@ -106,13 +106,47 @@ describe("POST /field-sync: ordering, results and isolation of failures", () => 
     expect((await withTenant(w.tenantId, (tx) => tx.jobFieldNote.findMany({ where: { jobId: job.id } }))).map((note) => note.body)).toEqual(["original"]);
   });
 
-  it("remembers a refusal: the same refused event is refused again, even after the state would allow it", async () => {
+  it("remembers a verdict on the content, but never a refusal caused by order or configuration (those stay retryable)", async () => {
     const job = await jobInProgress();
-    const refused = event("job.completion", job.id, { notes: "x" }, minutesAgo(5));
-    expect((await sync(w.cookie.techA1, [refused])).json.data.results[0].status).toBe("CONFLICT"); // no active form
-    const row = (await fieldEvents([refused.clientEventId]))[0];
-    expect(row).toMatchObject({ result: "REJECTED", resultCode: "CONFLICT", type: "job.completion" });
-    expect((await sync(w.cookie.techA1, [refused])).json.data.results[0]).toMatchObject({ status: "CONFLICT" });
+    // Content verdict: an amount in a currency that is not the job's will never be right.
+    const wrong = event("job.note", job.id, { kind: "ADDITIONAL_WORK_REQUESTED", body: "x", amountMinor: 5, currency: "EUR" }, minutesAgo(5));
+    const first = (await sync(w.cookie.techA1, [wrong])).json.data.results[0];
+    expect(first).toMatchObject({ status: "REJECTED", retryable: false });
+    expect((await fieldEvents([wrong.clientEventId]))[0]).toMatchObject({ result: "REJECTED", type: "job.note" });
+    expect((await sync(w.cookie.techA1, [wrong])).json.data.results[0]).toMatchObject({ status: "REJECTED" });
+    expect((await sync(w.cookie.techA1, [wrong])).json.data.results[0].details[0].code).toBe(first.details[0].code); // the stored reason replays identically
+
+    // State / configuration: no active form yet. Reported retryable and NOT stored, so it can succeed later.
+    const early = event("job.completion", job.id, { notes: "x" }, minutesAgo(4));
+    expect((await sync(w.cookie.techA1, [early])).json.data.results[0]).toMatchObject({ status: "CONFLICT", retryable: true });
+    expect(await fieldEvents([early.clientEventId])).toHaveLength(0);
+
+    // Order: a note for a job that is not in the field phase yet is retryable too.
+    const scheduled = await createJobViaApi(w);
+    await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: scheduled.id }, body: { employeeId: w.techA1.employeeId } });
+    const tooSoon = event("job.note", scheduled.id, { body: "early" }, minutesAgo(3));
+    expect((await sync(w.cookie.techA1, [tooSoon])).json.data.results[0]).toMatchObject({ status: "REJECTED", retryable: true });
+    expect(await fieldEvents([tooSoon.clientEventId])).toHaveLength(0);
+  });
+});
+
+describe("POST /field-sync: an event that arrived before its predecessor can be sent again", () => {
+  it("does not remember 'job_outcome.not_reportable' while the job can still advance, so the same event succeeds after start-work", async () => {
+    const job = await createJobViaApi(w);
+    await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, body: { employeeId: w.techA1.employeeId } });
+    const start = Date.now() + 2 * 86_400_000;
+    await call(rescheduleRoute, "POST", "/x", {
+      cookie: w.cookie.dispatcher,
+      params: { id: job.id },
+      body: { scheduledSlot: { start: new Date(start).toISOString(), end: new Date(start + 2 * 3_600_000).toISOString() } },
+    });
+    for (const status of ["EN_ROUTE", "ARRIVED"]) expect((await move(job.id, status)).status).toBe(200);
+    const outcome = event("job.outcome", job.id, { outcome: "SOLD", chargedAmountMinor: 500 }, new Date(Date.now() + 1000).toISOString());
+    const early = (await sync(w.cookie.techA1, [outcome])).json.data.results[0];
+    expect(early).toMatchObject({ status: "REJECTED", retryable: true });
+    expect(await fieldEvents([outcome.clientEventId])).toHaveLength(0);
+    expect((await move(job.id, "IN_PROGRESS")).status).toBe(200);
+    expect((await sync(w.cookie.techA1, [outcome])).json.data.results[0].status).toBe("ACCEPTED");
   });
 });
 
@@ -120,7 +154,7 @@ describe("POST /field-sync: batch id, event types and the registry", () => {
   it("stores the batch id on every event row (accepted or refused) and keeps the first batch on a replay", async () => {
     const job = await jobInProgress();
     const ok = event("job.note", job.id, { body: "labelled" }, minutesAgo(5));
-    const refused = event("job.completion", job.id, { notes: "x" }, minutesAgo(4));
+    const refused = event("job.note", job.id, { kind: "ADDITIONAL_WORK_REQUESTED", body: "x", amountMinor: 5, currency: "EUR" }, minutesAgo(4));
     const batchId = `batch-${randomUUID()}`;
     await sync(w.cookie.techA1, [ok, refused], batchId);
     const rows = await fieldEvents([ok.clientEventId, refused.clientEventId]);

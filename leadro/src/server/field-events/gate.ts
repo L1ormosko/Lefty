@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { FieldEvent, Prisma } from "@prisma/client";
 import { findCoordinateKey } from "@/lib/location-rules";
 import { ConflictError, InvalidStateTransitionError, ValidationError, type AppError } from "@/server/core";
@@ -72,11 +73,19 @@ type StoredRefusal = (typeof STORED_REFUSALS)[number];
 const isStoredRefusal = (error: unknown): error is AppError & { code: StoredRefusal } =>
   typeof error === "object" && error !== null && "code" in error && STORED_REFUSALS.includes((error as AppError).code as StoredRefusal);
 
-function refusalFromCode(code: string): Error {
+/**
+ * `resultCode` is the error code, plus ":" and the first detail code when the refusal had one (`CONFLICT:completion.already_submitted`),
+ * so a replay answers with the same machine-readable reason the first delivery got.
+ */
+const resultCodeOf = (error: AppError): string => (error.details?.[0]?.code ? `${error.code}:${error.details[0].code}` : error.code);
+
+function refusalFromCode(stored: string): Error {
+  const [code, detailCode] = stored.split(":", 2);
   const message = "This event was refused when it was first received. Send a corrected event with a new clientEventId.";
-  if (code === "INVALID_STATE_TRANSITION") return new InvalidStateTransitionError({ message });
-  if (code === "CONFLICT") return new ConflictError({ message });
-  return new ValidationError({ message });
+  const options = { message, ...(detailCode ? { details: [{ field: "clientEventId", code: detailCode, message }] } : {}) };
+  if (code === "INVALID_STATE_TRANSITION") return new InvalidStateTransitionError(options);
+  if (code === "CONFLICT") return new ConflictError(options);
+  return new ValidationError(options);
 }
 
 /** Conflicts raised for a reused id are not stored as refusals (the stored event is the first one, and stays valid). */
@@ -94,6 +103,11 @@ function sameContentConflict(code: string = DEFAULT_REUSED_ID_CODE): ConflictErr
   return error;
 }
 
+const batchContext = new AsyncLocalStorage<string>();
+
+/** Runs `work` so every FieldEvent row it CREATES carries `batchId` (used by the sync endpoint). */
+export const withFieldEventBatch = <T>(batchId: string, work: () => Promise<T>): Promise<T> => batchContext.run(batchId, work);
+
 /** Inserts the event row if nobody has; returns the row either way and whether this call inserted it. */
 async function claim(tx: TenantTx, request: FieldEventRequest, result: "ACCEPTED" | "REJECTED", resultCode?: string): Promise<{ row: FieldEvent; inserted: boolean }> {
   const offending = request.payload ? findCoordinateKey(request.payload) : null;
@@ -108,7 +122,8 @@ async function claim(tx: TenantTx, request: FieldEventRequest, result: "ACCEPTED
         type: request.type,
         jobId: request.jobId,
         deviceId: request.deviceId,
-        batchId: request.batchId,
+        // The batch of the sync call in progress labels the rows IT creates (a replayed event keeps its first batch).
+        batchId: request.batchId ?? batchContext.getStore(),
         occurredAt: request.occurredAt,
         payload: request.payload,
         payloadHash: request.payloadHash,
@@ -147,7 +162,7 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
     });
   } catch (error) {
     // A refusal marked retryable depends on the ORDER events arrive in (e.g. "job not EN_ROUTE yet"): it must not stick to the id.
-    if (isStoredRefusal(error) && !isReusedIdConflict(error) && !error.retryable) await rememberRefusal(request, error.code);
+    if (isStoredRefusal(error) && !isReusedIdConflict(error) && !error.retryable) await rememberRefusal(request, resultCodeOf(error));
     throw error;
   }
 }
@@ -155,7 +170,7 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
 const isReusedIdConflict = (error: AppError): boolean => reusedIdConflicts.has(error);
 
 /** Stores the refusal in its own transaction; a failure here must not hide the original error. */
-async function rememberRefusal(request: FieldEventRequest, code: StoredRefusal): Promise<void> {
+async function rememberRefusal(request: FieldEventRequest, code: string): Promise<void> {
   try {
     await withTenant(request.tenantId, async (tx) => {
       // A row already exists when this refusal is itself a replay (or a concurrent copy stored it): nothing to add.

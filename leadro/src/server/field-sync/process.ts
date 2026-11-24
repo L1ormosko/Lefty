@@ -1,7 +1,7 @@
 import { ZodError } from "zod";
 import { AppError, ForbiddenError, zodIssuesToFieldIssues, type Actor, type FieldIssue, type RequestContext } from "@/server/core";
-import { withTenant } from "@/server/db";
 import { logger } from "@/server/logging";
+import { withFieldEventBatch } from "@/server/field-events";
 import { findFieldSyncHandler, type FieldSyncEvent } from "./registry";
 import type { SyncBatchInput } from "./schemas";
 
@@ -50,54 +50,37 @@ export interface SyncBatchResult {
 function statusOfError(error: AppError): { status: SyncStatus; retryable: boolean } {
   switch (error.code) {
     case "CONFLICT":
-      // "still being processed" (retryable) is also a CONFLICT: the device retries it.
       return { status: "CONFLICT", retryable: error.retryable };
     case "VALIDATION_FAILED":
     case "INVALID_STATE_TRANSITION":
-      return { status: "REJECTED", retryable: false };
-    case "FORBIDDEN":
+      // `retryable` marks refusals caused by ORDER or configuration (the job is not EN_ROUTE yet, no form published yet):
+      // the gate does not remember them, so the same event may be sent again once the cause is gone.
+      return { status: "REJECTED", retryable: error.retryable };
     case "NOT_FOUND":
-    case "UNAUTHENTICATED":
-      // Not stored: the caller may gain access (a job assigned, a role granted) and send it again.
+      // A job not (yet) assigned to the caller: not remembered, may become visible later.
       return { status: "FORBIDDEN", retryable: true };
+    case "FORBIDDEN":
+    case "UNAUTHENTICATED":
+      // A permission or field-set refusal ("amount without the financial set") does not change by waiting.
+      return { status: "FORBIDDEN", retryable: error.retryable };
     default:
       return { status: "FAILED", retryable: true };
   }
 }
 
-/** Writes the batch id on the event's FieldEvent row when it has one and none is set yet (a replay keeps its first batch). */
-async function stampBatch(actor: Actor, employeeId: string, clientEventId: string, batchId: string): Promise<void> {
-  try {
-    await withTenant(actor.tenantId, (tx) =>
-      tx.fieldEvent.updateMany({ where: { tenantId: actor.tenantId, employeeId, clientEventId, batchId: null }, data: { batchId } }),
-    );
-  } catch (error) {
-    // The event itself was applied; losing its batch label must not turn a success into a failure.
-    logger.error("could not stamp the sync batch id", { tenantId: actor.tenantId, error: String(error) });
-  }
-}
+/** The services report a repeated delivery themselves (`replayed`); the sync reads that instead of looking the row up first. */
+const wasReplayed = (result: unknown): boolean => typeof result === "object" && result !== null && (result as { replayed?: unknown }).replayed === true;
 
-async function wasAlreadyAccepted(actor: Actor, employeeId: string, clientEventId: string): Promise<boolean> {
-  const earlier = await withTenant(actor.tenantId, (tx) =>
-    tx.fieldEvent.findFirst({ where: { tenantId: actor.tenantId, employeeId, clientEventId }, select: { result: true } }),
-  );
-  return earlier?.result === "ACCEPTED";
-}
-
-async function applyOne(actor: Actor, ctx: RequestContext, employeeId: string, batchId: string, event: FieldSyncEvent, index: number, sequence: number): Promise<SyncEventResult> {
+async function applyOne(actor: Actor, ctx: RequestContext, batchId: string, event: FieldSyncEvent, index: number, sequence: number): Promise<SyncEventResult> {
   const base = { index, clientEventId: event.clientEventId, type: event.type, sequence };
   const handler = findFieldSyncHandler(event.type);
   if (!handler) {
     return { ...base, status: "UNSUPPORTED", code: "UNSUPPORTED_EVENT_TYPE", message: `The server does not know the event type "${event.type}".`, retryable: false };
   }
   try {
-    const alreadyAccepted = await wasAlreadyAccepted(actor, employeeId, event.clientEventId);
-    const result = await handler({ actor, ctx, event });
-    await stampBatch(actor, employeeId, event.clientEventId, batchId);
-    return { ...base, status: alreadyAccepted ? "REPLAYED" : "ACCEPTED", retryable: false, result };
+    const result = await withFieldEventBatch(batchId, () => handler({ actor, ctx, event }));
+    return { ...base, status: wasReplayed(result) ? "REPLAYED" : "ACCEPTED", retryable: false, result };
   } catch (error) {
-    // The gate may have stored a REJECTED row for this attempt: label it too.
-    await stampBatch(actor, employeeId, event.clientEventId, batchId);
     if (error instanceof ZodError) {
       return { ...base, status: "REJECTED", code: "VALIDATION_FAILED", message: "The event's payload is invalid.", details: zodIssuesToFieldIssues(error), retryable: false };
     }
@@ -113,7 +96,6 @@ async function applyOne(actor: Actor, ctx: RequestContext, employeeId: string, b
 /** Applies one batch for the calling employee. Only an employee can sync: a device belongs to one. */
 export async function processFieldSyncBatch(actor: Actor, ctx: RequestContext, batch: SyncBatchInput): Promise<SyncBatchResult> {
   if (!actor.employeeId) throw new ForbiddenError({ message: "Only an employee can sync field events." });
-  const employeeId = actor.employeeId;
 
   const ordered = batch.events
     .map((event, index) => ({ event, index }))
@@ -123,7 +105,7 @@ export async function processFieldSyncBatch(actor: Actor, ctx: RequestContext, b
   let sequence = 0;
   for (const { event, index } of ordered) {
     sequence += 1;
-    results.push(await applyOne(actor, ctx, employeeId, batch.batchId, event, index, sequence));
+    results.push(await applyOne(actor, ctx, batch.batchId, event, index, sequence));
   }
   results.sort((left, right) => left.index - right.index);
 

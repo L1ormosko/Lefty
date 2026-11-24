@@ -26,6 +26,9 @@ import type { ArriveInput } from "./schemas";
  * Offline: `clientEventId` makes it idempotent; `occurredAt` is when the technician arrived. The response never holds coordinates.
  */
 
+/** Statuses from which the job can still reach EN_ROUTE, so a refused arrival may be retried after the earlier event synced. */
+const CAN_STILL_REACH_EN_ROUTE: readonly string[] = ["ASSIGNED", "SCHEDULED", "RESCHEDULED"];
+
 export interface ArrivalResult {
   arrival: Record<string, unknown>;
   job: { id: string; status: string };
@@ -54,8 +57,8 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
     await enforceInTx(tx, self, "location.create", { employeeId: self.employeeId, ownerEmployeeId: self.employeeId });
     await assignedJobRef(tx, self, jobId);
     if (job.status !== "EN_ROUTE") {
-      // retryable: an earlier event (marking the job EN_ROUTE) may simply not have synced yet.
-      throw new InvalidStateTransitionError({ message: `Arrival can only be confirmed while the job is EN_ROUTE (it is ${job.status}).`, retryable: true });
+      // retryable only while the job can still become EN_ROUTE (the earlier event may not have synced yet); from a terminal or later state a retry cannot help, so the verdict is stored.
+      throw new InvalidStateTransitionError({ message: `Arrival can only be confirmed while the job is EN_ROUTE (it is ${job.status}).`, retryable: CAN_STILL_REACH_EN_ROUTE.includes(job.status) });
     }
     // Arrival cannot predate the moment the job went EN_ROUTE (statusChangedAt is that moment: the job is EN_ROUTE now).
     const { statusChangedAt: enRouteAt } = await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId: actor.tenantId }, select: { statusChangedAt: true } });

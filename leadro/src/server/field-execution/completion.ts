@@ -43,7 +43,8 @@ export interface SubmittedCompletion {
   replayed: boolean;
 }
 
-const refusal = (field: string, code: string, message: string): ValidationError => new ValidationError({ message, field, details: [{ field, code, message }] });
+const refusal = (field: string, code: string, message: string, retryable = false): ValidationError =>
+  new ValidationError({ message, field, retryable, details: [{ field, code, message }] });
 
 async function readCompletion(tx: TenantTx, actor: Actor, jobId: string, completionId: string): Promise<Record<string, unknown>> {
   await authorizeFieldRead(tx, actor, jobId);
@@ -99,15 +100,16 @@ export async function submitCompletion(actor: Actor, ctx: RequestContext, jobId:
       if (!actor.employeeId) throw new ForbiddenError({ message: "Only an employee can submit a completion form." });
       if (!COMPLETABLE_STATUSES.includes(job.status)) {
         throw new InvalidStateTransitionError({
+          retryable: ["EN_ROUTE", "ARRIVED"].includes(job.status), // ordering: the work-start event may not have synced yet
           message: "The completion form can be submitted while the work is in progress or just finished.",
           details: [{ field: "jobId", code: "completion.not_ready", message: `The job is ${job.status}.` }],
         });
       }
       const definition = await resolveActiveFormForJob(tx, actor.tenantId, jobId);
       if (!definition) {
-        throw new ConflictError({ message: "No completion form is set up for this job type.", details: [{ field: "jobId", code: "completion.no_active_form", message: "Publish a form for the job type first." }] });
+        throw new ConflictError({ retryable: true, message: "No completion form is set up for this job type.", details: [{ field: "jobId", code: "completion.no_active_form", message: "Publish a form for the job type first." }] });
       }
-      if (formSchemaProblems(definition.schema).length > 0) throw new ConflictError({ message: "The completion form of this job type is invalid.", details: [{ field: "jobId", code: "completion.form_invalid", message: "Ask an administrator to fix the form." }] });
+      if (formSchemaProblems(definition.schema).length > 0) throw new ConflictError({ retryable: true, message: "The completion form of this job type is invalid.", details: [{ field: "jobId", code: "completion.form_invalid", message: "Ask an administrator to fix the form." }] });
       const fields = formFields(definition.schema);
       assertAnswersBelongToForm(fields.map((field) => field.key), input);
 
@@ -117,13 +119,14 @@ export async function submitCompletion(actor: Actor, ctx: RequestContext, jobId:
       }
       if (input.signatureAttachmentId) {
         const signature = await tx.jobAttachment.findFirst({ where: { id: input.signatureAttachmentId, jobId, tenantId: actor.tenantId, kind: "SIGNATURE" }, select: { id: true } });
-        if (!signature) throw refusal("signatureAttachmentId", "completion.signature_unknown", "Choose a signature recorded for this job.");
+        if (!signature) throw refusal("signatureAttachmentId", "completion.signature_unknown", "Choose a signature recorded for this job.", true);
       }
 
       const facts = await gatherFacts(tx, actor.tenantId, jobId, visitNumber, input, input.signatureAttachmentId !== undefined);
       const missing = missingRequiredFields(fields, facts);
       if (missing.length > 0) {
         throw new ValidationError({
+          retryable: true, // the missing facts (outcome, photos...) may simply not have synced yet
           message: "The completion form is incomplete.",
           details: missing.map((key) => ({ field: key, code: "completion.field_required", message: `Required: ${key}.` })),
         });
