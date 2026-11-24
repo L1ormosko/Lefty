@@ -59,11 +59,14 @@ export interface CompletionFieldSpec {
   labelKey: string;
 }
 
+/** `finalChargedAmount` -> `FINAL_CHARGED_AMOUNT`: i18n keys are DOMAIN.UPPER_SNAKE (`npm run i18n:check`). */
+const labelKeyFor = (key: CompletionFieldKey): string => `COMPLETION_FORM.FIELD.${key.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()}`;
+
 const field = (key: CompletionFieldKey, type: CompletionFieldSpec["type"], required: boolean): CompletionFieldSpec => ({
   key,
   type,
   required,
-  labelKey: `COMPLETION_FORM.FIELD.${key}`,
+  labelKey: labelKeyFor(key),
 });
 
 /** Spec 8.6: "do not force every job type to use identical fields" - the default varies by job category. */
