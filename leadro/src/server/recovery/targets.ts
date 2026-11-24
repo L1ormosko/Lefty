@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { buildScopeWhere, resolveScope } from "@/server/authz";
 import { registerFollowUpTargetAccess } from "@/server/follow-ups";
-import { caseResourceRef, caseScopeColumns } from "./access";
+import { caseResourceRefById, caseScopeColumns } from "./access";
 
 /**
  * Teaches the follow-ups module how to reach a recovery case (a follow-up about a case requires `recovery.view` over the
@@ -15,10 +15,7 @@ export function registerRecoveryFollowUpTarget(): void {
       const row = await tx.leadRecoveryCase.findFirst({ where: { id: targetId, tenantId }, select: { orgUnitId: true } });
       return row ? { orgUnitId: row.orgUnitId, archived: false } : null;
     },
-    async resourceRef(tx, tenantId, targetId) {
-      const row = await tx.leadRecoveryCase.findFirst({ where: { id: targetId, tenantId }, select: { orgUnitId: true, assignedToId: true } });
-      return row ? caseResourceRef(row) : null;
-    },
+    resourceRef: (tx, tenantId, targetId) => caseResourceRefById(tx, tenantId, targetId),
     async listWhere(tx, actor, now) {
       const scope = await resolveScope(tx, actor, "recovery.view", now);
       const where: Prisma.LeadRecoveryCaseWhereInput = buildScopeWhere(scope, caseScopeColumns, now);
