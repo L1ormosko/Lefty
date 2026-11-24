@@ -5,10 +5,11 @@ import { canInTx, enforceInTx, projectFields, withinScope } from "@/server/authz
 import { InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { deliverAfterCommit } from "@/server/notifications";
+import { loadLocationSettings } from "@/server/location";
 import { assertCaseAccess, caseResourceRef, loadCaseRow, resolveCaseListAccess } from "./access";
 import { ATTEMPT_FIELD_MAP, CASE_FIELD_MAP, attemptSelect, caseRowSelect, caseView, type CaseRow } from "./fields";
 import { notifyCaseAssigned } from "./notify";
-import { evaluatePresence } from "./presence";
+import { evaluatePresence, refreshWindowClosed } from "./presence";
 import type { AssignCaseInput, ChangeCaseStatusInput, ListCasesQuery, RecordAttemptInput, RecoverCaseInput, SummaryQuery, UpdateCaseInput } from "./schemas";
 
 /**
@@ -310,7 +311,14 @@ export async function refreshPresence(actor: Actor, ctx: RequestContext, caseId:
     await assertCaseAccess(tx, actor, caseId, "recovery.edit");
     await lockCase(tx, actor.tenantId, caseId);
     const current = await reload(tx, actor.tenantId, caseId);
-    const presence = await evaluatePresence(tx, actor.tenantId, { technicianId: current.technicianId, jobId: current.jobId });
+    // A refresh is allowed only within the presence window after the outcome, and only from the technician's events
+    // for THIS job: otherwise Lead Operations could poll a technician's location for as long as a case stays open.
+    const now = new Date();
+    const settings = await loadLocationSettings(tx, actor.tenantId);
+    const windowOpen = now.getTime() - current.outcomeAt.getTime() <= settings.presenceMaxAgeMinutes * 60_000;
+    const presence = windowOpen
+      ? await evaluatePresence(tx, actor.tenantId, { technicianId: current.technicianId, jobId: current.jobId, now, onlyJobEvents: true })
+      : refreshWindowClosed(now);
     await tx.leadRecoveryCase.update({
       where: { id: caseId },
       data: {
