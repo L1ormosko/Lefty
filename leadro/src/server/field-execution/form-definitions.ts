@@ -106,6 +106,9 @@ export async function createCompletionFormDraft(actor: Actor, ctx: RequestContex
       if (input.jobTypeId && !(await tx.jobType.findFirst({ where: { id: input.jobTypeId, tenantId: actor.tenantId }, select: { id: true } }))) {
         throw new ValidationError({ message: "Unknown job type.", field: "jobTypeId" });
       }
+      if (input.category && !(await tx.jobType.findFirst({ where: { tenantId: actor.tenantId, category: input.category }, select: { id: true } }))) {
+        throw new ValidationError({ message: "No job type has this category.", field: "category", details: [{ field: "category", code: "completion_form.category_unknown", message: "No job type has this category." }] });
+      }
       const latest = await tx.jobCompletionFormDefinition.aggregate({ where: { tenantId: actor.tenantId, ...target }, _max: { version: true } });
       const row = await tx.jobCompletionFormDefinition.create({
         data: {

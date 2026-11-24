@@ -130,6 +130,68 @@ describe("POST /field-sync: ordering, results and isolation of failures", () => 
   });
 });
 
+describe("POST /field-sync: the technician's offline day (EN_ROUTE, navigation, arrival, start work, note)", () => {
+  async function scheduledJob() {
+    const job = await createJobViaApi(w);
+    await call(assignRoute, "POST", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id }, body: { employeeId: w.techA1.employeeId } });
+    const start = Date.now() + 2 * 86_400_000;
+    await call(rescheduleRoute, "POST", "/x", {
+      cookie: w.cookie.dispatcher,
+      params: { id: job.id },
+      body: { scheduledSlot: { start: new Date(start).toISOString(), end: new Date(start + 2 * 3_600_000).toISOString() } },
+    });
+    return job;
+  }
+  const statusOf = async (jobId: string) => (await withTenant(w.tenantId, (tx) => tx.job.findFirstOrThrow({ where: { id: jobId }, select: { status: true } }))).status;
+
+  it("applies EN_ROUTE, navigation opened and a note from one batch, whatever order the device queued them in", async () => {
+    const job = await scheduledJob();
+    const enRoute = event("job.en_route", job.id, {}, minutesAgo(30));
+    const nav = event("location.navigation_opened", job.id, {}, minutesAgo(25));
+    const noted = event("job.note", job.id, { body: "On my way, gate code needed" }, minutesAgo(20));
+    const response = await sync(w.cookie.techA1, [noted, nav, enRoute]);
+    expect(response.json.data.results.map((result: { status: string }) => result.status)).toEqual(["ACCEPTED", "ACCEPTED", "ACCEPTED"]);
+    expect(await statusOf(job.id)).toBe("EN_ROUTE");
+    const row = (await fieldEvents([enRoute.clientEventId]))[0];
+    expect(row).toMatchObject({ type: "job.en_route", result: "ACCEPTED", entityType: "Job", entityId: job.id });
+    // The status change carries the device time, so arrival is ordered against when the technician really left.
+    const history = await withTenant(w.tenantId, (tx) => tx.jobStatusHistory.findFirstOrThrow({ where: { jobId: job.id, toStatus: "EN_ROUTE" } }));
+    expect(history.occurredAt.toISOString()).toBe(enRoute.occurredAt);
+    const again = await sync(w.cookie.techA1, [noted, nav, enRoute]);
+    expect(again.json.data.summary).toMatchObject({ accepted: 0, replayed: 3 });
+  });
+
+  it("continues through arrival and start work, and reports an out-of-order step as retryable (not stored)", async () => {
+    const job = await scheduledJob();
+    const arrive = event("job.arrive", job.id, { exception: { code: "DEVICE_OFFLINE" } }, minutesAgo(20));
+    const early = (await sync(w.cookie.techA1, [arrive])).json.data.results[0];
+    expect(early).toMatchObject({ status: "REJECTED", retryable: true }); // still SCHEDULED: the EN_ROUTE event has not arrived
+    expect(await fieldEvents([arrive.clientEventId])).toHaveLength(0);
+    const enRoute = event("job.en_route", job.id, {}, minutesAgo(30));
+    const startWork = event("job.start_work", job.id, {}, minutesAgo(10));
+    const response = await sync(w.cookie.techA1, [startWork, arrive, enRoute]);
+    expect(response.json.data.results.map((result: { type: string; status: string }) => [result.type, result.status])).toEqual([
+      ["job.start_work", "ACCEPTED"],
+      ["job.arrive", "ACCEPTED"],
+      ["job.en_route", "ACCEPTED"],
+    ]);
+    expect(await statusOf(job.id)).toBe("IN_PROGRESS");
+  });
+
+  it("refuses the offline envelope for any other transition, and a replayed EN_ROUTE after the job moved on still answers", async () => {
+    const job = await scheduledJob();
+    const refused = await call(transitionRoute, "POST", "/x", { cookie: w.cookie.techA1, params: { id: job.id }, body: { toStatus: "ARRIVED", clientEventId: randomUUID() } });
+    expect(refused.status).toBe(400);
+    const clientEventId = randomUUID();
+    const first = await call(transitionRoute, "POST", "/x", { cookie: w.cookie.techA1, params: { id: job.id }, body: { toStatus: "EN_ROUTE", clientEventId } });
+    expect(first.status).toBe(200);
+    expect((await move(job.id, "ARRIVED")).status).toBe(200);
+    const replay = await call(transitionRoute, "POST", "/x", { cookie: w.cookie.techA1, params: { id: job.id }, body: { toStatus: "EN_ROUTE", clientEventId } });
+    expect(replay.status).toBe(200);
+    expect(replay.json.data.replayed).toBe(true);
+  });
+});
+
 describe("POST /field-sync: an event that arrived before its predecessor can be sent again", () => {
   it("does not remember 'job_outcome.not_reportable' while the job can still advance, so the same event succeeds after start-work", async () => {
     const job = await createJobViaApi(w);

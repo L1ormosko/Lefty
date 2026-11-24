@@ -1,4 +1,5 @@
 import type { ZodType, ZodTypeDef } from "zod";
+import { arriveSchema, confirmArrival, startWork, startWorkSchema } from "@/server/arrival";
 import { ValidationError } from "@/server/core";
 import {
   recordAttachmentMetadata,
@@ -10,6 +11,7 @@ import {
   submitCompletion,
   submitCompletionSchema,
 } from "@/server/field-execution";
+import { transitionJob, transitionJobSchema } from "@/server/jobs";
 import { recordJobOutcome, recordOutcomeSchema } from "@/server/job-outcomes";
 import { recordLocationEvent, recordLocationEventSchema } from "@/server/location";
 import { endShift, endShiftSchema, startShift, startShiftSchema } from "@/server/shifts";
@@ -24,7 +26,8 @@ import { findFieldSyncHandler, registerFieldSyncHandler, type FieldSyncCall, typ
 
 /** The batch event's identity becomes the body's offline envelope: `clientEventId`, `occurredAt` (and the job where the body names it). */
 function envelopeOf(call: FieldSyncCall): Record<string, unknown> {
-  return { ...call.event.payload, clientEventId: call.event.clientEventId, occurredAt: call.event.occurredAt.toISOString() };
+  // `job.en_route` is the jobs transition endpoint with its target implied by the type.
+  return { ...call.event.payload, ...(call.event.type === "job.en_route" ? { toStatus: "EN_ROUTE" } : {}), clientEventId: call.event.clientEventId, occurredAt: call.event.occurredAt.toISOString() };
 }
 
 /** A job-scoped event must name its job: the endpoint it replaces has the id in the path. */
@@ -44,6 +47,10 @@ const jobHandler =
     run(call, requireJobId(call), parse(schema, envelopeOf(call)));
 
 const BUILT_IN: Record<string, FieldSyncHandler> = {
+  // The technician's steps toward the visit: each is a job status change owned by the jobs / arrival services.
+  "job.en_route": jobHandler(transitionJobSchema, ({ actor, ctx }, jobId, input) => transitionJob(actor, ctx, jobId, input)),
+  "job.arrive": jobHandler(arriveSchema, ({ actor, ctx }, jobId, input) => confirmArrival(actor, ctx, jobId, input)),
+  "job.start_work": jobHandler(startWorkSchema, ({ actor, ctx }, jobId, input) => startWork(actor, ctx, jobId, input)),
   "job.note": jobHandler(recordFieldNoteSchema, ({ actor, ctx }, jobId, input) => recordFieldNote(actor, ctx, jobId, input)),
   "job.material": jobHandler(recordMaterialSchema, ({ actor, ctx }, jobId, input) => recordMaterialUsed(actor, ctx, jobId, input)),
   "job.attachment": jobHandler(recordAttachmentSchema, ({ actor, ctx }, jobId, input) => recordAttachmentMetadata(actor, ctx, jobId, input)),

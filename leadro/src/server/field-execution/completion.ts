@@ -53,16 +53,27 @@ async function readCompletion(tx: TenantTx, actor: Actor, jobId: string, complet
   return row;
 }
 
-/** What exists for the visit: the outcome, material rows, photo metadata and the answers being submitted. */
+/**
+ * When the current visit began: the last time the job went EN_ROUTE (every visit starts that way), else the job's creation.
+ * Photos, signatures and materials recorded before it belong to an earlier visit and must not satisfy this visit's form.
+ */
+async function visitStartedAt(tx: TenantTx, tenantId: string, jobId: string): Promise<Date> {
+  const left = await tx.jobStatusHistory.findFirst({ where: { tenantId, jobId, toStatus: "EN_ROUTE" }, orderBy: [{ occurredAt: "desc" }, { id: "desc" }], select: { occurredAt: true } });
+  if (left) return left.occurredAt;
+  return (await tx.job.findFirstOrThrow({ where: { id: jobId, tenantId }, select: { createdAt: true } })).createdAt;
+}
+
+/** What exists for the CURRENT visit: the outcome, material rows, photo metadata and the answers being submitted. */
 async function gatherFacts(tx: TenantTx, tenantId: string, jobId: string, visitNumber: number, input: SubmitCompletionInput, hasSignature: boolean): Promise<CompletionFacts> {
+  const since = await visitStartedAt(tx, tenantId, jobId);
   const [outcome, materialCount, photoCount] = await Promise.all([
     tx.jobOutcome.findFirst({
       where: { tenantId, jobId, visitNumber },
       select: { outcome: true, quotedAmountMinor: true, approvedAmountMinor: true, chargedAmountMinor: true, collectedAmountMinor: true, paymentMethod: true },
     }),
-    tx.jobMaterialUsage.count({ where: { tenantId, jobId, completionId: null } }),
+    tx.jobMaterialUsage.count({ where: { tenantId, jobId, completionId: null, occurredAt: { gte: since } } }),
     // Photo METADATA counts: the device captured it; the upload may wait for storage (a FAILED one does not count).
-    tx.jobAttachment.count({ where: { tenantId, jobId, kind: "PHOTO", status: { not: "FAILED" } } }),
+    tx.jobAttachment.count({ where: { tenantId, jobId, kind: "PHOTO", status: { not: "FAILED" }, capturedAt: { gte: since } } }),
   ]);
   return {
     outcome: outcome ? { type: outcome.outcome, ...outcome } : null,
@@ -118,7 +129,11 @@ export async function submitCompletion(actor: Actor, ctx: RequestContext, jobId:
         throw new ConflictError({ message: "The completion form of this visit was already submitted.", details: [{ field: "jobId", code: "completion.already_submitted", message: "One completion form per visit." }] });
       }
       if (input.signatureAttachmentId) {
-        const signature = await tx.jobAttachment.findFirst({ where: { id: input.signatureAttachmentId, jobId, tenantId: actor.tenantId, kind: "SIGNATURE" }, select: { id: true } });
+        // A signature is this visit's: captured since it began and not already used by an earlier completion.
+        const signature = await tx.jobAttachment.findFirst({
+          where: { id: input.signatureAttachmentId, jobId, tenantId: actor.tenantId, kind: "SIGNATURE", capturedAt: { gte: await visitStartedAt(tx, actor.tenantId, jobId) }, signedFor: { none: {} } },
+          select: { id: true },
+        });
         if (!signature) throw refusal("signatureAttachmentId", "completion.signature_unknown", "Choose a signature recorded for this job.", true);
       }
 
@@ -156,7 +171,7 @@ export async function submitCompletion(actor: Actor, ctx: RequestContext, jobId:
         select: COMPLETION_COLUMNS,
       });
       // The loose material rows of this visit now belong to the completion that reported them.
-      await tx.jobMaterialUsage.updateMany({ where: { tenantId: actor.tenantId, jobId, completionId: null }, data: { completionId: row.id } });
+      await tx.jobMaterialUsage.updateMany({ where: { tenantId: actor.tenantId, jobId, completionId: null, occurredAt: { gte: await visitStartedAt(tx, actor.tenantId, jobId) } }, data: { completionId: row.id } });
       await recordJobEvent(tx, actor.tenantId, jobId, {
         type: "job.completion_submitted",
         actor,

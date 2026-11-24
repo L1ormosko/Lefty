@@ -355,6 +355,20 @@ describe("completion forms: versioned definitions and validated submissions (§8
     expect((await post(completionRoute, w.cookie.techA1, third.id, { notes: "Customer will think about it" })).status).toBe(201);
   });
 
+  it("counts only this visit's photos and rejects a category no job type has", async () => {
+    expect((await createForm({ fields: [{ key: "notes", type: "text", required: true, labelKey: "COMPLETION_FORM.FIELD.NOTES" }] }, { jobTypeId: undefined, category: "no-such-category" })).status).toBe(400);
+    const draft = await createForm({ fields: [{ key: "photos", type: "photos", required: true, labelKey: "COMPLETION_FORM.FIELD.PHOTOS" }] });
+    await publish(draft.json.data.id);
+    const job = await jobAt("IN_PROGRESS");
+    const old = { kind: "PHOTO", fileName: "before-visit.jpg", contentType: "image/jpeg", sizeBytes: 10, capturedAt: new Date(Date.now() - 2 * 86_400_000).toISOString() };
+    await post(attachmentRoute, w.cookie.techA1, job.id, old);
+    const refused = await post(completionRoute, w.cookie.techA1, job.id, {});
+    expect(refused.status).toBe(400);
+    expect(refused.json.error.details[0].field).toBe("photos");
+    await post(attachmentRoute, w.cookie.techA1, job.id, { ...old, capturedAt: new Date().toISOString() });
+    expect((await post(completionRoute, w.cookie.techA1, job.id, {})).status).toBe(201);
+  });
+
   it("is idempotent per clientEventId and refuses a replay once the caller lost access", async () => {
     const draft = await createForm({ fields: [{ key: "notes", type: "text", required: true, labelKey: "COMPLETION_FORM.FIELD.NOTES" }] });
     await publish(draft.json.data.id);
