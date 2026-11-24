@@ -148,7 +148,8 @@ export async function confirmArrival(actor: Actor, ctx: RequestContext, jobId: s
     jobId,
     type: "job.arrive",
     clientEventId: input.clientEventId,
-    occurredAt: reportedAt,
+    // The RAW device time goes to the gate (it judges it on first delivery); `reportedAt` is clamped, for storage only.
+    occurredAt: input.occurredAt ?? input.position?.deviceTime ?? now,
     deviceId: input.deviceId,
     // What the event MEANS as sent. Coordinates are hashed (one-way): a changed position under a reused id is a CONFLICT.
     payloadHash: hashFieldEventContent({ type: "job.arrive", jobId, trigger: input.trigger, occurredAt: input.occurredAt, position: input.position, exception: input.exception }),

@@ -192,6 +192,18 @@ describe("POST /field-sync: the technician's offline day (EN_ROUTE, navigation, 
   });
 });
 
+describe("POST /field-sync: a far-future device time is never accepted", () => {
+  it("refuses offline arrive and start-work dated a year ahead as retryable, and stores nothing", async () => {
+    const job = await jobInProgress();
+    const nextYear = new Date(Date.now() + 366 * 86_400_000).toISOString();
+    const arrive = event("job.arrive", job.id, { exception: { code: "DEVICE_OFFLINE" } }, nextYear);
+    const startWork = event("job.start_work", job.id, {}, nextYear);
+    const results = (await sync(w.cookie.techA1, [arrive, startWork])).json.data.results;
+    expect(results.map((result: { status: string; retryable: boolean }) => [result.status, result.retryable])).toEqual([["REJECTED", true], ["REJECTED", true]]);
+    expect(await fieldEvents([arrive.clientEventId, startWork.clientEventId])).toHaveLength(0);
+  });
+});
+
 describe("POST /field-sync: an event that arrived before its predecessor can be sent again", () => {
   it("does not remember 'job_outcome.not_reportable' while the job can still advance, so the same event succeeds after start-work", async () => {
     const job = await createJobViaApi(w);

@@ -59,7 +59,8 @@ export async function startWork(actor: Actor, ctx: RequestContext, jobId: string
     jobId,
     type: "job.start_work",
     clientEventId: input.clientEventId,
-    occurredAt: startedAt,
+    // The RAW device time goes to the gate (it judges it on first delivery); `startedAt` is clamped, for storage only.
+    occurredAt: input.occurredAt ?? now,
     deviceId: input.deviceId,
     payloadHash: hashFieldEventContent({ type: "job.start_work", jobId, occurredAt: input.occurredAt }),
     apply,

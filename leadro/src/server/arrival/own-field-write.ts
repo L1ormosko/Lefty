@@ -18,8 +18,11 @@ export function requireEmployee(actor: Actor): EmployeeActor {
   return { ...actor, employeeId: actor.employeeId };
 }
 
-/** `occurredAt` (device time of an offline event) must not be in the future or ancient; defaults to now. */
-/** `judgedByGate`: the write carries a `clientEventId`, so the shared gate judges the time on first delivery only. */
+/**
+ * `occurredAt` (device time of an offline event) must not be in the future or ancient; defaults to now. `judgedByGate`: the
+ * write carries a `clientEventId`, so the shared gate judges the RAW time on first delivery only; the value returned here is
+ * clamped to the server clock and is for storage, never for the gate.
+ */
 export function eventTime(occurredAt: Date | undefined, now: Date, judgedByGate = false): Date {
   const at = occurredAt ?? now;
   if (!judgedByGate && checkOccurredAt(at, now) !== null) throw new ValidationError({ message: "The event time is in the future or too old to accept.", field: "occurredAt" });

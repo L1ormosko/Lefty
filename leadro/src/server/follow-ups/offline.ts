@@ -56,7 +56,8 @@ export async function runFieldWrite<T>(
 ): Promise<T> {
   const now = new Date();
   const occurredAt = offline.occurredAt ?? now;
-  if (occurredAt.getTime() > now.getTime() + FUTURE_SKEW_MS) {
+  // With a clientEventId the shared gate judges the device time on first delivery only (a late replay must still answer).
+  if (!offline.clientEventId && occurredAt.getTime() > now.getTime() + FUTURE_SKEW_MS) {
     throw new ValidationError({ message: "An event cannot happen in the future.", field: "occurredAt" });
   }
 

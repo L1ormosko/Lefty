@@ -14,8 +14,10 @@ export async function lockEmployee(tx: TenantTx, tenantId: string, employeeId: s
   await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${employeeId} AND "tenantId" = ${tenantId} FOR NO KEY UPDATE`;
 }
 
-/** When the boundary happened: the device's `occurredAt` (offline events) or now. Refuses futures and ancient events. */
-/** `judgedByGate`: the write carries a `clientEventId`, so the shared gate judges the time on first delivery only (a late replay must still answer). */
+/**
+ * When the boundary happened: the device's `occurredAt` (offline events) or now. Refuses futures and ancient events, unless
+ * `judgedByGate` (the write carries a `clientEventId`: the shared gate judges the time on first delivery only, so a late replay still answers).
+ */
 export function boundaryTime(occurredAt: Date | undefined, now: Date, judgedByGate = false): Date {
   const at = occurredAt ?? now;
   if (!judgedByGate && checkOccurredAt(at, now) !== null) {
