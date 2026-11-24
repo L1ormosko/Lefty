@@ -352,9 +352,9 @@ Code: `src/server/jobs/job-access.ts`, `assignment.ts`, `status.ts`; decisions i
   history view. Denials on a job are 404.
 - **Fields**: money (`quotedAmountMinor`, `currency`) is the opt-in `financial` set. Writes check every field SENT with
   `assertWritableFields` and `JOB_WRITE_ALLOWLISTS`: the Technician's `jobs.edit {fields:"execution"}` covers `status`, `statusReason`,
-  `instructions` only (and, in Phase 2, only a move to EN_ROUTE). Trails (history, events, assignments) need the base field set.
+  `instructions` only (and only a move to EN_ROUTE through the plain transition; arrival and start of work are the field events `/arrive` and `/start-work`, which need the same `jobs.edit` and a writable `status`). *Superseded wording: "in Phase 2".* Trails (history, events, assignments) need the base field set.
 - **Operations**: create `jobs.create` (unit-level; tenant-wide for a customer with no unit); edit / transition / reschedule `jobs.edit`;
-  assign, reassign, unassign `jobs.assign`; closing a job that was AWAITING_REVIEW `jobs.approve`, reopening it `jobs.reject`;
+  assign, reassign, unassign `jobs.assign`; closing a job that was AWAITING_REVIEW `jobs.approve` (**and `jobs.assign` while the job still has active assignments**: the close ends them), reopening it `jobs.reject`;
   workflow switches `job_types.configure` (tenant-wide).
 - **Assignment override** (assigning an employee who fails hard eligibility): `jobs.approve` over the job plus a reason. Default holders: Owner/CEO
   and COO. The Dispatcher template does not hold it on purpose; a tenant may grant it to a custom role. Employment failures cannot be overridden.

@@ -26,7 +26,7 @@ import { endShift, endShiftSchema, startShift, startShiftSchema } from "@/server
 import { findFieldSyncHandler, registerFieldSyncHandler, type FieldSyncCall, type FieldSyncHandler } from "./registry";
 
 /**
- * The event types the field modules that exist today expose to the sync endpoint. Every handler builds the SAME input the
+ * The event types the field modules expose to the sync endpoint: job steps (en route, arrive, start work), notes, materials, attachments, completion, outcome, shifts, location events and follow-up tasks. Every handler builds the SAME input the
  * module's REST endpoint takes (the envelope of the batch event wins over anything in the payload), parses it with the
  * module's own Zod schema and calls the module's service, so an offline event and an online request take one code path
  * and one set of rules. A module added later registers its own types with `registerFieldSyncHandler`.

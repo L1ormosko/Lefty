@@ -53,7 +53,7 @@ Field sets (read before returning records):
 - Lists: `resolveScope` keeps field sets PER scope part. Derive a row's fields with `fieldSetsForRow` /
   `projectRows(rows, scope, FIELD_MAP, attributesOf)` (`employeeScopeSelect` + `employeeRowAttributes` for employees),
   never by unioning `parts[].fieldSets`.
-- `projectFields` requires an explicit field map (`EMPLOYEE_FIELD_MAP`, `CUSTOMER_FIELD_MAP`, `LEAD_FIELD_MAP`, `JOB_FIELD_MAP` in `field-maps.ts`);
+- `projectFields` requires an explicit field map (`EMPLOYEE_FIELD_MAP`, `CUSTOMER_FIELD_MAP`, `LEAD_FIELD_MAP`, `JOB_FIELD_MAP`, `LOCATION_EVENT_FIELD_MAP` (latitude and longitude are the sensitive `coordinates` set; the API never returns them), `JOB_OUTCOME_FIELD_MAP` (money, currency and payment are the `financial` set) and `JOB_FIELD_NOTE_FIELD_MAP` (note estimate = `financial`) in `field-maps.ts`);
   unmapped fields are dropped, so a new column is hidden until classified.
 - `assignRole` also requires the target user inside the granter's `permissions.assign` scope, and checks (scope AND
   field sets) together per held grant.
