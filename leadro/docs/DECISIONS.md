@@ -563,8 +563,8 @@ Code: `src/server/notifications/`, `src/lib/notification-rules.ts`, `/api/v1/not
   PENDING for the worker (`deliverPendingForAllTenants`); no scheduler is wired in yet (no worker infrastructure exists), the
   function is ready to be called from one.
 - **Typed event catalog** (`NOTIFICATION_EVENTS`): event type -> template key, critical flag, link target type. Callers pass only the
-  event type, so a template key can never disagree with the event; new events are one row plus six catalog keys. `job.cancelled`,
-  `qualification.expired` and `account.security_alert` are critical (mandatory operational/security notices, §14.1).
+  event type, so a template key can never disagree with the event; new events are one row plus six catalog keys. `job.cancelled`
+  and `account.security_alert` are critical (the Phase 2 events `lead.follow_up_due`, `qualification.expiring` and `qualification.expired` were removed in the final fix wave: nothing ever raised them) (mandatory operational/security notices, §14.1).
 - **Params contract enforced in code**: names are camelCase, values are numbers, booleans or identifier-like strings
   (`[A-Za-z0-9_.:-]{1,64}`, so no spaces, `@`, `+`): names, emails and phone numbers cannot be stored. Text is rendered at read time
   (`renderNotification` / `renderNotificationForRecipient`) in the RECIPIENT's locale chain with reviewed tenant overrides. The API returns key + params, not text.

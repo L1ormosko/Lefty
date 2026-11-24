@@ -12,7 +12,6 @@ import type { ResourceRef } from "@/server/authz";
 export const NOTIFICATION_EVENTS = {
   "lead.assigned": { templateKey: "NOTIFICATION.LEAD_ASSIGNED", critical: false, targetType: "lead", params: ["leadNumber"] },
   "lead.needs_owner": { templateKey: "NOTIFICATION.LEAD_NEEDS_OWNER", critical: false, targetType: "lead", params: ["leadNumber"] },
-  "lead.follow_up_due": { templateKey: "NOTIFICATION.LEAD_FOLLOW_UP_DUE", critical: false, targetType: "lead", params: ["leadNumber"] },
   "job.assigned": { templateKey: "NOTIFICATION.JOB_ASSIGNED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.reassigned": { templateKey: "NOTIFICATION.JOB_REASSIGNED", critical: false, targetType: "job", params: ["jobNumber"] },
   "job.rescheduled": { templateKey: "NOTIFICATION.JOB_RESCHEDULED", critical: false, targetType: "job", params: ["jobNumber"] },
@@ -26,8 +25,6 @@ export const NOTIFICATION_EVENTS = {
   // Lead recovery (§9.3): Lead Operations hear about a new case. Links to the case; the text carries only its number.
   "recovery.case_created": { templateKey: "NOTIFICATION.RECOVERY_CASE_CREATED", critical: false, targetType: "recovery_case", params: ["caseNumber"] },
   "recovery.case_assigned": { templateKey: "NOTIFICATION.RECOVERY_CASE_ASSIGNED", critical: false, targetType: "recovery_case", params: ["caseNumber"] },
-  "qualification.expiring": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRING", critical: false, targetType: "employee_qualification", params: ["daysRemaining"] },
-  "qualification.expired": { templateKey: "NOTIFICATION.QUALIFICATION_EXPIRED", critical: true, targetType: "employee_qualification", params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
 } as const;
 
