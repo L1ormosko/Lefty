@@ -8,9 +8,9 @@ import type { ActiveAssignmentView, JobRow } from "./fields";
  *  - ORG_UNIT / LEGAL_ENTITY follow `Job.orgUnitId` (the service-area unit);
  *  - ASSIGNED = the caller is the employee of an ACTIVE `JobAssignment`, or a current member of the
  *    team of an ACTIVE team assignment (team expansion);
- *  - OWN matches nothing. Record-set grants (`recovery_related`, `customer_history`) are not
- *    expressed here: a job reference carries no sets, so such grants only count where a caller
- *    passes the set explicitly (the customer history view does).
+ *  - OWN matches nothing. `recovery_related` is expressed here (the reference carries it when the job has a recovery
+ *    case); `customer_history` is not: it only counts where a caller passes the set explicitly (the customer history view).
+ *    List queries do not apply `recovery_related`: Lead Ops reaches an original job through the case that links to it.
  *
  * The query-side form of ASSIGNED is `jobAssignedToWhere` in `@/server/customers`; the functions here
  * are the per-record form and a test pins that both agree.
@@ -21,6 +21,12 @@ export interface JobAccessFacts {
   assignments: ActiveAssignmentView[];
   /** Employees the job is assigned to: assignment employees plus current members of assigned teams. */
   assignedEmployeeIds: string[];
+  /**
+   * The job has a lead recovery case: its reference then carries the record set `recovery_related`, which is what a Lead
+   * Operations grant (`jobs.view` qualified `recovery_related`) matches, so Lead Ops can open the original job from a case.
+   * Their ORG_UNIT scope still applies; the set only widens WHICH jobs in the unit, never the unit.
+   */
+  recoveryRelated: boolean;
 }
 
 /**
@@ -34,8 +40,13 @@ export async function loadJobAccessFacts(
   jobIds: readonly string[],
   now: Date = new Date(),
 ): Promise<Map<string, JobAccessFacts>> {
-  const facts = new Map<string, JobAccessFacts>(jobIds.map((jobId) => [jobId, { assignments: [], assignedEmployeeIds: [] }]));
+  const facts = new Map<string, JobAccessFacts>(jobIds.map((jobId) => [jobId, { assignments: [], assignedEmployeeIds: [], recoveryRelated: false }]));
   if (jobIds.length === 0) return facts;
+  const withCases = await tx.leadRecoveryCase.findMany({ where: { tenantId, jobId: { in: [...jobIds] } }, select: { jobId: true }, distinct: ["jobId"] });
+  for (const { jobId } of withCases) {
+    const entry = facts.get(jobId);
+    if (entry) entry.recoveryRelated = true;
+  }
 
   const rows = await tx.jobAssignment.findMany({
     where: { tenantId, state: "ACTIVE", jobId: { in: [...jobIds] }, job: { archivedAt: null } },
@@ -99,7 +110,7 @@ export function jobRowAttributes(row: JobScopeRow, facts: JobAccessFacts | undef
 
 /** The `ResourceRef` of a job row, for `can` / `enforceInTx`. Always carries assigned ids, so a denial is a 404, never a 403. */
 export function toJobResourceRef(row: Pick<JobRow, "orgUnitId">, facts: JobAccessFacts | undefined): ResourceRef {
-  return { orgUnitId: row.orgUnitId, assignedEmployeeIds: facts?.assignedEmployeeIds ?? [], sets: [] };
+  return { orgUnitId: row.orgUnitId, assignedEmployeeIds: facts?.assignedEmployeeIds ?? [], sets: facts?.recoveryRelated ? ["recovery_related"] : [] };
 }
 
 /**
