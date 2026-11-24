@@ -111,13 +111,13 @@ describe("the full flow over HTTP: rule -> outcome -> case -> work -> recovery",
     await withTenant(w.tenantId, async (tx) => {
       await tx.$executeRawUnsafe(
         `INSERT INTO "RecoveryRule" (id, "tenantId", "ruleKey", version, name, status, priority, trigger, conditions, actions, "highImpact", "cooldownMinutes", "activatedAt", "updatedAt")
-         VALUES ('corrupt-rule', '${w.tenantId}', 'corrupt', 1, 'Corrupt', 'ACTIVE', 1, 'job.not_converted', '{"unknownKey": true}'::jsonb, '[{"type":"apply_discount"}]'::jsonb, false, 0, now(), now())`,
+         VALUES ('corrupt-${w.tenantId}', '${w.tenantId}', 'corrupt', 1, 'Corrupt', 'ACTIVE', 1, 'job.not_converted', '{"unknownKey": true}'::jsonb, '[{"type":"apply_discount"}]'::jsonb, false, 0, now(), now())`,
       );
     });
     const job = await jobInProgress();
     const recorded = await call(recordOutcomeRoute, "POST", "/x", { cookie: w.cookie.techA1, params: { id: job.id }, body: { outcome: "NOT_SOLD", lostReasonId: reasonId } });
     expect(recorded.status).toBe(201);
-    await withTenant(w.tenantId, (tx) => tx.recoveryRule.update({ where: { id: "corrupt-rule" }, data: { status: "INACTIVE" } }));
+    await withTenant(w.tenantId, (tx) => tx.recoveryRule.update({ where: { id: `corrupt-${w.tenantId}` }, data: { status: "INACTIVE" } }));
   });
 });
 

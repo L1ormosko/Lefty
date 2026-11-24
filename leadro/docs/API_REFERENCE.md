@@ -2235,26 +2235,77 @@ fresh and accurate location event and is an estimate, never proof; coordinates, 
 (ASSIGNED / OWN = the assigned recovery employee); out of scope is `404`. Lead Operations also gets `jobs.view` on a job that has a recovery case
 (`recovery_related`), so the original job opens from the case.
 
-| Method and path | Permission | Purpose |
-|---|---|---|
-| `GET /lead-recovery/rules` | `recovery.view` | rules in scope, evaluation order; query `status`, `ruleKey`, `latestOnly` (default true), `cursor`, `limit` |
-| `POST /lead-recovery/rules` | `recovery.manage` over the unit | create a DRAFT (`ruleKey`, `name`, `priority`, `conditions`, `actions`, `orgUnitId?`, `cooldownMinutes`); `409` duplicate key; audit `recovery_rule.create` |
-| `GET /lead-recovery/rules/{id}` | `recovery.view` | one rule |
-| `PATCH /lead-recovery/rules/{id}` | `recovery.manage` | edit a DRAFT in place; `409` otherwise; audit `recovery_rule.update` |
-| `POST /lead-recovery/rules/{id}/new-version` | `recovery.manage` | copy into a new DRAFT (version + 1); `409` while another working version exists |
-| `POST /lead-recovery/rules/{id}/submit` | `recovery.manage` | DRAFT -> PENDING_APPROVAL (high impact only) |
-| `POST /lead-recovery/rules/{id}/activate` | `recovery.approve` (high impact, not the author) / `recovery.manage` | activate; supersedes the older ACTIVE version; audit `recovery_rule.approve` / `.activate` |
-| `POST /lead-recovery/rules/{id}/deactivate` | `recovery.manage` (ACTIVE) / `recovery.approve` (reject PENDING_APPROVAL) | audit `recovery_rule.deactivate` / `.reject` |
-| `POST /lead-recovery/rules/dry-run` | `recovery.manage` | body `jobOutcomeId` + exactly one of `ruleId` / `definition`, optional `presence` what-if; answers `matched, wouldFire, skippedReason, checks[], cooldown, presence (status only), existingCaseId, highImpact, actions`; writes nothing |
-| `GET /lead-recovery/cases` | `recovery.view` | the queue, newest outcome first; query `status`, `open`, `priority`, `assignedToId` (id, `me`, `none`), `customerId`, `jobId`, `orgUnitId`, `presenceStatus` |
-| `GET /lead-recovery/cases/{id}` | `recovery.view` | the case plus `attempts`, `statusHistory`, `followUps` |
-| `PATCH /lead-recovery/cases/{id}` | `recovery.edit` | `estimatedValueMinor` (an estimate), `priority` of an open case |
-| `POST /lead-recovery/cases/{id}/assign` | `recovery.assign` | `{ assigneeId }` (`null` unassigns); the assignee must be an active employee with a login who can view the case; notified |
-| `POST /lead-recovery/cases/{id}/status` | `recovery.edit` | `status` in `CONTACTING, CUSTOMER_REACHED, FOLLOW_UP_REQUIRED, NOT_RECOVERED, CLOSED`; the last two need `reason`; `409` for an invalid move |
-| `POST /lead-recovery/cases/{id}/attempts` | `recovery.edit` | one communication attempt (`channel`, `outcome?`, `occurredAt?`, `durationSeconds?`, `notes?`, `offeredAmountMinor?` entered by the employee); first attempt moves NEW / ASSIGNED to CONTACTING |
-| `POST /lead-recovery/cases/{id}/recover` | `recovery.edit` | confirm: `recoveredAmountMinor`, `collectedAmountMinor?`, `recoveredJobId?`, `recoveredLeadId?` (same customer, not the original job), `recoveredAt?`; status RECOVERED; the estimate is untouched |
-| `POST /lead-recovery/cases/{id}/refresh-presence` | `recovery.edit` | re-evaluate presence now (status snapshot) |
-| `GET /lead-recovery/summary` | `recovery.view` | cases by status; CONFIRMED recovered revenue and ESTIMATED value of open cases per currency, never added together; query `from`, `to`, `orgUnitId` |
+### GET /api/v1/lead-recovery/rules
+
+- **Permission**: `recovery.view`. **Purpose**: rules in scope, evaluation order; query `status`, `ruleKey`, `latestOnly` (default true), `cursor`, `limit`
+
+### POST /api/v1/lead-recovery/rules
+
+- **Permission**: `recovery.manage` over the unit. **Purpose**: create a DRAFT (`ruleKey`, `name`, `priority`, `conditions`, `actions`, `orgUnitId?`, `cooldownMinutes`); `409` duplicate key; audit `recovery_rule.create`
+
+### GET /api/v1/lead-recovery/rules/{id}
+
+- **Permission**: `recovery.view`. **Purpose**: one rule
+
+### PATCH /api/v1/lead-recovery/rules/{id}
+
+- **Permission**: `recovery.manage`. **Purpose**: edit a DRAFT in place; `409` otherwise; audit `recovery_rule.update`
+
+### POST /api/v1/lead-recovery/rules/{id}/new-version
+
+- **Permission**: `recovery.manage`. **Purpose**: copy into a new DRAFT (version + 1); `409` while another working version exists
+
+### POST /api/v1/lead-recovery/rules/{id}/submit
+
+- **Permission**: `recovery.manage`. **Purpose**: DRAFT -> PENDING_APPROVAL (high impact only)
+
+### POST /api/v1/lead-recovery/rules/{id}/activate
+
+- **Permission**: `recovery.approve` (high impact, not the author) / `recovery.manage`. **Purpose**: activate; supersedes the older ACTIVE version; audit `recovery_rule.approve` / `.activate`
+
+### POST /api/v1/lead-recovery/rules/{id}/deactivate
+
+- **Permission**: `recovery.manage` (ACTIVE) / `recovery.approve` (reject PENDING_APPROVAL). **Purpose**: audit `recovery_rule.deactivate` / `.reject`
+
+### POST /api/v1/lead-recovery/rules/dry-run
+
+- **Permission**: `recovery.manage`. **Purpose**: body `jobOutcomeId` + exactly one of `ruleId` / `definition`, optional `presence` what-if; answers `matched, wouldFire, skippedReason, checks[], cooldown, presence (status only), existingCaseId, highImpact, actions`; writes nothing
+
+### GET /api/v1/lead-recovery/cases
+
+- **Permission**: `recovery.view`. **Purpose**: the queue, newest outcome first; query `status`, `open`, `priority`, `assignedToId` (id, `me`, `none`), `customerId`, `jobId`, `orgUnitId`, `presenceStatus`
+
+### GET /api/v1/lead-recovery/cases/{id}
+
+- **Permission**: `recovery.view`. **Purpose**: the case plus `attempts`, `statusHistory`, `followUps`
+
+### PATCH /api/v1/lead-recovery/cases/{id}
+
+- **Permission**: `recovery.edit`. **Purpose**: `estimatedValueMinor` (an estimate), `priority` of an open case
+
+### POST /api/v1/lead-recovery/cases/{id}/assign
+
+- **Permission**: `recovery.assign`. **Purpose**: `{ assigneeId }` (`null` unassigns); the assignee must be an active employee with a login who can view the case; notified
+
+### POST /api/v1/lead-recovery/cases/{id}/status
+
+- **Permission**: `recovery.edit`. **Purpose**: `status` in `CONTACTING, CUSTOMER_REACHED, FOLLOW_UP_REQUIRED, NOT_RECOVERED, CLOSED`; the last two need `reason`; `409` for an invalid move
+
+### POST /api/v1/lead-recovery/cases/{id}/attempts
+
+- **Permission**: `recovery.edit`. **Purpose**: one communication attempt (`channel`, `outcome?`, `occurredAt?`, `durationSeconds?`, `notes?`, `offeredAmountMinor?` entered by the employee); first attempt moves NEW / ASSIGNED to CONTACTING
+
+### POST /api/v1/lead-recovery/cases/{id}/recover
+
+- **Permission**: `recovery.edit`. **Purpose**: confirm: `recoveredAmountMinor`, `collectedAmountMinor?`, `recoveredJobId?`, `recoveredLeadId?` (same customer, not the original job), `recoveredAt?`; status RECOVERED; the estimate is untouched
+
+### POST /api/v1/lead-recovery/cases/{id}/refresh-presence
+
+- **Permission**: `recovery.edit`. **Purpose**: re-evaluate presence now (status snapshot)
+
+### GET /api/v1/lead-recovery/summary
+
+- **Permission**: `recovery.view`. **Purpose**: cases by status; CONFIRMED recovered revenue and ESTIMATED value of open cases per currency, never added together; query `from`, `to`, `orgUnitId`
 
 Errors: `400` validation (discount, unknown key, bad range), `403` missing permission or SoD, `404` missing or out of scope, `409` conflict or invalid
 transition. Audit actions: `recovery.case_create` (system), `recovery.case_annotate`, `recovery.case_assign`, `recovery.case_status_change`,

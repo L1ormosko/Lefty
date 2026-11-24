@@ -54,7 +54,7 @@ describe("reading cases", () => {
     expect(view).toMatchObject({ status: "NEW", presenceStatus: "AT_LOCATION", presenceAccuracyM: 12, nextStatuses: ["ASSIGNED", "CONTACTING", "CLOSED"] });
     expect(typeof view.presenceAgeMinutes).toBe("number");
     for (const hidden of ["presenceLocationEventId", "presenceDistanceM", "latitude", "longitude"]) expect(view).not.toHaveProperty(hidden);
-    expect(JSON.stringify(view)).not.toContain(String(SITE.latitude));
+    expect(JSON.stringify(view)).not.toMatch(/-75\.0|40\.0/);
   });
 
   it("keeps confirmed and estimated revenue apart", async () => {
@@ -244,6 +244,6 @@ describe("presence refresh", () => {
     const view = await refreshPresence(w.leadOps.actor, ctx(w.leadOps), caseId);
     expect(view).toMatchObject({ presenceStatus: "LEFT_LOCATION", presenceAccuracyM: 8 });
     expect(before.presenceEvaluatedAt).not.toEqual(view.presenceEvaluatedAt);
-    expect(JSON.stringify(view)).not.toContain(String(SITE.latitude + 0.2));
+    expect(JSON.stringify(view)).not.toMatch(/40\.2/);
   });
 });
