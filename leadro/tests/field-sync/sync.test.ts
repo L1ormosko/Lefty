@@ -4,6 +4,7 @@ import { POST as assignRoute } from "@/app/api/v1/jobs/[id]/assign/route";
 import { POST as rescheduleRoute } from "@/app/api/v1/jobs/[id]/reschedule/route";
 import { POST as transitionRoute } from "@/app/api/v1/jobs/[id]/transition/route";
 import { POST as syncRoute } from "@/app/api/v1/field-sync/route";
+import { POST as createFollowUpRoute } from "@/app/api/v1/follow-ups/route";
 import { withTenant } from "@/server/db";
 import { clearFieldSyncHandlers, registerBuiltInFieldSyncHandlers, registerFieldSyncHandler, registeredFieldSyncTypes } from "@/server/field-sync";
 import { disconnect } from "../authz/fixtures";
@@ -296,5 +297,31 @@ describe("POST /field-sync: request validation", () => {
     const ancient = event("job.note", job.id, { body: "ancient" }, new Date(Date.now() - 30 * 86_400_000).toISOString());
     const response = await sync(w.cookie.techA1, [future, ancient]);
     expect(response.json.data.results.map((result: { status: string }) => result.status)).toEqual(["REJECTED", "REJECTED"]);
+  });
+});
+
+describe("POST /field-sync: follow-up tasks", () => {
+  it("starts, completes and cancels a follow-up task through the same services as the REST endpoints", async () => {
+    const job = await jobInProgress();
+    const make = async (title: string) => {
+      const created = await call(createFollowUpRoute, "POST", "/x", {
+        cookie: w.cookie.ceo,
+        body: { targetType: "JOB", targetId: job.id, title, dueAt: new Date(Date.now() + 86_400_000).toISOString(), assigneeId: w.techA1.employeeId },
+      });
+      expect(created.status).toBe(201);
+      return created.json.data.id as string;
+    };
+    const [first, second] = [await make("Take photos"), await make("Order a part")];
+    const start = event("follow_up.status", job.id, { followUpId: first, status: "IN_PROGRESS" }, minutesAgo(30));
+    const done = event("follow_up.complete", job.id, { followUpId: first, note: "Photos taken" }, minutesAgo(20));
+    const cancel = event("follow_up.cancel", job.id, { followUpId: second, reason: "Customer bought it" }, minutesAgo(10));
+    const noId = event("follow_up.complete", job.id, {}, minutesAgo(5));
+    const response = await sync(w.cookie.techA1, [start, done, cancel, noId]);
+    expect(response.status).toBe(200);
+    const byId = Object.fromEntries(response.json.data.results.map((result: { clientEventId: string }) => [result.clientEventId, result]));
+    for (const accepted of [start, done, cancel]) expect(byId[accepted.clientEventId].status).toBe("ACCEPTED");
+    expect(byId[noId.clientEventId]).toMatchObject({ status: "REJECTED", code: "VALIDATION_FAILED" });
+    const rows = await withTenant(w.tenantId, (tx) => tx.followUpTask.findMany({ where: { id: { in: [first, second] } }, orderBy: { createdAt: "asc" } }));
+    expect(rows.map((row) => row.status)).toEqual(["DONE", "CANCELLED"]);
   });
 });
