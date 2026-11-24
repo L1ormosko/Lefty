@@ -15,7 +15,7 @@ import { logger } from "@/server/logging";
  *    entity the first run created;
  *  - same hash, `REJECTED`: the original refusal is raised again (the stored code), so a retry never "succeeds" later;
  *  - different hash: `409 CONFLICT`. A clientEventId names ONE event; reusing it for different content is a client bug.
- * Business refusals (validation, state, conflict) of a NEW event are stored as `REJECTED` in a second transaction,
+ * Business refusals (validation, state, conflict) of a NEW event are stored (unless the error is `retryable`: a state-ordering refusal such as "not EN_ROUTE yet", so the device can resend after the earlier event synced) as `REJECTED` in a second transaction,
  * because the first one rolled back with the failed work. Permission denials are never stored: they are not facts
  * about the event, and the caller may be allowed later.
  *
@@ -146,7 +146,8 @@ export async function runFieldEvent<T>(request: FieldEventRequest, handlers: Fie
       return { result, replayed: false };
     });
   } catch (error) {
-    if (isStoredRefusal(error) && !isReusedIdConflict(error)) await rememberRefusal(request, error.code);
+    // A refusal marked retryable depends on the ORDER events arrive in (e.g. "job not EN_ROUTE yet"): it must not stick to the id.
+    if (isStoredRefusal(error) && !isReusedIdConflict(error) && !error.retryable) await rememberRefusal(request, error.code);
     throw error;
   }
 }

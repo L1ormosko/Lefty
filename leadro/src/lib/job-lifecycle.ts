@@ -169,12 +169,26 @@ export const REASON_REQUIRED_STATUSES: readonly JobStatusValue[] = [
 ];
 
 /**
- * What an execution-only grant (Technician `jobs.edit {fields:"execution"}`) may move a job to: leaving for the job
- * and starting the work (§8.5). Arrival needs location verification (§8.3, the arrival flow) and completion goes through
- * the outcome (§9.1), so neither is a plain status move for a technician. The lifecycle graph still decides whether
- * the edge exists (IN_PROGRESS is only reachable from ARRIVED, or from AWAITING_REVIEW by a reviewer).
+ * What an execution-only grant (Technician `jobs.edit {fields:"execution"}`) may move a job to through the
+ * plain `POST /jobs/{id}/transition`: leaving for the job. The next two steps are field EVENTS that carry
+ * more than a status (a location, an offline timestamp), so they have their own endpoints and are listed
+ * in `TECHNICIAN_FIELD_EVENT_STEPS` instead: arrival (`/arrive`, geofence check) and start of work
+ * (`/start-work`). Completion is reported through the job outcome (§9.1).
  */
-export const TECHNICIAN_TARGET_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE", "IN_PROGRESS"];
+export const TECHNICIAN_TARGET_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE"];
+
+/**
+ * The steps a technician takes through field-event endpoints (§8.3, §8.4): EN_ROUTE > ARRIVED > IN_PROGRESS.
+ * Both are `core` edges, so a tenant cannot switch them off. Pausing and resuming work is not offered: the
+ * machine has no ON_HOLD > IN_PROGRESS edge, so a pause could not be undone by the technician.
+ */
+export const TECHNICIAN_FIELD_EVENT_STEPS: readonly { from: JobStatusValue; to: JobStatusValue }[] = [
+  { from: "EN_ROUTE", to: "ARRIVED" },
+  { from: "ARRIVED", to: "IN_PROGRESS" },
+];
+
+export const isTechnicianFieldEventStep = (from: JobStatusValue, to: JobStatusValue): boolean =>
+  TECHNICIAN_FIELD_EVENT_STEPS.some((step) => step.from === from && step.to === to);
 
 /** Where the work is under way or done: the assignment can no longer be changed by dispatch. */
 export const FIELD_IN_PROGRESS_STATUSES: readonly JobStatusValue[] = ["EN_ROUTE", "ARRIVED", "IN_PROGRESS"];

@@ -27,7 +27,7 @@ Invariants:
   OVERRIDE, a `dispatch.override` event and audit; employment failures can never be overridden. Assignments are ENDED, never
   deleted; CLOSED / CANCELLED / unassign end them (ASSIGNED access stops). Team assignments expand to current members.
 - Every update calls `assertWritableFields` (Technician: `status`, `statusReason`, `instructions` only; money needs `financial`).
-  Execution-only grants may move a job only to EN_ROUTE and IN_PROGRESS (arrival needs location verification, completion goes through the outcome).
+  Execution-only grants may move a job only to EN_ROUTE in Phase 2 (arrival/start/completion are Phase 3).
 - Row lock (`FOR UPDATE`) on the job for status / assignment / schedule changes. Money is audited by field name only.
 - Conflicts are shown, not blocking (§25.2): `warnings` on writes (`DURATION_EXCEEDS_WINDOW`, `SLOT_SHORTER_THAN_DURATION`,
   `ASSIGNEE_ELIGIBILITY_CONFLICT`). New work for an archived customer is refused.
