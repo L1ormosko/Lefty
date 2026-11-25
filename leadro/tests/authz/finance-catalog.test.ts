@@ -19,7 +19,7 @@ describe("Phase 4 permission catalog", () => {
     expect(actions("materials")).toEqual(["VIEW", "CREATE", "EDIT", "ARCHIVE", "APPROVE", "EXPORT"]);
     expect(actions("finance_ledger")).toEqual(["VIEW", "EXPORT"]);
     expect(actions("approvals")).toEqual(["VIEW", "MANAGE", "CONFIGURE"]);
-    for (const module of FINANCE_MODULES) expect(actions(module).length, module).toBeGreaterThan(0);
+    for (const financeModule of FINANCE_MODULES) expect(actions(financeModule).length, financeModule).toBeGreaterThan(0);
   });
 
   it("marks money-moving and ledger-reading permissions sensitive", () => {
@@ -47,8 +47,8 @@ describe("Phase 4 role templates", () => {
   });
 
   it("gives the Finance Director full finance and policy configuration but nothing operational", () => {
-    for (const module of FINANCE_MODULES) {
-      for (const p of PERMISSION_CATALOG.filter((x) => x.module === module)) expect(holds("FINANCE_DIRECTOR", `${module}.${p.action.toLowerCase()}`), `${module}.${p.action}`).toBe(true);
+    for (const financeModule of FINANCE_MODULES) {
+      for (const p of PERMISSION_CATALOG.filter((x) => x.module === financeModule)) expect(holds("FINANCE_DIRECTOR", `${financeModule}.${p.action.toLowerCase()}`), `${financeModule}.${p.action}`).toBe(true);
     }
     expect(holds("FINANCE_DIRECTOR", "approvals.configure")).toBe(true);
     expect(holds("FINANCE_DIRECTOR", "materials.approve")).toBe(true);

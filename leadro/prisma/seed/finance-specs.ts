@@ -8,7 +8,7 @@ export interface MaterialSpec {
   name: string;
   unit: string;
   supplier: string;
-  /** Unit cost in minor units (cents): version 1, effective from the seed run. */
+  /** Unit cost in minor units (cents): version 1, effective from 2020-01-01 so seeded job usage falls inside it. */
   unitCostMinor: bigint;
 }
 
