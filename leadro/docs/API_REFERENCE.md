@@ -2450,3 +2450,136 @@ Free text appears only in the record itself; events, audit and the offline log c
   in the order sent (`index`); `sequence` is the order applied. `status`: `ACCEPTED` (applied; `result` = what the endpoint would answer), `REPLAYED` (already applied earlier, same answer), `REJECTED` (a verdict on the content is remembered: send a corrected event with a new id; with `retryable: true` it was caused by order or configuration, is NOT remembered and the same event may be sent again once the earlier events synced),
   `CONFLICT` (the id was used for different content, or the module refused with a conflict), `FORBIDDEN` (not allowed or not visible; not remembered; retryable only for a job not yet visible to the caller), `UNSUPPORTED`, `FAILED` (server problem, `retryable: true`). Labels `FIELD.SYNC.STATUS.*`.
 - **Errors** (whole request): `400` malformed batch (empty, over 100 events, bad ids / times / type), `401`, `403` caller is not an employee. Sending the same batch again is safe.
+
+## Finance: ledger, payments, revenue confirmation, provider intake (`/api/v1/finance/**`) - Phase 4
+
+Code: `src/server/ledger`, `src/server/payments` (READMEs there), pure balance rules `src/lib/ledger-balances.ts`, routes
+`src/app/api/v1/finance/**`. Spec 11.1, 11.8, 18.3, 26.3, 26.4. Design decisions: `DECISIONS.md` "Phase 4 Task 4".
+
+Conventions for every finance endpoint:
+- **Money** is a decimal STRING of minor units in responses; requests take a JSON integer or a decimal string (`API_CONVENTIONS.md` "Money").
+- **Scope**: finance reaches records through TENANT, LEGAL_ENTITY and ORG_UNIT scopes only (a job's service-area unit; OWN / ASSIGNED
+  never match finance). Ledger entries are scoped by the unit / legal entity snapshot taken at posting; jobs, job balances and payments by
+  the job's current unit. Out of scope = `404` (audited denial), no grant at all = `403`.
+- **What is returned**: ids, money, finance enums and codes only. No job titles, addresses or customer names (the Finance Director sees a
+  job only through its `financial` field set).
+- **Balance** object (one per currency): `currency, chargedMinor, adjustedMinor, billedMinor (= charged + adjusted), collectedMinor,
+  refundedMinor, chargedBackMinor, netCollectedMinor (= collected - refunded - charged back), outstandingMinor (= billed - net collected;
+  negative = customer in credit), materialCostMinor, paymentStatus`. `paymentStatus`: `NOT_CHARGED | UNPAID | PARTIAL | PAID | OVERPAID |
+  REFUNDED` (labels `FINANCE.PAYMENT_STATUS.*`; rule in `src/lib/ledger-balances.ts`). A REVERSAL counts under the type it reverses.
+- **Ledger entry** fields: `id, type (CHARGE | PAYMENT | REFUND | CHARGEBACK | ADJUSTMENT | REVERSAL | MATERIAL_COST), source (JOB | OUTCOME |
+  PAYMENT | REFUND | CHARGEBACK | ADJUSTMENT | MATERIAL_USAGE | REVERSAL), amountMinor (signed), currency, jobId, customerId, outcomeId,
+  paymentId, refundId, chargebackId, adjustmentId, materialUsageId, orgUnitId, legalEntityId, reversesEntryId, reversedByEntryId,
+  idempotencyKey, actorUserId, systemActor, memo, occurredAt, recordedAt`. Labels `FINANCE.LEDGER.TYPE.*`, `FINANCE.LEDGER.SOURCE.*`.
+- **Payment** fields: `id, jobId, customerId, outcomeId, method (CASH | CARD | CHECK | BANK_TRANSFER | FINANCING | OTHER), status (PENDING |
+  RECEIVED | FAILED | VOIDED), origin (MANUAL | PROVIDER), amountMinor, currency, reference, provider, providerRef, intakeEventId, orgUnitId,
+  receivedAt, failedAt, failureReason, voidedAt, voidReason, recordedById, createdAt, updatedAt`. Labels `FINANCE.PAYMENT.*`.
+- Error detail codes are translated by clients as `FINANCE.ERROR.<CODE UPPERCASED>` (`ledger.wrong_sign` > `FINANCE.ERROR.LEDGER.WRONG_SIGN`).
+
+### GET /api/v1/finance/ledger/entries
+- **Purpose**: ledger entries in the caller's scope, newest first (`occurredAt desc, id desc`). **Permission**: `finance_ledger.view`.
+- **Query**: `cursor, limit, jobId, customerId, outcomeId, paymentId, legalEntityId, type, occurredFrom, occurredTo` (ISO, `[from, to)`).
+- **Response**: `200 { data: [entry], page }`. Entries are never edited or deleted: a correction appears as a REVERSAL entry.
+
+### GET /api/v1/finance/ledger/entries/{id}
+- One entry (`finance_ledger.view` over its snapshot unit / legal entity). `200 { data: entry }`, `404`.
+
+### POST /api/v1/finance/ledger/entries/{id}/reverse
+- **Purpose**: reverse a posted CHARGE (the only correction of a charge). **Permission**: `finance_payments.edit` over the entry's job.
+- **Body** (strict): `{ reason }` (1-500 chars, stored as the reversal's memo and in the audit).
+- **Response**: `201 { data: { reversal: entry, replayed: false } }`; reversing the same charge again is `200` with `replayed: true`.
+- **Errors**: `409 INVALID_STATE_TRANSITION` `ledger.reverse_not_supported` (not a CHARGE: void the payment / use Task 5 flows),
+  `ledger.reversal_not_reversible`, `ledger.already_reversed`. **Audit**: `ledger.reverse` (with reason).
+
+### GET /api/v1/finance/jobs/{id}/balance
+- **Purpose**: derived balances and payment status of one job. **Permission**: `finance_ledger.view` over the job.
+- **Response**: `200 { data: { jobId, customerId, balances: [balance] } }` (`balances: []` = nothing posted).
+
+### GET /api/v1/finance/job-balances
+- Jobs in scope that have ledger entries, newest job first, each with its balances. **Permission**: `finance_ledger.view`.
+- **Query**: `cursor, limit, customerId`. **Response**: `200 { data: [{ jobId, customerId, balances }], page }`.
+
+### GET /api/v1/finance/customers/{id}/balance
+- **Purpose**: a customer's balances over the entries the caller may see. **Permission**: `finance_ledger.view`.
+- **Query**: `occurredFrom, occurredTo`. **Response**: `200 { data: { customerId, coverage: TENANT | SCOPE, balances } }` (`SCOPE` = only
+  entries in the caller's units / legal entities were summed; labels `FINANCE.BALANCE.COVERAGE.*`). A scoped caller who sees no entry of
+  the customer gets `404` (existence is not confirmed).
+
+### GET /api/v1/finance/legal-entities/{id}/balance
+- **Purpose**: totals of one legal entity (entries whose legal-entity snapshot is it). **Permission**: `finance_ledger.view` with a TENANT
+  scope or a LEGAL_ENTITY scope on that entity (a unit-scoped manager gets `404`). **Query**: `occurredFrom, occurredTo`.
+- **Response**: `200 { data: { legalEntityId, balances } }`.
+
+### GET /api/v1/finance/payments
+- Payments in scope (through the job), newest first. **Permission**: `finance_payments.view`.
+- **Query**: `cursor, limit, jobId, outcomeId, status, method, origin`. **Response**: `200 { data: [payment], page }`.
+
+### POST /api/v1/finance/payments
+- **Purpose**: record a payment by hand (cash, check, card terminal, bank transfer...). **Permission**: `finance_payments.create` over the job
+  (Owner, Finance Director; COO and unit managers view only).
+- **Headers**: `Idempotency-Key` **required** (`400 payment.idempotency_key_required` otherwise). It becomes the payment's own key (scoped to
+  the recording user), so double submits and concurrent duplicates create ONE payment and ONE ledger entry, even after the 24 h request store.
+- **Body** (strict): `jobId, method, amountMinor (> 0)`, optional `currency` (must be the job's: `400 payment.currency_mismatch`),
+  `reference` (<= 120; **required** for CHECK, CARD, BANK_TRANSFER), `status` (`RECEIVED` default | `PENDING`), `receivedAt` (RECEIVED only,
+  default now, never more than 5 minutes ahead).
+- **Response**: `201 { data: { payment, replayed: false } }` (the request store replays it verbatim with `Idempotent-Replayed: true`).
+  RECEIVED posts a PAYMENT entry (`payment:<id>:received`) in the same transaction; PENDING posts nothing yet.
+- **Errors**: `400`, `403`, `404` (job out of scope or missing), `409` (`payment.idempotency_key_reused`; in-flight duplicate, retryable).
+  **Audit**: `payment.record`.
+
+### GET /api/v1/finance/payments/{id}
+- One payment (`finance_payments.view` over its job). `200 { data: payment }`.
+
+### POST /api/v1/finance/payments/{id}/receive | /fail | /void
+- **Purpose**: status changes (DB machine: PENDING > RECEIVED | FAILED | VOIDED, RECEIVED > VOIDED). **Permission**: `finance_payments.edit` over
+  the payment's job.
+- **Body**: `receive` `{ receivedAt? }`; `fail` and `void` `{ reason }` (required). `receive` posts the PAYMENT entry; `void` of a RECEIVED
+  payment posts the REVERSAL of that entry (`payment:<id>:void`); `fail` posts nothing.
+- **Response**: `200 { data: { payment, replayed } }`; asking for the status the payment already has is a replay (also under concurrency:
+  one change, one posting). **Errors**: `409 INVALID_STATE_TRANSITION` `payment.invalid_transition`. **Audit**: `payment.receive | fail | void`
+  (previous and new status, reason).
+
+### GET /api/v1/finance/charges-to-confirm
+- **Purpose**: the revenue confirmation queue: SOLD outcomes carrying a charged or collected amount, oldest first. **Permission**:
+  `finance_payments.view` over the job AND the outcome `financial` field set (`job_outcomes.view`); rows without that set are left out.
+- **Query**: `cursor, limit, jobId, state` (`pending` default: a charge or collection not yet posted; `all`).
+- **Response**: `200 { data: [{ outcomeId, jobId, customerId, visitNumber, occurredAt, currency, chargedAmountMinor, collectedAmountMinor,
+  paymentMethod, reportedPaymentStatus, charge: { state, postedMinor, entryId }, collection: { state, recordedMinor, paymentId } }], page }`.
+  `state`: `NOT_REQUIRED | PENDING | POSTED | MISMATCH` (`MISMATCH` = the outcome was corrected after posting; labels `FINANCE.REVENUE.STATE.*`).
+
+### POST /api/v1/finance/outcomes/{id}/charge
+- **Purpose**: post the outcome's CHARGE (source OUTCOME, `occurredAt` = the visit). **Permission**: `finance_payments.create` over the job plus
+  the outcome `financial` set (`403 revenue.financial_set_required`).
+- **Body** (strict): `{ expectedAmountMinor }`: the amount the confirmer saw; a different current amount is `409 revenue.outcome_changed`.
+- **Response**: `201 { data: { entryId, amountMinor, currency, replayed: false, balances } }`; confirming again is `200`, `replayed: true`.
+- **Errors**: `409 revenue.nothing_to_charge` (not SOLD / no amount), `revenue.charge_already_posted` (another active charge with a different
+  amount: reverse it, then confirm again; the key becomes `outcome:<id>:charge:<n+1>`). **Audit**: `revenue.charge_confirm`.
+
+### POST /api/v1/finance/outcomes/{id}/collection
+- **Purpose**: record the collection the technician reported as a RECEIVED MANUAL payment linked to the outcome (`receivedAt` = the visit)
+  and post its PAYMENT entry. **Permission**: as `/charge`.
+- **Body** (strict): `{ expectedAmountMinor, method?, reference? }` (`method` defaults to the outcome's, `400 revenue.method_required` when
+  neither has one; `reference` required for CHECK, CARD, BANK_TRANSFER).
+- **Response**: `201 { data: { payment, replayed: false, balances } }`; again = `200` replay. **Errors**: `409 revenue.nothing_to_collect`,
+  `revenue.outcome_changed`, `revenue.collection_already_recorded` (void it first). **Audit**: `revenue.collection_confirm`.
+
+### POST /api/v1/finance/intake/{tenantSlug}/{provider}
+- **Purpose**: a payment provider's webhook. **Auth**: no session; the PROVIDER authenticates the delivery (its signature over the raw body
+  with its per-tenant secret). JSON body, at most 1 MB.
+- **This build has no provider**: every call answers `409 CONFLICT` with detail code `payment_provider.not_configured` and writes nothing
+  (an unknown tenant answers the same; label `FINANCE.PROVIDER.NOT_CONFIGURED`).
+- With a provider installed (`registerPaymentProvider`): bad signature `401` (logged as a REJECTED event under `unverified:<sha256>`, never
+  under the id the body claims); otherwise the event is stored first, then validated and applied, and the answer is `200 { data: { eventId,
+  status (ACCEPTED | REJECTED | DUPLICATE | UNMATCHED), rejectionCode, paymentId, duplicate } }` (labels `FINANCE.INTAKE.STATUS.*`,
+  `FINANCE.INTAKE.REJECTION.*`: `malformed_event`, `invalid_event_fields`, `unsupported_event_type`, `unknown_job`, `currency_mismatch`,
+  `duplicate_provider_ref`). A repeated delivery (same provider + event id, sequential or concurrent) returns the event on record with
+  `duplicate: true` and never posts twice; the same id with different content is `409 payment_intake.payload_mismatch`. ACCEPTED creates
+  a PROVIDER payment (RECEIVED) and its PAYMENT entry by `system:provider-intake`. **Audit**: `payment_intake.process` (system actor).
+
+### GET /api/v1/finance/intake-events
+- The intake log, newest first (hashes and normalized fields only). **Permission**: `finance_payments.view` with a TENANT scope (`403`
+  otherwise). **Query**: `cursor, limit, provider, status`. **Response**: `200 { data: [event], page }`.
+
+### GET /api/v1/finance/payment-providers
+- `200 { data: { configured: [] } }`: the provider keys this deployment accepts events from (empty: "not configured"). **Permission**:
+  `finance_payments.view`.
