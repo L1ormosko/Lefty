@@ -152,7 +152,7 @@ export async function receiveProviderEvent(request: IntakeRequest): Promise<Inta
       details: [{ field: "externalId", code: "payment_intake.payload_mismatch", message: "An event with this id was already received with different content." }],
     });
   }
-  return withTenant(tenantId, (tx) => processEvent(tx, event.id, incoming, provider.key, !inserted));
+  return withTenant(tenantId, (tx) => processEvent(tx, event.id, incoming, provider.key));
 }
 
 function safeParse(provider: PaymentProvider, rawBody: string): ReturnType<PaymentProvider["parseEvent"]> {
@@ -164,10 +164,12 @@ function safeParse(provider: PaymentProvider, rawBody: string): ReturnType<Payme
 }
 
 /** Validates and applies a RECEIVED event under a row lock (a concurrent duplicate waits, then sees the final status). */
-async function processEvent(tx: TenantTx, eventId: string, incoming: ProviderEvent, providerKey: string, duplicate: boolean): Promise<IntakeResult> {
+async function processEvent(tx: TenantTx, eventId: string, incoming: ProviderEvent, providerKey: string): Promise<IntakeResult> {
   await tx.$queryRaw`SELECT "id" FROM "PaymentIntakeEvent" WHERE "id" = ${eventId} FOR UPDATE`;
   const event = await tx.paymentIntakeEvent.findUniqueOrThrow({ where: { id: eventId } });
+  // Already decided by an earlier (or concurrent) delivery: report it, post nothing.
   if (event.status !== "RECEIVED") return toResult(event, true);
+  // Still RECEIVED: this delivery decides it (first delivery, or a retry after a crash between storing and processing).
 
   const finish = async (status: PaymentIntakeStatus, data: Prisma.PaymentIntakeEventUncheckedUpdateInput = {}): Promise<IntakeResult> => {
     const updated = await tx.paymentIntakeEvent.update({ where: { id: event.id }, data: { ...data, status, processedAt: new Date() } });
@@ -180,7 +182,7 @@ async function processEvent(tx: TenantTx, eventId: string, incoming: ProviderEve
       newValue: { provider: providerKey, status, rejectionCode: updated.rejectionCode, paymentId: updated.paymentId, jobId: updated.jobId },
       sourceApp: "SYSTEM",
     });
-    return toResult(updated, duplicate);
+    return toResult(updated, false);
   };
 
   const payment = incoming.payment;

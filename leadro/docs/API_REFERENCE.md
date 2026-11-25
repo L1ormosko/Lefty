@@ -2530,7 +2530,13 @@ Conventions for every finance endpoint:
 ### GET /api/v1/finance/payments/{id}
 - One payment (`finance_payments.view` over its job). `200 { data: payment }`.
 
-### POST /api/v1/finance/payments/{id}/receive | /fail | /void
+### POST /api/v1/finance/payments/{id}/receive
+
+### POST /api/v1/finance/payments/{id}/fail
+
+### POST /api/v1/finance/payments/{id}/void
+
+The three status changes share one description:
 - **Purpose**: status changes (DB machine: PENDING > RECEIVED | FAILED | VOIDED, RECEIVED > VOIDED). **Permission**: `finance_payments.edit` over
   the payment's job.
 - **Body**: `receive` `{ receivedAt? }`; `fail` and `void` `{ reason }` (required). `receive` posts the PAYMENT entry; `void` of a RECEIVED
