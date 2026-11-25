@@ -393,5 +393,12 @@ Rules:
   key also forces MFA). Custom roles holding any of them require MFA (the existing `customRoleRequiresMfa` rule).
 - **Scopes**: finance data carries `orgUnitId` (and `legalEntityId` on the ledger and reconciliation runs), so ORG_UNIT and LEGAL_ENTITY
   scopes apply; the Finance Director and Owner are assigned at TENANT.
+- **Finance review flags** (`FinanceReviewFlag`, spec 11.7) use the reconciliation module, no new keys: listing / reading
+  `finance_reconciliation.view` (scoped by the flag's `orgUnitId`; a flag without a unit needs TENANT scope), assigning
+  `finance_reconciliation.assign`, resolving `finance_reconciliation.edit`. Raising one is a side effect of a money or job service
+  (no permission of its own) or, by a person, `finance_reconciliation.create`.
+- **COO and material costs**: the COO maintains the catalog but does not see costs or approve cost changes (the `cost` set and
+  `materials.approve` are Owner / Finance Director only). Spec 4.5 gives the COO "View" on financial reports, not cost data;
+  a tenant can grant the set to its COO role.
 - **Compensation stays untouched**: `compensation.*` and `financial_reports.*` keep their Phase 1 meaning; no commission or payroll
   permission is added (blocked on the owner's compensation specification, spec 28.4).

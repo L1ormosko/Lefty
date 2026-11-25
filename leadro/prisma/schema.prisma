@@ -205,6 +205,7 @@ model Tenant {
   reconciliationRuns       ReconciliationRun[]
   reconciliationExceptions ReconciliationException[]
   paymentIntakeEvents      PaymentIntakeEvent[]
+  financeReviewFlags       FinanceReviewFlag[]
 }
 
 model LegalEntity {
@@ -280,6 +281,9 @@ model OrgUnit {
   chargebacks      Chargeback[]      @relation("ChargebackOrgUnit")
   adjustments      Adjustment[]      @relation("AdjustmentOrgUnit")
   approvalRequests ApprovalRequest[] @relation("ApprovalRequestOrgUnit")
+
+  reconciliationExceptions ReconciliationException[] @relation("ReconciliationExceptionOrgUnit")
+  financeReviewFlags       FinanceReviewFlag[]       @relation("FinanceReviewFlagOrgUnit")
 
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
@@ -482,6 +486,9 @@ model User {
   reconciliationRunsStarted        ReconciliationRun[]       @relation("ReconciliationRunStartedBy")
   reconciliationExceptionsAssigned ReconciliationException[] @relation("ReconciliationExceptionAssignedTo")
   reconciliationExceptionsResolved ReconciliationException[] @relation("ReconciliationExceptionResolvedBy")
+  financeReviewFlagsRaised         FinanceReviewFlag[]       @relation("FinanceReviewFlagRaisedBy")
+  financeReviewFlagsAssigned       FinanceReviewFlag[]       @relation("FinanceReviewFlagAssignedTo")
+  financeReviewFlagsResolved       FinanceReviewFlag[]       @relation("FinanceReviewFlagResolvedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -1095,12 +1102,13 @@ model Customer {
 
   recoveryRuleRuns RecoveryRuleRun[]
 
-  ledgerEntries    LedgerEntry[]
-  payments         Payment[]
-  refunds          Refund[]
-  chargebacks      Chargeback[]
-  adjustments      Adjustment[]
-  approvalRequests ApprovalRequest[]
+  ledgerEntries      LedgerEntry[]
+  payments           Payment[]
+  refunds            Refund[]
+  chargebacks        Chargeback[]
+  adjustments        Adjustment[]
+  approvalRequests   ApprovalRequest[]
+  financeReviewFlags FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, number])
@@ -1703,6 +1711,7 @@ model Job {
   approvalRequests         ApprovalRequest[]
   reconciliationExceptions ReconciliationException[]
   paymentIntakeEvents      PaymentIntakeEvent[]
+  financeReviewFlags       FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   // Lets a recovery case reference (job, customer) so a case and its job can never disagree on the customer.
@@ -2445,8 +2454,8 @@ model JobCompletion {
   @@index([tenantId, formDefinitionId])
 }
 
-/// Material used on a visit. Free text until the Phase 4 materials catalog exists: `materialRef` is
-/// a placeholder id for that catalog (no FK yet).
+/// Material used on a visit: free-text `name` as the technician recorded it, linked to the Phase 4 catalog through
+/// `materialId` when known. `materialRef` is the Phase 3 placeholder id (no FK), kept for rows recorded before the catalog.
 model JobMaterialUsage {
   id                String    @id @default(cuid())
   tenantId          String
@@ -2608,9 +2617,11 @@ model JobOutcome {
 
   ruleRuns RecoveryRuleRun[]
 
-  ledgerEntries LedgerEntry[]
-  payments      Payment[]
-  adjustments   Adjustment[]
+  ledgerEntries            LedgerEntry[]
+  payments                 Payment[]
+  adjustments              Adjustment[]
+  reconciliationExceptions ReconciliationException[]
+  financeReviewFlags       FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([id, jobId, tenantId])
@@ -3007,6 +3018,12 @@ enum ReconciliationExceptionStatus {
   RESOLVED
 }
 
+enum FinanceReviewFlagStatus {
+  OPEN
+  ASSIGNED
+  RESOLVED
+}
+
 /// What the authenticated intake did with an external payment event (spec 18.3, 26.4).
 enum PaymentIntakeStatus {
   RECEIVED
@@ -3107,20 +3124,21 @@ model LedgerEntry {
   occurredAt      DateTime        @db.Timestamptz(3)
   recordedAt      DateTime        @default(now()) @db.Timestamptz(3)
 
-  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  job           Job?              @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  customer      Customer?         @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  outcome       JobOutcome?       @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  payment       Payment?          @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  refund        Refund?           @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  chargeback    Chargeback?       @relation(fields: [chargebackId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  adjustment    Adjustment?       @relation(fields: [adjustmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  materialUsage JobMaterialUsage? @relation(fields: [materialUsageId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  orgUnit       OrgUnit?          @relation("LedgerEntryOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  legalEntity   LegalEntity?      @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  reverses      LedgerEntry?      @relation("LedgerReversal", fields: [reversesEntryId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  reversedBy    LedgerEntry[]     @relation("LedgerReversal")
-  actor         User?             @relation("LedgerEntryActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job?                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer      Customer?           @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome       JobOutcome?         @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment       Payment?            @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  refund        Refund?             @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  chargeback    Chargeback?         @relation(fields: [chargebackId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  adjustment    Adjustment?         @relation(fields: [adjustmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  materialUsage JobMaterialUsage?   @relation(fields: [materialUsageId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit       OrgUnit?            @relation("LedgerEntryOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  legalEntity   LegalEntity?        @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reverses      LedgerEntry?        @relation("LedgerReversal", fields: [reversesEntryId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reversedBy    LedgerEntry[]       @relation("LedgerReversal")
+  reviewFlags   FinanceReviewFlag[]
+  actor         User?               @relation("LedgerEntryActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
   @@unique([tenantId, idempotencyKey])
@@ -3174,6 +3192,7 @@ model Payment {
   refunds       Refund[]
   chargebacks   Chargeback[]
   exceptions    ReconciliationException[]
+  reviewFlags   FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([id, jobId, tenantId])
@@ -3205,14 +3224,16 @@ model Refund {
   createdAt         DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime     @updatedAt @db.Timestamptz(3)
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  job             Job              @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  payment         Payment?         @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  customer        Customer?        @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  approvalRequest ApprovalRequest? @relation("RefundApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  orgUnit         OrgUnit?         @relation("RefundOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  requestedBy     User?            @relation("RefundRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job             Job                       @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment         Payment?                  @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer        Customer?                 @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest?          @relation("RefundApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit         OrgUnit?                  @relation("RefundOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requestedBy     User?                     @relation("RefundRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   ledgerEntries   LedgerEntry[]
+  exceptions      ReconciliationException[]
+  reviewFlags     FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, idempotencyKey])
@@ -3255,6 +3276,7 @@ model Chargeback {
   orgUnit          OrgUnit?            @relation("ChargebackOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
   recordedBy       User?               @relation("ChargebackRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   ledgerEntries    LedgerEntry[]
+  reviewFlags      FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, idempotencyKey])
@@ -3287,14 +3309,15 @@ model Adjustment {
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  job             Job?             @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  customer        Customer?        @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  outcome         JobOutcome?      @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  approvalRequest ApprovalRequest? @relation("AdjustmentApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  orgUnit         OrgUnit?         @relation("AdjustmentOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  requestedBy     User?            @relation("AdjustmentRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job             Job?                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer        Customer?           @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome         JobOutcome?         @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest?    @relation("AdjustmentApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit         OrgUnit?            @relation("AdjustmentOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requestedBy     User?               @relation("AdjustmentRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
   ledgerEntries   LedgerEntry[]
+  reviewFlags     FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, idempotencyKey])
@@ -3454,6 +3477,12 @@ model ReconciliationException {
   jobId               String?
   paymentId           String?
   intakeEventId       String?
+  /// Added by 20261125100000_phase4_review_flags: the refund (REFUND_WITHOUT_PAYMENT) and the outcome
+  /// (OUTCOME_LEDGER_MISMATCH) an exception is about, and the job's service-area unit at detection time (scope filter;
+  /// null for an exception without a job, which only tenant-wide finance scope sees).
+  refundId            String?
+  outcomeId           String?
+  orgUnitId           String?
   currency            String                        @default("USD") @db.Char(3)
   expectedAmountMinor BigInt?
   recordedAmountMinor BigInt?
@@ -3472,6 +3501,9 @@ model ReconciliationException {
   job         Job?                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
   payment     Payment?            @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
   intakeEvent PaymentIntakeEvent? @relation("ReconciliationIntake", fields: [intakeEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  refund      Refund?             @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome     JobOutcome?         @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit     OrgUnit?            @relation("ReconciliationExceptionOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
   assignedTo  User?               @relation("ReconciliationExceptionAssignedTo", fields: [assignedToId, tenantId], references: [id, tenantId], onDelete: Restrict)
   resolvedBy  User?               @relation("ReconciliationExceptionResolvedBy", fields: [resolvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
 
@@ -3479,6 +3511,7 @@ model ReconciliationException {
   @@index([tenantId, runId, status])
   @@index([tenantId, status, kind])
   @@index([tenantId, jobId])
+  @@index([tenantId, orgUnitId, status])
 }
 
 /// Log of every external payment event the authenticated intake received (spec 18.3, 26.4). Written BEFORE any core
@@ -3518,4 +3551,62 @@ model PaymentIntakeEvent {
   @@unique([tenantId, provider, externalId])
   @@index([tenantId, status, receivedAt])
   @@index([tenantId, jobId])
+}
+
+/// "Flag for finance review" (spec 11.7, 25.4): a money record or job a person in finance must look at, e.g. a job reopened
+/// after money was posted, a refund of an already-reconciled payment, a chargeback lost. Added by migration
+/// 20261125100000_phase4_review_flags. A flag never changes money: the reviewer acts through adjustments / reversals and
+/// resolves the flag with a reason. Raised by a person or a machine actor (exactly one, CHECK); `idempotencyKey` (unique per
+/// tenant) lets a service raise the same flag for the same event once. `orgUnitId` is the job's unit at raise time (scope).
+model FinanceReviewFlag {
+  id               String                  @id @default(cuid())
+  tenantId         String
+  /// Machine code, lowercase dotted, e.g. "job.reopened_after_posting" (CHECK finance_review_flag_reason_code_format).
+  reasonCode       String
+  /// Optional free text from a person; never written by a machine actor (keep machine detail in `details`).
+  note             String?                 @db.Text
+  /// Ids, codes and numbers only (amounts as decimal strings).
+  details          Json?
+  status           FinanceReviewFlagStatus @default(OPEN)
+  jobId            String?
+  customerId       String?
+  outcomeId        String?
+  paymentId        String?
+  refundId         String?
+  chargebackId     String?
+  adjustmentId     String?
+  ledgerEntryId    String?
+  orgUnitId        String?
+  idempotencyKey   String?
+  raisedById       String?
+  systemActor      String?
+  raisedAt         DateTime                @default(now()) @db.Timestamptz(3)
+  assignedToId     String?
+  assignedAt       DateTime?               @db.Timestamptz(3)
+  resolvedAt       DateTime?               @db.Timestamptz(3)
+  resolvedById     String?
+  resolutionReason String?                 @db.Text
+  createdAt        DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job         Job?         @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer    Customer?    @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome     JobOutcome?  @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment     Payment?     @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  refund      Refund?      @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  chargeback  Chargeback?  @relation(fields: [chargebackId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  adjustment  Adjustment?  @relation(fields: [adjustmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ledgerEntry LedgerEntry? @relation(fields: [ledgerEntryId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit     OrgUnit?     @relation("FinanceReviewFlagOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  raisedBy    User?        @relation("FinanceReviewFlagRaisedBy", fields: [raisedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedTo  User?        @relation("FinanceReviewFlagAssignedTo", fields: [assignedToId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  resolvedBy  User?        @relation("FinanceReviewFlagResolvedBy", fields: [resolvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, raisedAt])
+  @@index([tenantId, orgUnitId, status])
+  @@index([tenantId, jobId])
+  @@index([tenantId, assignedToId, status])
 }

@@ -661,8 +661,9 @@ The Phase 2 rules apply (ids only, resolve through tenant-scoped queries and re-
 
 # Phase 4: financial core
 
-Migration `20261124100000_phase4_financial_core` (schema only; services arrive in Phase 4 Tasks 2-6, none of which add a
-migration). 13 new tenant-owned tables (77 in total) with `tenantId`, `(id, tenantId)` unique keys, composite `(ref, tenantId)`
+Migrations `20261124100000_phase4_financial_core` and `20261125100000_phase4_review_flags` (schema only; services arrive in
+Phase 4 Tasks 2-6, none of which add a migration; the second one exists because the first was already applied to the shared
+databases when Task 1 found the gap). 14 new tenant-owned tables (78 in total) with `tenantId`, `(id, tenantId)` unique keys, composite `(ref, tenantId)`
 FKs and FORCE RLS (the DO-block runs again over the whole schema). Existing `Int` money columns became `BigInt`
 (`Job`, `Lead`, `JobOutcome`, `JobFieldNote`, `LeadRecoveryCase`, `RecoveryAttempt`). Names are asserted in
 `tests/db/phase4-schema.test.ts`. **No compensation, commission or payroll tables exist**: they wait for the owner's compensation
@@ -701,6 +702,11 @@ erDiagram
   Job |o--o{ ReconciliationException : about
   Payment |o--o{ ReconciliationException : about
   PaymentIntakeEvent |o--o{ ReconciliationException : about
+  Refund |o--o{ ReconciliationException : about
+  JobOutcome |o--o{ ReconciliationException : about
+  Job |o--o{ FinanceReviewFlag : "flagged"
+  LedgerEntry |o--o{ FinanceReviewFlag : "flagged"
+  Payment |o--o{ FinanceReviewFlag : "flagged"
 ```
 
 ## Model guide
@@ -716,18 +722,19 @@ erDiagram
 | `ApprovalPolicy` | Configurable policy per subject type and amount tier; versioned (content frozen, only `active` changes); one active version per `code`. `requiredApprovals` 1 or 2; `approverPermission` is a permission key. |
 | `ApprovalRequest` | Generic request. Snapshots the policy (code, version, required approvals, approver permission). `subjectType` + `subjectId` is a polymorphic reference (no FK, see below). One PENDING request per subject. `excludedApproverIds` = editors / submitters besides the requester, who can never decide. |
 | `ApprovalDecision` | Append-only; one per (request, decider). A trigger refuses a decision by the requester or an excluded person, or on a request that is not pending. |
-| `ReconciliationRun` / `ReconciliationException` | A run per period (and legal entity, currency) and what it found; exceptions are assigned and resolved only with a reason. |
+| `ReconciliationRun` / `ReconciliationException` | A run per period (and legal entity, currency) and what it found; exceptions are assigned and resolved only with a reason. An exception names the job, payment, intake event, refund (required for REFUND_WITHOUT_PAYMENT) or outcome (required for OUTCOME_LEDGER_MISMATCH) it is about, plus the job's `orgUnitId` at detection (scope filter); all frozen after insert. |
+| `FinanceReviewFlag` | "Flag for finance review" (spec 11.7): a job or money record a finance person must look at (`reasonCode` like `job.reopened_after_posting`). Typed optional references (job, customer, outcome, payment, refund, chargeback, adjustment, ledger entry; at least one), `orgUnitId` scope snapshot, raised by a user XOR `system:<name>` (free-text `note` only from a person), optional `idempotencyKey` unique per tenant. OPEN -> ASSIGNED -> RESOLVED (with reason); what was flagged is frozen; never deleted. Changes no money by itself. |
 | `PaymentIntakeEvent` | Log of every external payment event, written before core records are touched. `(tenant, provider, externalId)` unique (duplicate webhooks find their first row). Raw payload is not stored: only its SHA-256 and the validated fields. A bad signature can only be REJECTED. |
 
 ## Database-level rules (Phase 4)
 
 - **Append-only**: `LedgerEntry` and `ApprovalDecision` reject UPDATE, DELETE and TRUNCATE (`leadro_append_only`).
 - **Never deleted**: `Payment`, `Refund`, `Chargeback`, `Adjustment`, `MaterialCostVersion`, `ApprovalPolicy`, `ApprovalRequest`,
-  `ReconciliationRun`, `ReconciliationException`, `PaymentIntakeEvent` reject DELETE (`leadro_no_delete`).
+  `ReconciliationRun`, `ReconciliationException`, `PaymentIntakeEvent`, `FinanceReviewFlag` reject DELETE (`leadro_no_delete`).
 - **Frozen columns** (`leadro_immutable_columns(...)`): identity and money columns of every financial record after insert; a policy's
   whole content; a request's policy snapshot; an intake event's identity and hash.
 - **Status machines** (`leadro_status_transitions('FROM>TO', ...)`): payment, refund, chargeback, adjustment, approval request,
-  material cost version, reconciliation run / exception, intake event. An illegal move is `restrict_violation`.
+  material cost version, reconciliation run / exception, intake event, finance review flag. An illegal move is `restrict_violation`.
 - **Ledger**: sign by type, never zero, source/reference consistency, exactly one actor, a REVERSAL mirrors exactly one earlier
   non-reversal entry (same job, customer, currency, negated amount; one reversal per entry via `ledger_entry_one_reversal`).
 - **Material costs**: approved versions of one material never overlap (`material_cost_version_no_overlap`, GiST exclusion;
@@ -737,7 +744,7 @@ erDiagram
 
 ## Contracts for JSON and polymorphic references (Phase 4)
 
-- `ApprovalRequest.details`, `ReconciliationException.details`, `PaymentIntakeEvent.parsed`: ids, codes and numbers only; any amount is
+- `ApprovalRequest.details`, `ReconciliationException.details`, `FinanceReviewFlag.details`, `PaymentIntakeEvent.parsed`: ids, codes and numbers only; any amount is
   a decimal string (docs/API_CONVENTIONS.md "Money"); no free text, no raw provider payload.
 - `ApprovalRequest.subjectType` + `subjectId` is polymorphic: MATERIAL_COST_CHANGE -> `MaterialCostVersion.id`, ADJUSTMENT ->
   `Adjustment.id`, REFUND -> `Refund.id`, CHARGEBACK_WRITE_OFF -> `Chargeback.id`, HIGH_VALUE_DISCOUNT -> `Job.id`. The typed FK on the

@@ -21,6 +21,8 @@ const TENANT_OWNED_TABLES = [
   // Phase 4 financial core (13)
   "Material", "MaterialCostVersion", "LedgerEntry", "Payment", "Refund", "Chargeback", "Adjustment", "ApprovalPolicy",
   "ApprovalRequest", "ApprovalDecision", "ReconciliationRun", "ReconciliationException", "PaymentIntakeEvent",
+  // Phase 4 follow-up migration 20261125100000_phase4_review_flags
+  "FinanceReviewFlag",
 ];
 
 let A: { id: string };

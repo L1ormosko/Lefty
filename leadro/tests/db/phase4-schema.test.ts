@@ -6,7 +6,8 @@ import { createTenant } from "../helpers";
  * Phase 4 schema: tenant isolation of every new table, composite tenant-safe foreign keys, CHECK constraints, status
  * machines, immutability, the append-only ledger and approval decisions, separation of duties, cost-version overlap and
  * BigInt money. Constraint, index and trigger names asserted here are part of the migration contract
- * (20261124100000_phase4_financial_core).
+ * (20261124100000_phase4_financial_core, and 20261125100000_phase4_review_flags for finance review flags and the extra
+ * reconciliation exception references).
  */
 
 interface Graph {
@@ -84,6 +85,7 @@ async function buildGraph(label: string): Promise<Graph> {
       data: { tenantId, provider: "demo", externalId: key("evt"), eventType: "payment.succeeded", payloadHash: "a".repeat(64), signatureValid: true, status: "ACCEPTED" },
     });
     await tx.reconciliationException.create({ data: { tenantId, runId: run.id, kind: "UNPAID", jobId: job.id, intakeEventId: intake.id, expectedAmountMinor: 100n, recordedAmountMinor: 0n } });
+    await tx.financeReviewFlag.create({ data: { tenantId, reasonCode: "job.reopened_after_posting", jobId: job.id, orgUnitId: orgUnit.id, systemActor: "system:jobs" } });
     return {
       tenantId, userId: user.id, otherUserId: otherUser.id, orgUnitId: orgUnit.id, customerId: customer.id, jobId: job.id, otherJobId: otherJob.id,
       outcomeId: outcome.id, materialId: material.id, costVersionId: costVersion.id, policyId: policy.id, requestId: request.id, paymentId: payment.id, ledgerEntryId: entry.id,
@@ -111,7 +113,7 @@ const entry = (g: Graph, over: Record<string, unknown> = {}) => ({
 describe("tenant isolation of every Phase 4 table", () => {
   const TABLES = [
     "Material", "MaterialCostVersion", "LedgerEntry", "Payment", "Refund", "Chargeback", "Adjustment", "ApprovalPolicy", "ApprovalRequest",
-    "ApprovalDecision", "ReconciliationRun", "ReconciliationException", "PaymentIntakeEvent",
+    "ApprovalDecision", "ReconciliationRun", "ReconciliationException", "PaymentIntakeEvent", "FinanceReviewFlag",
   ];
 
   it.each(TABLES)("%s: each tenant sees only its own rows, and nothing without a tenant context", async (table) => {
@@ -169,7 +171,10 @@ describe("ledger", () => {
   it("is append-only: UPDATE, DELETE and TRUNCATE are rejected", async () => {
     await rejects(A, /append-only/, (tx) => tx.$executeRaw`UPDATE "LedgerEntry" SET "memo" = 'x' WHERE "id" = ${A.ledgerEntryId}`);
     await rejects(A, /append-only/, (tx) => tx.$executeRaw`DELETE FROM "LedgerEntry" WHERE "id" = ${A.ledgerEntryId}`);
-    await rejects(A, /append-only/, (tx) => tx.$executeRawUnsafe(`TRUNCATE "LedgerEntry"`));
+    // FinanceReviewFlag references the ledger, so a bare TRUNCATE already fails on the foreign key; naming both tables
+    // gets past that check and reaches the ledger's own TRUNCATE guard.
+    await rejects(A, /append-only|referenced in a foreign key/, (tx) => tx.$executeRawUnsafe(`TRUNCATE "LedgerEntry"`));
+    await rejects(A, /append-only/, (tx) => tx.$executeRawUnsafe(`TRUNCATE "LedgerEntry", "FinanceReviewFlag"`));
   });
 
   it("enforces the sign by type, never zero, and one actor", async () => {
@@ -428,5 +433,52 @@ describe("reconciliation and payment intake", () => {
     const pending = await withTenant(A.tenantId, (tx) => tx.paymentIntakeEvent.create({ data: event() }));
     await withTenant(A.tenantId, (tx) => tx.paymentIntakeEvent.update({ where: { id: pending.id }, data: { status: "ACCEPTED", processedAt: new Date() } }));
     await rejects(A, /never deleted/, (tx) => tx.paymentIntakeEvent.delete({ where: { id: pending.id } }));
+  });
+});
+
+describe("finance review flags and exception references (20261125100000_phase4_review_flags)", () => {
+  const flag = (over: Record<string, unknown> = {}) => ({ tenantId: A.tenantId, reasonCode: "refund.after_reconciliation", jobId: A.jobId, raisedById: A.userId, ...over });
+
+  it("validates code, actor, subject and free text, and raises a flag once per idempotency key", async () => {
+    await rejects(A, "finance_review_flag_reason_code_format", (tx) => tx.financeReviewFlag.create({ data: flag({ reasonCode: "Not A Code" }) }));
+    await rejects(A, "finance_review_flag_reason_code_format", (tx) => tx.financeReviewFlag.create({ data: flag({ reasonCode: "nodot" }) }));
+    await rejects(A, "finance_review_flag_one_actor", (tx) => tx.financeReviewFlag.create({ data: flag({ systemActor: "system:jobs" }) }));
+    await rejects(A, "finance_review_flag_one_actor", (tx) => tx.financeReviewFlag.create({ data: flag({ raisedById: null }) }));
+    await rejects(A, "finance_review_flag_system_actor_format", (tx) => tx.financeReviewFlag.create({ data: flag({ raisedById: null, systemActor: "jobs" }) }));
+    await rejects(A, "finance_review_flag_note_by_person", (tx) => tx.financeReviewFlag.create({ data: flag({ raisedById: null, systemActor: "system:jobs", note: "free text" }) }));
+    await rejects(A, "finance_review_flag_subject", (tx) => tx.financeReviewFlag.create({ data: flag({ jobId: null }) }));
+    await rejects(A, /foreign key/i, (tx) => tx.financeReviewFlag.create({ data: flag({ jobId: B.jobId }) }));
+    const idempotencyKey = key("flag");
+    await withTenant(A.tenantId, (tx) => tx.financeReviewFlag.create({ data: flag({ idempotencyKey, paymentId: A.paymentId, note: "Refund after the period closed" }) }));
+    await rejects(A, /Unique constraint/, (tx) => tx.financeReviewFlag.create({ data: flag({ idempotencyKey }) }));
+  });
+
+  it("moves OPEN -> ASSIGNED -> RESOLVED with its fields, keeps what was flagged frozen, and is never deleted", async () => {
+    const created = await withTenant(A.tenantId, (tx) => tx.financeReviewFlag.create({ data: flag({ ledgerEntryId: A.ledgerEntryId }) }));
+    await rejects(A, "finance_review_flag_assigned", (tx) => tx.financeReviewFlag.update({ where: { id: created.id }, data: { status: "ASSIGNED" } }));
+    await withTenant(A.tenantId, (tx) => tx.financeReviewFlag.update({ where: { id: created.id }, data: { status: "ASSIGNED", assignedToId: A.otherUserId, assignedAt: new Date() } }));
+    await rejects(A, /immutable/, (tx) => tx.financeReviewFlag.update({ where: { id: created.id }, data: { reasonCode: "other.code" } }));
+    await rejects(A, /immutable/, (tx) => tx.financeReviewFlag.update({ where: { id: created.id }, data: { jobId: A.otherJobId } }));
+    await rejects(A, "finance_review_flag_resolved", (tx) => tx.financeReviewFlag.update({ where: { id: created.id }, data: { status: "RESOLVED", resolvedAt: new Date(), resolvedById: A.otherUserId } }));
+    await withTenant(A.tenantId, (tx) =>
+      tx.financeReviewFlag.update({ where: { id: created.id }, data: { status: "RESOLVED", resolvedAt: new Date(), resolvedById: A.otherUserId, resolutionReason: "Adjustment posted" } }),
+    );
+    await rejects(A, /status transition RESOLVED -> OPEN/, (tx) => tx.financeReviewFlag.update({ where: { id: created.id }, data: { status: "OPEN" } }));
+    await rejects(A, /never deleted/, (tx) => tx.financeReviewFlag.delete({ where: { id: created.id } }));
+  });
+
+  it("an exception names its refund or outcome when its kind needs one, and the new references are frozen", async () => {
+    const run = await withTenant(A.tenantId, (tx) => tx.reconciliationRun.create({ data: { tenantId: A.tenantId, periodStart: new Date("2026-05-01T00:00:00Z"), periodEnd: new Date("2026-06-01T00:00:00Z") } }));
+    const refund = await withTenant(A.tenantId, (tx) => tx.refund.findFirstOrThrow({ where: { jobId: A.jobId } }));
+    await rejects(A, "reconciliation_exception_refund_reference", (tx) => tx.reconciliationException.create({ data: { tenantId: A.tenantId, runId: run.id, kind: "REFUND_WITHOUT_PAYMENT", jobId: A.jobId } }));
+    await rejects(A, "reconciliation_exception_outcome_reference", (tx) => tx.reconciliationException.create({ data: { tenantId: A.tenantId, runId: run.id, kind: "OUTCOME_LEDGER_MISMATCH", jobId: A.jobId } }));
+    await rejects(A, /foreign key/i, (tx) => tx.reconciliationException.create({ data: { tenantId: A.tenantId, runId: run.id, kind: "OTHER", orgUnitId: B.orgUnitId } }));
+    const exception = await withTenant(A.tenantId, (tx) =>
+      tx.reconciliationException.create({ data: { tenantId: A.tenantId, runId: run.id, kind: "REFUND_WITHOUT_PAYMENT", jobId: A.jobId, refundId: refund.id, orgUnitId: A.orgUnitId } }),
+    );
+    await withTenant(A.tenantId, (tx) => tx.reconciliationException.create({ data: { tenantId: A.tenantId, runId: run.id, kind: "OUTCOME_LEDGER_MISMATCH", jobId: A.jobId, outcomeId: A.outcomeId } }));
+    for (const data of [{ refundId: null }, { outcomeId: A.outcomeId }, { orgUnitId: null }]) {
+      await rejects(A, /immutable/, (tx) => tx.reconciliationException.update({ where: { id: exception.id }, data }));
+    }
   });
 });
