@@ -150,6 +150,10 @@ describe("scope by org unit and legal entity", () => {
     expect(runs.length).toBeGreaterThanOrEqual(1);
     expect(runs.every((run: { legalEntityId: string }) => run.legalEntityId === w.legalEntityId)).toBe(true);
     expect(await listIds(entityFinanceCookie)).not.toContain(exceptionB);
+    const summary = (await call(summaryRoute, "GET", "/x", { cookie: entityFinanceCookie, query: { legalEntityId: w.legalEntityId } })).json.data;
+    expect(summary.coverage).toBe("SCOPE");
+    expect(summary.latestRuns.map((run: { legalEntityId: string }) => run.legalEntityId)).toEqual([w.legalEntityId]);
+    expect((await call(summaryRoute, "GET", "/x", { cookie: entityFinanceCookie, query: { legalEntityId: secondEntityId } })).json.data.unresolvedTotal).toBe(0);
 
     // A fresh City B problem is not found by entity 1's run, only by entity 2's.
     const late = await partlyPaidJob(w, true);
