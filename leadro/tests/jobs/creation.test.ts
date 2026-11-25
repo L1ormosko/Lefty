@@ -137,7 +137,7 @@ describe("who may create, and what they see back", () => {
     expect(refused.status).toBe(403);
     const byCeo = await create(w.cookie.ceo, { ...base(), quotedAmountMinor: 25_000, currency: "USD" });
     expect(byCeo.status).toBe(201);
-    expect(byCeo.json.data).toMatchObject({ quotedAmountMinor: 25_000, currency: "USD" });
+    expect(byCeo.json.data).toMatchObject({ quotedAmountMinor: "25000", currency: "USD" });
     const asDispatcher = await call(getJobRoute, "GET", "/x", { cookie: w.cookie.dispatcher, params: { id: byCeo.json.data.id } });
     expect(asDispatcher.json.data).not.toHaveProperty("quotedAmountMinor");
     const [audit] = await auditEvents(w.tenantId, "job.create", byCeo.json.data.id);

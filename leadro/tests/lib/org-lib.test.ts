@@ -46,6 +46,12 @@ describe("changedFields", () => {
     expect(result.next).toEqual({ name: "B" });
   });
 
+  it("compares bigint money by value instead of throwing", () => {
+    const before = { quotedAmountMinor: 12_500n as bigint | null };
+    expect(changedFields(before, { quotedAmountMinor: 12_500n }).changedKeys).toEqual([]);
+    expect(changedFields(before, { quotedAmountMinor: 9_007_199_254_740_993n })).toMatchObject({ changedKeys: ["quotedAmountMinor"], next: { quotedAmountMinor: 9_007_199_254_740_993n } });
+  });
+
   it("treats undefined as 'not in the patch' and null as 'clear it'", () => {
     const result = changedFields({ code: "X1", name: "N" }, { code: null, name: undefined });
     expect(result.changedKeys).toEqual(["code"]);

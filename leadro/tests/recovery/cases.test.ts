@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stringifyJson } from "@/lib/money";
 import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError } from "@/server/core";
 import { withTenant } from "@/server/db";
 import {
@@ -54,13 +55,13 @@ describe("reading cases", () => {
     expect(view).toMatchObject({ status: "NEW", presenceStatus: "AT_LOCATION", presenceAccuracyM: 12, nextStatuses: ["ASSIGNED", "CONTACTING", "CLOSED"] });
     expect(typeof view.presenceAgeMinutes).toBe("number");
     for (const hidden of ["presenceLocationEventId", "presenceDistanceM", "latitude", "longitude"]) expect(view).not.toHaveProperty(hidden);
-    expect(JSON.stringify(view)).not.toMatch(/-75\.0|40\.0/);
+    expect(stringifyJson(view)).not.toMatch(/-75\.0|40\.0/);
   });
 
   it("keeps confirmed and estimated revenue apart", async () => {
     const { caseId } = await newCase(90_000);
     const view = await getCase(w.leadOps.actor, caseId);
-    expect(view.revenue).toEqual({ currency: "USD", confirmed: null, estimated: { estimatedValueMinor: 90_000, initialValueMinor: 90_000 } });
+    expect(view.revenue).toEqual({ currency: "USD", confirmed: null, estimated: { estimatedValueMinor: 90_000n, initialValueMinor: 90_000n } });
     expect(view.recoveredAmountMinor).toBeNull();
   });
 
@@ -161,7 +162,7 @@ describe("status machine and attempts (§9.5)", () => {
   it("editing the estimate never touches confirmed revenue", async () => {
     const { caseId } = await newCase();
     const view = await updateCase(w.leadOps.actor, ctx(w.leadOps), caseId, updateCaseSchema.parse({ estimatedValueMinor: 250_000, priority: "HIGH" }));
-    expect(view).toMatchObject({ estimatedValueMinor: 250_000, priority: "HIGH", recoveredAmountMinor: null, recoveredAt: null });
+    expect(view).toMatchObject({ estimatedValueMinor: 250_000n, priority: "HIGH", recoveredAmountMinor: null, recoveredAt: null });
     expect(view.revenue).toMatchObject({ confirmed: null });
   });
 
@@ -185,12 +186,12 @@ describe("recovery and attribution (§9.7)", () => {
       customerId: w.customerId,
       recoveredJobId: newJob,
       recoveredLeadId: newLead,
-      recoveredAmountMinor: 80_000,
-      collectedAmountMinor: 30_000,
-      estimatedValueMinor: 100_000,
+      recoveredAmountMinor: 80_000n,
+      collectedAmountMinor: 30_000n,
+      estimatedValueMinor: 100_000n,
       recoveredById: w.leadOps.userId,
     });
-    expect(view.revenue).toMatchObject({ confirmed: { recoveredAmountMinor: 80_000, collectedAmountMinor: 30_000 }, estimated: { estimatedValueMinor: 100_000 } });
+    expect(view.revenue).toMatchObject({ confirmed: { recoveredAmountMinor: 80_000n, collectedAmountMinor: 30_000n }, estimated: { estimatedValueMinor: 100_000n } });
     expect(view.recoveredAt).not.toBeNull();
     expect(view.nextStatuses).toEqual(["CLOSED"]);
     await expect(recoverCase(w.leadOps.actor, ctx(w.leadOps), caseId, recoverCaseSchema.parse({ recoveredAmountMinor: 1 }))).rejects.toBeInstanceOf(InvalidStateTransitionError);
@@ -230,8 +231,8 @@ describe("recovery and attribution (§9.7)", () => {
     const summary = await recoverySummary(world.leadOps.actor, summaryQuerySchema.parse({}));
     expect(summary).toMatchObject({
       casesByStatus: { RECOVERED: 1, NEW: 1 },
-      confirmed: [{ currency: "USD", cases: 1, recoveredAmountMinor: 35_000, collectedAmountMinor: 35_000 }],
-      estimated: [{ currency: "USD", openCases: 1, estimatedValueMinor: 60_000 }],
+      confirmed: [{ currency: "USD", cases: 1, recoveredAmountMinor: 35_000n, collectedAmountMinor: 35_000n }],
+      estimated: [{ currency: "USD", openCases: 1, estimatedValueMinor: 60_000n }],
     });
   });
 });
@@ -244,7 +245,7 @@ describe("presence refresh", () => {
     const view = await refreshPresence(w.leadOps.actor, ctx(w.leadOps), caseId);
     expect(view).toMatchObject({ presenceStatus: "LEFT_LOCATION", presenceAccuracyM: 8 });
     expect(before.presenceEvaluatedAt).not.toEqual(view.presenceEvaluatedAt);
-    expect(JSON.stringify(view)).not.toMatch(/40\.2/);
+    expect(stringifyJson(view)).not.toMatch(/40\.2/);
   });
 
   it("ignores the technician's location events that belong to no job or to another job", async () => {

@@ -83,8 +83,8 @@ describe("recording an outcome moves the job through its lifecycle", () => {
       visitNumber: 1,
       outcome: "SOLD",
       lostReasonId: null,
-      chargedAmountMinor: 45000,
-      collectedAmountMinor: 20000,
+      chargedAmountMinor: "45000", // money is a decimal string in JSON (docs/API_CONVENTIONS.md "Money")
+      collectedAmountMinor: "20000",
       paymentStatus: "PARTIAL",
       paymentMethod: "CARD",
       employeeId: w.techA1.employeeId,
@@ -380,7 +380,7 @@ describe("who may report, read and correct", () => {
 
     const fixed = await patch(w.cookie.cityManagerA, { reason: "Typo in the quote", quotedAmountMinor: 8000, lostReasonId: reasons.noNeed });
     expect(fixed.status).toBe(200);
-    expect(fixed.json.data).toMatchObject({ quotedAmountMinor: 8000, lostReasonId: reasons.noNeed, outcome: "NOT_SOLD" });
+    expect(fixed.json.data).toMatchObject({ quotedAmountMinor: "8000", lostReasonId: reasons.noNeed, outcome: "NOT_SOLD" });
     const audit = (await auditEvents(w.tenantId, "job_outcome.correct", outcomeId))[0];
     expect(audit.reason).toBe("Typo in the quote");
     expect(audit.newValue).toMatchObject({ changedFields: ["lostReasonId", "quotedAmountMinor"] });
@@ -523,7 +523,7 @@ describe("fix round 1: money, corrections, currency, idempotency details", () =>
   it("shows amounts and payment only with the financial set: Dispatcher sees the outcome, not the money", async () => {
     const job = await jobAt("IN_PROGRESS");
     const recorded = await record(w.cookie.techA1, job.id, { outcome: "SOLD", chargedAmountMinor: 7000, paymentMethod: "CASH", paymentStatus: "PENDING" });
-    expect(recorded.json.data.outcome).toMatchObject({ chargedAmountMinor: 7000, paymentStatus: "PENDING", currency: "USD" }); // the technician holds the set
+    expect(recorded.json.data.outcome).toMatchObject({ chargedAmountMinor: "7000", paymentStatus: "PENDING", currency: "USD" }); // the technician holds the set
     const id = recorded.json.data.outcome.id;
 
     const dispatcher = (await getOutcome(w.cookie.dispatcher, id)).json.data;
@@ -533,21 +533,21 @@ describe("fix round 1: money, corrections, currency, idempotency details", () =>
     }
     const listed = (await call(jobOutcomesRoute, "GET", "/x", { cookie: w.cookie.dispatcher, params: { id: job.id } })).json.data[0];
     expect(listed).not.toHaveProperty("chargedAmountMinor");
-    expect((await getOutcome(w.cookie.cityManagerA, id)).json.data.chargedAmountMinor).toBe(7000);
-    expect((await getOutcome(w.cookie.finance, id)).json.data).toMatchObject({ chargedAmountMinor: 7000 });
+    expect((await getOutcome(w.cookie.cityManagerA, id)).json.data.chargedAmountMinor).toBe("7000");
+    expect((await getOutcome(w.cookie.finance, id)).json.data).toMatchObject({ chargedAmountMinor: "7000" });
   });
 
   it("keeps the original amount retrievable after a correction (history in the audit row, financial set required)", async () => {
     const job = await jobAt("IN_PROGRESS");
     const id = (await record(w.cookie.techA1, job.id, { outcome: "SOLD", chargedAmountMinor: 45000, paymentMethod: "CARD", paymentStatus: "PENDING" })).json.data.outcome.id;
-    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Wrong total", chargedAmountMinor: 54000 })).json.data.chargedAmountMinor).toBe(54000);
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Wrong total", chargedAmountMinor: 54000 })).json.data.chargedAmountMinor).toBe("54000");
     expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Paid in full", chargedAmountMinor: 54000, collectedAmountMinor: 54000, paymentStatus: "PAID" })).status).toBe(200);
 
     const history = await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.cityManagerA, params: { id } });
     expect(history.status).toBe(200);
     expect(history.json.data).toHaveLength(2);
-    expect(history.json.data[0]).toMatchObject({ reason: "Wrong total", changedFields: ["chargedAmountMinor"], previous: { chargedAmountMinor: 45000 }, next: { chargedAmountMinor: 54000 } });
-    expect(history.json.data[1]).toMatchObject({ reason: "Paid in full", previous: { collectedAmountMinor: null, paymentStatus: "PENDING" }, next: { collectedAmountMinor: 54000, paymentStatus: "PAID" } });
+    expect(history.json.data[0]).toMatchObject({ reason: "Wrong total", changedFields: ["chargedAmountMinor"], previous: { chargedAmountMinor: "45000" }, next: { chargedAmountMinor: "54000" } });
+    expect(history.json.data[1]).toMatchObject({ reason: "Paid in full", previous: { collectedAmountMinor: null, paymentStatus: "PENDING" }, next: { collectedAmountMinor: "54000", paymentStatus: "PAID" } });
 
     expect((await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.techA1, params: { id } })).status).toBe(403); // no edit
     expect((await call(correctionsRoute, "GET", "/x", { cookie: w.cookie.dispatcher, params: { id } })).status).toBe(403);
@@ -562,7 +562,7 @@ describe("fix round 1: money, corrections, currency, idempotency details", () =>
     const id = (await record(w.cookie.techA1, job.id, { outcome: "SOLD", currency: "USD", chargedAmountMinor: 100 })).json.data.outcome.id;
     expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "EUR", chargedAmountMinor: 200 })).json.error.details[0].code).toBe("job_outcome.currency_mismatch");
     expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "USD" })).json.error.details[0].code).toBe("job_outcome.currency_alone");
-    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "USD", chargedAmountMinor: 200 })).json.data.chargedAmountMinor).toBe(200);
+    expect((await patchOutcome(w.cookie.cityManagerA, id, { reason: "Typo", currency: "USD", chargedAmountMinor: 200 })).json.data.chargedAmountMinor).toBe("200");
   });
 
   it("treats an omitted default and the same value sent explicitly as the same submission", async () => {
