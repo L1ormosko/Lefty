@@ -1,5 +1,6 @@
 import type { ResourceResolver } from "@/server/authz";
 import { financeJobRefById, ledgerEntryJobRef, ledgerEntryRefById, outcomeFinanceRef } from "@/server/ledger";
+import { adjustmentResourceRef, chargebackResourceRef, refundResourceRef, reviewFlagResourceRef } from "@/server/finance-adjustments";
 import { paymentResourceRef } from "@/server/payments";
 
 /**
@@ -26,3 +27,18 @@ export const resolveLedgerEntry: ResourceResolver<IdParams> = (actor, { params }
 
 /** `POST /finance/ledger/entries/{id}/reverse`: the entry's job. */
 export const resolveLedgerEntryJob: ResourceResolver<IdParams> = (actor, { params }, tx) => ledgerEntryJobRef(tx, actor.tenantId, params.id);
+
+/** `POST /finance/refunds`, `POST /finance/chargebacks`: the job of the payment named in the body. */
+export const resolveBodyPayment: ResourceResolver<{ body: { paymentId: string } }> = (actor, { body }, tx) => paymentResourceRef(tx, actor.tenantId, body.paymentId);
+
+/** `/finance/refunds/{id}/...`: the refund's job. */
+export const resolveRefund: ResourceResolver<IdParams> = (actor, { params }, tx) => refundResourceRef(tx, actor.tenantId, params.id);
+
+/** `/finance/adjustments/{id}/...`: the adjustment's job. */
+export const resolveAdjustment: ResourceResolver<IdParams> = (actor, { params }, tx) => adjustmentResourceRef(tx, actor.tenantId, params.id);
+
+/** `/finance/chargebacks/{id}/...`: the chargeback's job. */
+export const resolveChargeback: ResourceResolver<IdParams> = (actor, { params }, tx) => chargebackResourceRef(tx, actor.tenantId, params.id);
+
+/** `/finance/review-flags/{id}/...`: the flag's unit (tenant-level when it has none). */
+export const resolveReviewFlagRef: ResourceResolver<IdParams> = (actor, { params }, tx) => reviewFlagResourceRef(tx, actor.tenantId, params.id);

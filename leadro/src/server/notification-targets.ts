@@ -1,4 +1,5 @@
 import { registerApprovalNotificationTarget } from "@/server/approvals";
+import { registerFinanceAdjustments } from "@/server/finance-adjustments";
 import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
 import { registerJobNotificationTarget } from "@/server/jobs";
@@ -25,6 +26,9 @@ export function registerNotificationTargets(): void {
   // Approvals: notifications that link to a request. Subject modules add their `registerApprovalSubject(...)` call here too.
   registerApprovalNotificationTarget();
   registerMaterialCostApprovalSubject();
+  // Refunds, adjustments, chargeback write-offs (approval subjects), provider chargebacks (intake) and the finance review
+  // reactions to a reopened job or a corrected outcome.
+  registerFinanceAdjustments();
 }
 
 registerNotificationTargets();
