@@ -403,5 +403,9 @@ Rules:
 - **COO and material costs**: the COO maintains the catalog but does not see costs or approve cost changes (the `cost` set and
   `materials.approve` are Owner / Finance Director only). Spec 4.5 gives the COO "View" on financial reports, not cost data;
   a tenant can grant the set to its COO role.
+- **Materials in practice** (Task 2): catalog reads are the `materials.view` capability (tenant-wide reference data); catalog writes need
+  TENANT scope. Proposing or withdrawing a cost needs `materials.create` AND the `cost` set (so the COO template cannot propose costs);
+  cost-change requests are tenant-level, decided with `materials.approve` at TENANT scope. Costing a job's materials or reading its direct
+  material cost needs `jobs.view` over the job plus the `cost` set.
 - **Compensation stays untouched**: `compensation.*` and `financial_reports.*` keep their Phase 1 meaning; no commission or payroll
   permission is added (blocked on the owner's compensation specification, spec 28.4).
