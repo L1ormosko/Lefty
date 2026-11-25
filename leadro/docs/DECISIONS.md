@@ -1091,3 +1091,54 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
   uncosted line is reported as such (never estimated). The unit of a material is locked once it has a version or linked usage.
 - **Not done here**: posting `MATERIAL_COST` ledger entries (`LedgerEntry.materialUsageId`) belongs to the ledger service (Task 4, parallel);
   the snapshot columns are what such a posting would read. No `materials.export` endpoint yet (no export framework exists).
+
+## Phase 4 Task 6: reconciliation
+
+- **What a run examines (period picks the jobs, the ledger now gives their state).** A run of `[periodStart, periodEnd)`, one currency,
+  one legal entity or the whole tenant (`legalEntityId` null; TENANT scope only) examines every job with money activity in the period:
+  a ledger entry `occurredAt` in it (entity by the entry's posting snapshot; MATERIAL_COST excluded), a SOLD outcome, a payment created /
+  received / failed / voided, or a refund requested / posted in it (entity by the job's CURRENT unit: those records have no snapshot).
+  Expected (billed = charged + adjustments) vs recorded (net collected) is computed over ALL of each job's entries in the currency as the
+  ledger knows them at run time, not "as of periodEnd": an exception is work to do, so a run should not report a gap that a later payment
+  already closed. Cost if finance wants an as-of-period-end close: one `occurredAt < periodEnd` filter in `balancesOf` (detect.ts); the
+  run totals would then be reproducible for a closed period.
+- **Kinds.** UNPAID (billed > 0, nothing net received), PARTIAL_PAYMENT, OVERPAYMENT (more than billed, including money with nothing
+  billed) per job; FAILED_PAYMENT (`failedAt` in the period); DUPLICATE_EXTERNAL_EVENT / UNMATCHED_PROVIDER_EVENT (intake rows DUPLICATE /
+  UNMATCHED, `receivedAt` in the period; an event without a job or currency only in tenant-wide runs); OUTCOME_LEDGER_MISMATCH (an active
+  CHARGE whose total differs from the outcome's current `chargedAmountMinor`); REFUND_WITHOUT_PAYMENT (code `refund_no_payment`: no
+  payment named and the job has no RECEIVED payment; `refund_payment_not_received`; `refund_exceeds_payment`: live refunds of a payment
+  above its amount); and **finance confirmation pending** as `OTHER` + `details.code = finance_confirmation_pending` (the enum has no kind
+  for it and only Task 1 adds migrations): a SOLD outcome with a charge or collection finance has not confirmed. UNPAID is included
+  although the brief did not list it: it is the plainest expected-vs-recorded gap, and the enum has it. Cost if it is noise for a tenant
+  that invoices on terms: one branch in `classifyJobBalance`.
+- **Idempotent re-runs without an idempotency column.** `ReconciliationException` has no key, so identity is a fingerprint computed in
+  code: kind, `details.code`, currency and the referenced records (job, payment, intake event, refund, outcome), NOT the amounts (a job
+  that is still partly paid after another payment is the same problem). Per finding: an OPEN / ASSIGNED exception with that fingerprint
+  -> nothing new; its mutable `details` record `lastSeenRunId`, `lastSeenAt`, `latestExpectedMinor`, `latestRecordedMinor` (the frozen
+  columns keep what was first found; `runId` stays the raising run). Only RESOLVED ones and one has exactly these amounts -> the resolution
+  stands (a person closed this very situation with a reason; raising it again every run would train people to ignore the queue).
+  Different amounts after a resolution -> a new exception. Step 2 of a run holds `pg_advisory_xact_lock(hashtext('reconciliation:<tenant>'))`
+  (per tenant, not per scope: a tenant-wide run and an entity run see the same findings), so concurrent runs cannot both create.
+  An exception that is no longer detected is NOT closed automatically: resolution needs a person (`resolvedById`, DB CHECK); its stale
+  `lastSeenRunId` shows it. Cost if auto-closing is wanted: a system resolver user, i.e. a schema change.
+- **Run lifecycle in three transactions**: (1) RUNNING is committed (a crash leaves it visible; the next run of the same entity and
+  currency closes RUNNING runs older than 15 minutes as FAILED `abandoned`), (2) detection + exceptions + totals + COMPLETED atomically
+  (timeout 120 s), (3) only on failure: FAILED `internal_error` (a code; the message goes to the log) and the error is rethrown (500).
+  Runs are synchronous; a period is at most 366 days. Cost if tenants outgrow it: call `startReconciliationRun` from a worker, same code.
+  Run totals: `expectedMinor` / `recordedMinor` = sums over examined jobs; `exceptionCount` = findings of the run (new + still open);
+  how many it raised is counted from `runId`; "accepted earlier" is in the POST response and the completion audit only (no column).
+- **Scope.** Exceptions carry the job's unit at detection (`orgUnitId`; contract) and are scoped by it (ORG_UNIT; LEGAL_ENTITY through
+  the unit's entity); one without a unit is tenant-level (TENANT only, 404 otherwise, not 403). Runs are scoped by legal entity only:
+  a unit manager (template: view at ORG_UNIT) sees the exceptions of their units but no run, because a run's totals are the whole
+  entity's money (same rule as `getLegalEntityBalance`).
+- **Outcome money is redacted per row** for OUTCOME_LEDGER_MISMATCH and `finance_confirmation_pending` without the `job_outcomes`
+  `financial` set over the exception's unit (`moneyRedacted: true`, amounts null, money keys dropped from `details`): Task 4's one rule
+  for the technician's amounts. Ledger-derived gaps need only `finance_reconciliation.view`. The summary returns counts only.
+- **Workflow.** Assign / unassign = `finance_reconciliation.assign`; the assignee must hold `finance_reconciliation.edit` over the
+  exception (`400 reconciliation.assignee_not_eligible`), so work is never parked with someone who cannot act. Resolve =
+  `finance_reconciliation.edit` with a reason, resolver = caller; RESOLVED is final. Updates are conditional on the status and assignee
+  read (`409 reconciliation.exception_changed` for the loser); the same request again is a replay. No separation of duties: resolving
+  moves no money. Audit: `reconciliation_run.start|complete|fail`, `reconciliation_exception.assign|unassign|resolve`.
+- **Refunds are read straight from `Refund`** (Task 5 builds that module in parallel); live = not REJECTED / CANCELLED. Chargebacks are not
+  an exception source yet (a LOST chargeback is already in net collected; the dispute itself is Task 5's workflow).
+- **Not built**: `finance_reconciliation.export`, scheduled runs, notifications to finance, auto-resolution, UI.

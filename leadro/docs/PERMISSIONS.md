@@ -414,3 +414,9 @@ Rules:
   receiving / failing / voiding a payment and reversing a charge `finance_payments.edit`; payments, the confirmation queue and providers
   `finance_payments.view`; the provider intake log `finance_payments.view` at TENANT scope. Finance reaches a job through its unit only:
   OWN / ASSIGNED scopes never match finance records. A legal entity's totals need TENANT or that LEGAL_ENTITY scope.
+- **Reconciliation endpoints (Task 6)**: starting a run `finance_reconciliation.create` with TENANT or that LEGAL_ENTITY scope (a
+  tenant-wide run: TENANT); reading runs, exceptions and the summary `finance_reconciliation.view`; assigning / unassigning
+  `finance_reconciliation.assign` (the assignee must hold `finance_reconciliation.edit` over the exception); resolving
+  `finance_reconciliation.edit`. Exceptions are scoped by the unit recorded at detection (none = TENANT only); runs by legal entity, so
+  unit managers (view at ORG_UNIT) see their units' exceptions but no runs or entity totals. Outcome amounts inside an exception also need
+  the `job_outcomes` `financial` set (else redacted). `finance_reconciliation.export` is not used yet (no export endpoint).
