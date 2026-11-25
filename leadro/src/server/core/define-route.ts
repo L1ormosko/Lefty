@@ -47,6 +47,11 @@ export interface RouteHandlerArgs<S extends RouteSchemas> {
   req: Request;
   ctx: RequestContext;
   input: RouteInput<S>;
+  /**
+   * The request body exactly as received ("" when there was none). Only for handlers that must check a signature over the
+   * raw bytes (the payment provider intake, spec 18.3); every other handler uses the validated `input`.
+   */
+  rawBody: string;
   /** Logger already bound to the correlation id (and tenant/user when authenticated). */
   log: Logger;
 }
@@ -178,7 +183,7 @@ export function defineRoute<S extends RouteSchemas = RouteSchemas>(definition: R
       const ctx: RequestContext = { correlationId, actor, sourceApp };
       if (actor && definition.authorize) await definition.authorize(actor, input, ctx);
 
-      const run = (): Promise<RouteResult> => definition.handler({ req, ctx, input, log });
+      const run = (): Promise<RouteResult> => definition.handler({ req, ctx, input, rawBody: bodyText, log });
 
       const idempotencyKey = definition.idempotent ? req.headers.get(IDEMPOTENCY_HEADER) : null;
       let response: Response;

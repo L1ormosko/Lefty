@@ -998,3 +998,64 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
 - **Idempotency**: `createApprovalRequestInTx` takes the subject module's deterministic `idempotencyKey` (unique per tenant: subject modules
   should prefix it with their subject type); a repeat returns the same request (`replayed: true`); the same key for another subject is `409`.
   The decide / cancel / policy routes accept `Idempotency-Key`.
+## Phase 4 Task 4: ledger, revenue, payments, provider intake
+
+- **Revenue is finance-confirmed, not automatic (manager preference, spec 11.5 human oversight).** Recording an outcome posts nothing. SOLD
+  outcomes with a charged / collected amount appear in `GET /finance/charges-to-confirm`; a holder of `finance_payments.create` over the
+  job (Owner, Finance Director) posts the CHARGE (`POST /finance/outcomes/{id}/charge`) and records the collection as a RECEIVED MANUAL
+  payment linked to the outcome (`/collection`), whose PAYMENT entry posts in the same transaction. Both carry `expectedAmountMinor`
+  (the amount the confirmer saw): if the outcome was corrected meanwhile the confirmation is `409 revenue.outcome_changed`. `occurredAt`
+  of the charge and `receivedAt` of the collection are the visit's `occurredAt`; `recordedAt` is the server clock. Cost if wrong: an
+  outcome hook (`onJobOutcomeRecorded`) calling the same two functions with a system actor; no data change.
+- **Outcome-derived keys**: `outcome:<outcomeId>:charge:<n>` and `outcome:<outcomeId>:collection:<n>` (payment key), where `n` is 1 + the
+  number of earlier charges (reversed) / collection payments (voided or failed) of that outcome. Two people confirming at once compute the
+  same `n` and post once; after a correction (reverse the charge, confirm again) the new posting cannot collide with history. At most one
+  ACTIVE charge and one active collection per outcome: a different amount while one is active is refused (`revenue.charge_already_posted`,
+  `revenue.collection_already_recorded`); the same amount is a replay. A posted amount that no longer matches a corrected outcome shows as
+  `MISMATCH` in the queue (`state=all`); Task 6 reconciles it.
+- **Confirmation needs the outcome `financial` set too** (`job_outcomes.view` financial over the job, the existing one rule for outcome
+  money): the queue leaves such rows out and the confirmation is `403 revenue.financial_set_required`. A finance grant alone never reveals
+  a technician's amounts.
+- **Permission mapping (no catalog change)**: posting a charge or a collection and recording a payment = `finance_payments.create`;
+  reversing a CHARGE, voiding / failing / receiving a payment = `finance_payments.edit` (both correct recorded money); reads of entries and
+  balances = `finance_ledger.view`; payments, the confirmation queue, providers = `finance_payments.view`; the intake log =
+  `finance_payments.view` at TENANT scope (an event may name no existing job). `finance_ledger.export` is not used yet (no export endpoint).
+- **One posting path**: `postLedgerEntryInTx` / `reverseLedgerEntryInTx` (ledger module) do NOT check permissions; every caller enforces
+  first. Idempotency is `createMany({ skipDuplicates })` (= `INSERT ... ON CONFLICT DO NOTHING`) followed by a read of the key: a concurrent
+  duplicate waits for the first transaction and then finds its row, instead of aborting the caller's transaction on a unique violation.
+  The same key with different identity fields is `409 ledger.idempotency_key_reused`. Payments use the same technique on
+  `Payment.idempotencyKey`. Entries must be in the job's currency (`ledger.currency_mismatch`).
+- **Reversal-only corrections**: the generic `POST /finance/ledger/entries/{id}/reverse` takes CHARGE entries only. PAYMENT entries are
+  corrected by voiding the payment (keeps the record and the ledger consistent); REFUND / CHARGEBACK / ADJUSTMENT / MATERIAL_COST by their
+  owners' flows (Tasks 5, 2). A reversal copies the original's references and unit / legal-entity snapshot, key `reversal:<entryId>`
+  (void: `payment:<id>:void`); a second reversal under another key is `ledger.already_reversed` (unique index), a reversal is never reversed.
+- **Balance semantics** (`src/lib/ledger-balances.ts`, per currency, never stored): charged = CHARGE; billed = charged + ADJUSTMENT
+  (positive adjustment = the customer owes more, negative = credit); net collected = PAYMENT - refunded - charged back; outstanding = billed
+  - net collected; material cost separate. A REVERSAL counts under the type it reverses. Status: REFUNDED (something refunded, nothing
+  net collected) > NOT_CHARGED (nothing billed, nothing net collected) / OVERPAID (nothing billed, money in) > UNPAID > PARTIAL > PAID >
+  OVERPAID. `NOT_CHARGED` is added to the brief's five statuses. Note for Task 5: a goodwill refund does not by itself reduce what is
+  billed; if a refund should also forgive the charge, Task 5 posts a matching negative ADJUSTMENT.
+- **Scope**: finance reaches a job through its service-area unit only (`financeJobRef`), never OWN / ASSIGNED (a technician never sees
+  finance even if a custom role carried a finance grant with those scopes). Ledger entries (lists, customer and legal-entity totals) are
+  scoped by their posting snapshot; a job's balance, the job-balance list and payments follow the job's CURRENT unit (the work item belongs
+  to whoever owns the job now). A legal entity's totals need TENANT or that LEGAL_ENTITY scope. A scoped caller asking for a customer with
+  no visible entry gets 404. Finance responses carry ids and money only (no job titles, addresses, customer names).
+- **Manual payments require `Idempotency-Key`** (400 without): it becomes `Payment.idempotencyKey` = `manual:<userId>:<key>`, so the DB
+  guarantees one payment per submission even past the 24 h request store. Reference is required for CHECK, CARD (terminal slip) and
+  BANK_TRANSFER. `receivedAt` at most 5 minutes in the future.
+- **Provider intake** (`POST /api/v1/finance/intake/{tenantSlug}/{provider}`, no session; `defineRoute` now hands handlers `rawBody`, the
+  exact bytes, for the signature): unknown provider (always, in this build) and unknown / inactive tenant answer the same `409
+  payment_provider.not_configured` before any write. A bad signature is `401` and is logged as REJECTED under `externalId =
+  unverified:<sha256 of body>`: the claimed id is NOT used, so a forger cannot pre-claim a real event id and make the genuine delivery a
+  "duplicate". The verified event is committed first (RECEIVED), then processed in a second transaction under `SELECT ... FOR UPDATE`;
+  an event left RECEIVED by a crash is processed by the next retry. Validation before any core record: event type (`payment.received` only;
+  others REJECTED `unsupported_event_type`, Task 5 may add refund / chargeback events), job exists in the tenant (else UNMATCHED
+  `unknown_job`), job currency, provider reference not seen (else DUPLICATE with `duplicateOfId`). Validation verdicts answer 200 (the
+  event is on record; a provider retry would not change it); same id with different content is `409 payment_intake.payload_mismatch`.
+  Known limitation: with a provider configured, anyone knowing the tenant slug can make the intake write one REJECTED row per distinct
+  forged body (rate limiting is Phase 8 hardening).
+- **No real provider, no fake one**: the registry is empty; tests define their own HMAC provider. A real integration needs per-tenant
+  secrets (connection table, encrypted like MFA secrets: a later migration, as recorded in Task 1).
+- **Not built**: exports (`finance_ledger.export`), charges not tied to an outcome (source JOB: Task 5 adjustments cover corrections),
+  matching an UNMATCHED intake event to a job by hand (UNMATCHED > ACCEPTED is allowed by the DB), provider payment-failed / refund events,
+  notifications to finance about new items in the queue, UI.

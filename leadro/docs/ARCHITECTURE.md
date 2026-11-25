@@ -46,6 +46,8 @@ in `src/`); tests may import internals when they need to.
 | Recovery | `recovery` | recovery rules (versioned, approval for high impact), the engine subscribed to the outcome event, cases, attempts, presence snapshot, recovery summary |
 | Follow-ups | `follow-ups` | follow-up tasks about a lead, customer, job or recovery case; overdue / due-soon sweep; per-target access registry |
 | Approvals | `approvals` | Phase 4: the generic approval engine: versioned policies (subject type, currency, amount band), requests that snapshot them, append-only decisions, single / dual approval, separation of duties, expiry sweep, the approver queue, and the subject registry (`registerApprovalSubject`) through which materials and finance subjects are called back |
+| Ledger (Phase 4) | `ledger` | the append-only ledger: the one idempotent posting / reversal path, derived balances and payment status per job / customer / legal entity |
+| Payments (Phase 4) | `payments` | payment records (manual, status changes), finance-confirmed revenue from outcomes, the `PaymentProvider` port (not configured) and the authenticated provider intake |
 
 Not built (spec 2.2 modules for later phases): performance, finance and compensation (blocked on an
 approved compensation spec, 28.4), automation, reporting, integrations, and every UI for the Phase 2

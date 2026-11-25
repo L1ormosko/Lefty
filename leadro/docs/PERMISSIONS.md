@@ -405,3 +405,8 @@ Rules:
   a tenant can grant the set to its COO role.
 - **Compensation stays untouched**: `compensation.*` and `financial_reports.*` keep their Phase 1 meaning; no commission or payroll
   permission is added (blocked on the owner's compensation specification, spec 28.4).
+- **Ledger and payments endpoints (Task 4)**: entries and balances `finance_ledger.view`; recording a payment and confirming an
+  outcome's charge / collection `finance_payments.create` (confirming also needs the `job_outcomes` `financial` set over the job);
+  receiving / failing / voiding a payment and reversing a charge `finance_payments.edit`; payments, the confirmation queue and providers
+  `finance_payments.view`; the provider intake log `finance_payments.view` at TENANT scope. Finance reaches a job through its unit only:
+  OWN / ASSIGNED scopes never match finance records. A legal entity's totals need TENANT or that LEGAL_ENTITY scope.
