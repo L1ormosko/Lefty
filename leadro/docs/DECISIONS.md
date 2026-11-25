@@ -998,3 +998,35 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
 - **Idempotency**: `createApprovalRequestInTx` takes the subject module's deterministic `idempotencyKey` (unique per tenant: subject modules
   should prefix it with their subject type); a repeat returns the same request (`replayed: true`); the same key for another subject is `409`.
   The decide / cancel / policy routes accept `Idempotency-Key`.
+
+## Phase 4 Task 2: materials catalog, versioned costs, job material costing
+
+- **Extended cost rounding (FOR OWNER REVIEW).** `extendedCostMinor = quantity x unitCostMinor`, where `quantity` is the usage's
+  `Decimal(12,3)` and `unitCostMinor` the cost version's whole minor units. The product is computed exactly as `bigint` thousandths of a minor
+  unit and rounded ONCE, **half-even** (banker's rounding) to whole minor units: 1.5 m x 425 = 637.5 -> 638; 1.5 x 423 = 634.5 -> 634; a
+  non-half fraction goes to the nearest unit. Rounding happens per usage line; the job total is the exact sum of the rounded lines. This is the
+  only rounding in Phase 4 (the global "no rounding" rule cannot hold for a 3-decimal quantity times a cost); it is plain multiplication,
+  no pricing formula. Cost if the owner prefers half-up or per-job rounding: one function in `src/lib/material-cost-rules.ts`, but snapshots
+  already taken keep their value (they are frozen), so decide before production data is costed. A product above `MAX_MONEY_MINOR` is not costed.
+- **Version at usage time = `occurredAt`** (the device time the Phase 3 gate accepted, `assertBelievableEventTime`), not `recordedAt`: the cost
+  in force when the material was used. The version is the APPROVED one whose `[effectiveFrom, effectiveTo)` covers it (same range as the GiST).
+- **No stranded snapshots.** A new version must start strictly after the current approved version's start AND after every usage already costed
+  with the current version (`409 material.cost_before_costed_usage`). Checked at proposal and again inside the approval transaction; costing and
+  approving both take the material row lock, so the invariant "every costed line's version covers its `occurredAt`" holds forever. Backdating
+  is allowed up to that point (supplier increases are often retroactive to the 1st). If the check fails at approval time, the decision answers
+  409 and rolls back (the engine contract); the approver rejects instead. Corrections of past job costs are Task 5 adjustments, never rewrites.
+- **One pending version per material**; the version's effective date does not move with the approval date. Without an active
+  `MATERIAL_COST_CHANGE` policy the version is APPROVED at once (`approvalRequestId = null`, audit `by: "no_policy"`). Requests are tenant-level
+  (`resolveResource` returns `{}`): materials have no org unit, so approvers need the policy permission at TENANT scope.
+- **Who costs and proposes.** Catalog reads are a capability (any `materials.view` scope; the catalog is tenant-wide reference data like lost
+  reasons); catalog writes are TENANT-scoped. Writing or reading any cost needs the `cost` set: so the COO (catalog maintainer without the set,
+  Task 1 ruling) can create materials but cannot propose a cost, and Finance (view + approve + cost, no create) approves but does not propose.
+  Costing a job's materials needs `jobs.view` over the job plus the `cost` set; it writes only a derived snapshot (the version is fixed by the
+  date), so it is not an operational permission (spec 26.3). Cost if wrong: one `enforce*` call per service.
+- **Linking free-text usage.** Phase 3 lines carry free text + an optional `materialRef`; a line resolves to its `materialId`, else to the
+  material whose `code` equals `materialRef` (trimmed, lower-cased), else it can be linked explicitly (`POST /materials/usages/{id}/cost
+  { materialId }`). Archived materials still cost past usage. Units must match (trimmed, case-insensitive); there is no conversion.
+- **Costing is explicit** (endpoint), not triggered when the technician records the line: the field-execution module stays unchanged, and an
+  uncosted line is reported as such (never estimated). The unit of a material is locked once it has a version or linked usage.
+- **Not done here**: posting `MATERIAL_COST` ledger entries (`LedgerEntry.materialUsageId`) belongs to the ledger service (Task 4, parallel);
+  the snapshot columns are what such a posting would read. No `materials.export` endpoint yet (no export framework exists).
