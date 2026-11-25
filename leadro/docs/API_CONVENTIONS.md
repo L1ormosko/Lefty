@@ -9,8 +9,8 @@ Authority: `SPEC.md` 20.1-20.4, 21, 16.
   `/roles`, `/permissions`, ... Breaking changes ship as `/api/v2`.
 - JSON only (`application/json; charset=utf-8`). Field names camelCase. Enums are language-neutral
   upper-case English identifiers (`ACTIVE`, `ORG_UNIT`). Timestamps are ISO-8601 UTC
-  (`2026-11-21T13:40:18.000Z`); dates without time are `YYYY-MM-DD`. Money (later) is integer
-  minor units, never floats.
+  (`2026-11-21T13:40:18.000Z`); dates without time are `YYYY-MM-DD`. Money is integer
+  minor units, never floats (see "Money" below).
 - Resource style: plural nouns, `GET /employees`, `POST /employees`, `GET /employees/{id}`,
   `PATCH /employees/{id}`, `POST /employees/{id}/archive` (state transitions are explicit
   action sub-resources; no hard deletes of business records).
@@ -112,3 +112,20 @@ from user -> org unit -> tenant. API payloads carry identifiers and values, not 
 Per-IP and per-account limits on `/auth/*`; `429` with `Retry-After`. The counters are in memory per
 process (with several instances the limits multiply; the database lockout is the real brute-force
 control). Numbers: `docs/AUTH.md`.
+
+## Money (Phase 4)
+
+- **Storage and server code**: money columns are Postgres `BIGINT` (Prisma `BigInt`, TypeScript `bigint`) holding integer minor
+  units, next to an ISO 4217 `currency` (`char(3)`). All arithmetic is `bigint` arithmetic; there is no rounding anywhere in
+  Phase 4. The Phase 2/3 `INT` columns (quotes, outcome amounts, recovery values, field-note estimates) were widened in
+  migration `20261124100000_phase4_financial_core`; the 32-bit cap (about 21.4 million major units) no longer applies.
+- **Responses: a minor-unit amount is a decimal STRING** (`"quotedAmountMinor": "125000"`), never a JSON number. JSON numbers lose
+  precision above 2^53 and `JSON.stringify` rejects `bigint`, so `defineRoute` serializes every response with `stringifyJson`
+  (`src/lib/money.ts`: `bigint` -> decimal string) and stored JSON (audit values, idempotency replays) goes through the same
+  conversion. Clients treat money as an opaque digit string and parse it with `BigInt(...)` or a decimal library.
+- **Requests: an amount is a JSON integer (safe integer) OR a decimal string**; both parse to `bigint` with `moneyAmountSchema`
+  (non-negative) or `signedMoneyAmountSchema` (ledger adjustments). Anything else (floats, `"12.5"`, exponent forms, leading zeros,
+  more than 999,999,999,999,999) is `400`. The limit is below 2^53, so a JavaScript client can still send a number.
+- **Counts are not money**: quantities, counts and percentages stay JSON numbers.
+- **Ids and keys in JSON values stored by the platform** never contain amounts as numbers: when a stored JSON document must carry an
+  amount (audit trail, approval `details`, reconciliation `details`, intake `parsed`) it is written as a decimal string.

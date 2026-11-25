@@ -1,3 +1,5 @@
+import { stringifyJson } from "./money";
+
 /**
  * Audit events record the changed fields only (docs/API_CONVENTIONS.md). Given the stored record
  * and the requested patch, returns the previous and new value of every field that actually
@@ -16,7 +18,7 @@ export function changedFields<T extends Record<string, unknown>>(
   for (const key of Object.keys(patch) as Array<keyof T & string>) {
     const requested = patch[key];
     if (requested === undefined) continue; // not part of the patch
-    if (JSON.stringify(before[key] ?? null) === JSON.stringify(requested ?? null)) continue;
+    if (stringifyJson(before[key] ?? null) === stringifyJson(requested ?? null)) continue; // bigint-safe (money)
     changedKeys.push(key);
     previous[key] = before[key] ?? null;
     next[key] = requested ?? null;

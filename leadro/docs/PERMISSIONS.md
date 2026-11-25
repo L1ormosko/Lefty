@@ -61,6 +61,14 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `completion_forms` | view (fill one in), configure (definitions per job type / category) |
 | `recovery` | view, create, edit (work a case, record attempts), assign, approve (activate a high-impact rule, never its author), manage (author and test rules) |
 | `follow_ups` | view, create, edit, assign |
+| `materials` | view, create (propose a cost version), edit, archive, approve* (decide a cost change), export*; costs are the opt-in `cost` field set |
+| `finance_ledger` | view*, export* |
+| `finance_payments` | view, create* (record a payment), edit* (mark failed / void) |
+| `finance_refunds` | view, create* (request), approve* (policy approver) |
+| `finance_chargebacks` | view, create*, edit* (dispute workflow), approve* (decide a write-off) |
+| `finance_adjustments` | view, create*, approve* |
+| `finance_reconciliation` | view, create (start a run), edit (resolve an exception), assign, export* |
+| `approvals` | view (own requests + approver queue), manage (see and cancel every request in scope), configure* (approval policies) |
 
 Phase 2 additions (`qualifications`, `notifications`, `job_types`, and `manage` on customers/leads) are not rows of the
 4.5 matrix; their defaults are in section 5 ("Phase 2 modules"). `notifications.*` is a capability check: the
@@ -89,6 +97,7 @@ the `base` (non-sensitive) fields only; a sensitive set is visible only to a gra
 | `jobs.financial_fields` | jobs | `financial` |
 | `job_outcomes.financial_fields` | job_outcomes | `financial` |
 | `location.coordinate_fields` | location | `coordinates` |
+| `materials.cost_fields` | materials | `cost` |
 
 `location.coordinate_fields` (spec 22.2): `LocationEvent.latitude` / `longitude` (`LOCATION_EVENT_FIELD_MAP`). A plain `location.view` grant reads when, what
 kind, how accurate and what the server concluded, never where. Only the Owner/CEO template names it (`includeFields`); no other shipped template does.
@@ -358,3 +367,38 @@ Code: `src/server/jobs/job-access.ts`, `assignment.ts`, `status.ts`; decisions i
   workflow switches `job_types.configure` (tenant-wide).
 - **Assignment override** (assigning an employee who fails hard eligibility): `jobs.approve` over the job plus a reason. Default holders: Owner/CEO
   and COO. The Dispatcher template does not hold it on purpose; a tenant may grant it to a custom role. Employment failures cannot be overridden.
+
+## 11. Phase 4: finance, materials and approvals (permission catalog + templates)
+
+Defaults (templates in `role-templates.ts`; a tenant edits its own copy afterwards):
+
+| Module | Owner | COO | Finance Director | State / Regional / City Mgr | Team Leader, Dispatcher, Technician | Others |
+|---|---|---|---|---|---|---|
+| `materials` | full + `cost` set | view, create, edit, archive (no costs, no approve) | view, approve, export + `cost` set (no catalog editing) | view (no costs) | view (no costs) | - |
+| `finance_ledger` | full | view | full | view (scope) | - | - |
+| `finance_payments` | full | view | full | view (scope) | - | - |
+| `finance_refunds` | full | view | full | view, create (request) | - | - |
+| `finance_chargebacks` | full | view | full | view | - | - |
+| `finance_adjustments` | full | view | full | view, create (request) | - | - |
+| `finance_reconciliation` | full | view | full | view | - | - |
+| `approvals` | full | view, manage | full (incl. configure policies) | view | - | - |
+
+Rules:
+- **Finance gains nothing operational** (spec 26.3): the Finance Director template holds no `dispatch`, `jobs.edit/assign`,
+  `employees.edit` or `materials.create/edit`. A test pins it.
+- **Who decides** a request is the approval policy's `approverPermission` (a key such as `finance_refunds.approve`), checked inside the
+  request's scope by the approval service. Holding `approvals.view` alone never lets someone decide. The requester and anyone listed in
+  `excludedApproverIds` can never decide it (service check + database trigger).
+- **Sensitive** (`*` above): reading or exporting the ledger, recording / deciding money, and `approvals.configure` (an `.configure`
+  key also forces MFA). Custom roles holding any of them require MFA (the existing `customRoleRequiresMfa` rule).
+- **Scopes**: finance data carries `orgUnitId` (and `legalEntityId` on the ledger and reconciliation runs), so ORG_UNIT and LEGAL_ENTITY
+  scopes apply; the Finance Director and Owner are assigned at TENANT.
+- **Finance review flags** (`FinanceReviewFlag`, spec 11.7) use the reconciliation module, no new keys: listing / reading
+  `finance_reconciliation.view` (scoped by the flag's `orgUnitId`; a flag without a unit needs TENANT scope), assigning
+  `finance_reconciliation.assign`, resolving `finance_reconciliation.edit`. Raising one is a side effect of a money or job service
+  (no permission of its own) or, by a person, `finance_reconciliation.create`.
+- **COO and material costs**: the COO maintains the catalog but does not see costs or approve cost changes (the `cost` set and
+  `materials.approve` are Owner / Finance Director only). Spec 4.5 gives the COO "View" on financial reports, not cost data;
+  a tenant can grant the set to its COO role.
+- **Compensation stays untouched**: `compensation.*` and `financial_reports.*` keep their Phase 1 meaning; no commission or payroll
+  permission is added (blocked on the owner's compensation specification, spec 28.4).

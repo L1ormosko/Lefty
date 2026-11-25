@@ -205,6 +205,6 @@ describe("fix round 1: content-wise separation of duties, money redaction, versi
     expect(JSON.stringify(asLeadOps)).not.toContain("424242");
     expect(asLeadOps.checks).toMatchObject([{ condition: "minValueMinor", passed: true, actual: null, redacted: true }]);
     const asOwner = await dryRunRule(w.ceo.actor, body);
-    expect(asOwner.checks).toMatchObject([{ condition: "minValueMinor", actual: 424_242 }]);
+    expect(asOwner.checks).toMatchObject([{ condition: "minValueMinor", actual: 424_242n }]);
   });
 });

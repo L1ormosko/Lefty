@@ -89,10 +89,10 @@ export const formFields = (schema: unknown): CompletionField[] => ((schema as { 
 export interface CompletionFacts {
   outcome: {
     type: string;
-    quotedAmountMinor: number | null;
-    approvedAmountMinor: number | null;
-    chargedAmountMinor: number | null;
-    collectedAmountMinor: number | null;
+    quotedAmountMinor: bigint | null;
+    approvedAmountMinor: bigint | null;
+    chargedAmountMinor: bigint | null;
+    collectedAmountMinor: bigint | null;
     paymentMethod: string | null;
   } | null;
   materialCount: number;

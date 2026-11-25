@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { moneyAmountSchema } from "@/lib/money";
 import { LEAD_STATUSES } from "@/lib/lead-lifecycle";
 import { normalizePhoneE164 } from "@/lib/phone";
 import { pageQuerySchema } from "@/server/core";
@@ -47,7 +48,7 @@ const leadContentFields = {
   preferredTimeNote: text(200).nullish(),
   notes: text(4000).nullish(),
   /** Integer minor units (§11.8: never floats). */
-  quotedAmountMinor: z.number().int().min(0).max(2_000_000_000).nullish(),
+  quotedAmountMinor: moneyAmountSchema.nullish(),
   currency,
   /** Service-area org unit. Drives ORG_UNIT scope; omit only with a tenant-wide grant. */
   orgUnitId: id.nullish(),

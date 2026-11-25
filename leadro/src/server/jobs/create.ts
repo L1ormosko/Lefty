@@ -41,7 +41,7 @@ interface JobDraft {
   appointmentWindow?: { start: Date; end: Date };
   estimatedDurationMinutes?: number;
   timeZone?: string;
-  quotedAmountMinor?: number;
+  quotedAmountMinor?: bigint;
   currency?: string;
   additionalRequirements?: CreateJobInput["additionalRequirements"];
 }

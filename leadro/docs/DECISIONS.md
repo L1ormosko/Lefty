@@ -891,3 +891,61 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
 - **Single helpers**: `teamMembers` (customers), `holdsOutcomeFinancialSet` / `decisionHoldsFinancial` (job-outcomes), `caseResourceRefById` (recovery), finished recovery statuses derived from the status machine, field-note money through `JOB_FIELD_NOTE_FIELD_MAP`.
 - **Follow-up target registry** lives on `globalThis`; the unregistered recovery-case default fails closed. **Field-sync** gained `follow_up.status | complete | cancel`. **Removed events**: `lead.follow_up_due`, `qualification.expiring`, `qualification.expired` (nothing raised them). **`job.create` audit** records money field names only.
 - **mfa replay test** no longer straddles a 30-second TOTP step (pinned step, waits out the last seconds of one).
+
+## Phase 4 Task 1: schema, money as BigInt, catalog, templates, seed
+
+- **Two migrations.** `20261124100000_phase4_financial_core` (all Phase 4 tables, Int -> BigInt for the Phase 2/3 money columns, RLS,
+  CHECKs, status machines, append-only and no-delete guards) was applied to the shared `leadro` and `leadro_test` databases before the
+  gap check for Tasks 2-6 ran, so it is NOT edited in place. The gap went into `20261125100000_phase4_review_flags`:
+  - `FinanceReviewFlag` (Task 5 "finance review flags", spec 11.7 "Flag for finance review"): no existing table fit. Reconciliation
+    exceptions need a run, follow-up tasks are operational (customer work, operational roles see them). Permissions reuse
+    `finance_reconciliation.*` (see PERMISSIONS.md section 11), so the catalog does not grow.
+  - `ReconciliationException.refundId`, `.outcomeId` (Task 6 "refunds without payment" and "outcome/ledger mismatch" need a typed,
+    tenant-safe reference rather than an id in `details`; CHECKs require them for those kinds) and `.orgUnitId` (scope filter, like every
+    other finance table). Added to the frozen-column trigger.
+- **Status history of finance records = the audit trail.** Payment, refund, chargeback, adjustment, approval request, cost version,
+  exception and flag status changes write an audit event (previous and new status, actor, reason) in the same transaction; there are no
+  `*StatusHistory` tables for them (same as qualifications and follow-ups). The DB status-machine triggers stop illegal moves.
+- **BigInt fallout fixed in Phase 2/3 code**: `changedFields` compared values with `JSON.stringify`, so a job PATCH carrying a quote
+  answered 500; the field-event content hash did the same, so recording an outcome through the offline gate or field-sync answered 500.
+  Both now handle `bigint`; the hash writes bare digits, so events hashed before the migration (amounts were numbers) still replay.
+  Phase 2/3 tests now expect decimal strings in API JSON and `bigint` from services (docs/API_CONVENTIONS.md "Money").
+- **COO template**: maintains the material catalog without the `cost` field set and without `materials.approve` (the manager's WIP commit
+  2ddef29 changed this from the first draft, which gave the COO full materials including costs). Spec 4.5 grants the COO "View" of
+  financial reports and no cost data; costs and cost approvals stay with Owner and Finance Director. Cost if wrong: one template line.
+- **Seed**: `seedFinanceData` (5 demo materials with an approved version-1 cost effective 2020-01-01, 6 default approval policies) runs per
+  seeded tenant and is idempotent. Seeded costs are approved without a request: demonstration data, documented as such.
+- **Payment provider configuration has no table.** There is no real provider (spec 28.3), so the intake's provider and secret resolution
+  is code (a `PaymentProvider` registry, "not configured" by default). A real provider with per-tenant credentials will need a
+  connection table (encrypted secret, like MFA secrets) in a later migration. Unknown tenant or provider = refused before any row is
+  written (`PaymentIntakeEvent.tenantId` is required).
+- **Not modelled** (no task needs it): "Other Direct Cost" (spec 11.1) and any discount record behind `HIGH_VALUE_DISCOUNT` (the subject is
+  the job; Task 3 may leave that subject unregistered). Compensation, commission and payroll remain blocked on the owner's compensation
+  specification (spec 28.4).
+
+### Contracts for Phase 4 Tasks 2-6 (no further migration expected)
+
+- **Money**: `bigint` minor units + `currency` everywhere; parse inputs with `moneyAmountSchema` / `signedMoneyAmountSchema`, sum with
+  `sumMinor`, store JSON amounts as decimal strings (`serializeJson`); responses are serialized by `defineRoute`.
+- **Task 2 (materials)**: cost lives only in `MaterialCostVersion` (`versionNumber` per material, PENDING_APPROVAL -> APPROVED | REJECTED |
+  CANCELLED). Approving a version effective at D first closes the open approved version (`effectiveTo = D`, settable once), then sets
+  APPROVED + `approvedAt` (+ `approvalRequestId` while still pending; frozen after approval); the GiST constraint refuses overlap. Costing a
+  `JobMaterialUsage` sets `materialId`, `costVersionId`, `unitCostMinor`, `extendedCostMinor`, `costCurrency`, `costedAt` together, once
+  (trigger freezes them and `quantity`); the derivation of `extendedCostMinor` from `Decimal(12,3)` quantity is Task 2's to decide and document.
+  Costs are the `cost` field set of `materials.*`.
+- **Task 3 (approvals)**: resolve the active policy by `subjectType` + `currency` + amount in `[minAmountMinor, maxAmountMinor)`; snapshot
+  code, version, `requiredApprovals`, `approverPermission`, `expiresAt`, `excludedApproverIds` at creation (frozen); one PENDING per subject
+  (partial unique index); decisions append-only, one per decider, SoD trigger; set `decidedAt` / `cancelledAt` + `cancelReason` with the
+  status. Subject links: the subject row's `approvalRequestId` (chargeback: `writeOffApprovalRequestId`). Policies change by inserting
+  `version + 1` and deactivating the old row (one active per code).
+- **Task 4 (ledger, payments)**: every posting through one ledger service with a deterministic `idempotencyKey`; sign by type; `source` +
+  its reference column; actor user XOR `system:<name>`; `orgUnitId` / `legalEntityId` copied from the job at posting. Corrections are
+  REVERSAL entries (one per entry, same job/customer/currency, negated amount). Payments: PENDING -> RECEIVED | FAILED | VOIDED,
+  RECEIVED -> VOIDED; MANUAL needs `recordedById`, PROVIDER needs `provider` + `providerRef` + `intakeEventId`. Intake writes
+  `PaymentIntakeEvent` first (unique per tenant/provider/externalId, payload SHA-256 only), signature-invalid can only be REJECTED.
+- **Task 5 (refunds, chargebacks, adjustments, flags)**: status machines as in the migration (refund REQUESTED -> PENDING_APPROVAL |
+  APPROVED -> POSTED; chargeback OPEN -> DISPUTED -> WON | LOST -> WRITE_OFF_PENDING_APPROVAL -> WRITTEN_OFF; adjustment PENDING_APPROVAL
+  -> APPROVED -> POSTED); core columns frozen; postings are REFUND / CHARGEBACK / ADJUSTMENT ledger entries; review flags via
+  `FinanceReviewFlag` with a deterministic `idempotencyKey` per triggering event.
+- **Task 6 (reconciliation)**: one `ReconciliationRun` per period / legal entity / currency (RUNNING -> COMPLETED | FAILED, totals on the
+  run); exceptions carry the typed references above and `orgUnitId`; OPEN <-> ASSIGNED -> RESOLVED with `resolvedById` + reason.

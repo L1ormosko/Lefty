@@ -190,6 +190,22 @@ model Tenant {
   recoveryAttempts           RecoveryAttempt[]
   followUpTasks              FollowUpTask[]
   recoveryRuleRuns           RecoveryRuleRun[]
+
+  // Phase 4
+  materials                Material[]
+  materialCostVersions     MaterialCostVersion[]
+  ledgerEntries            LedgerEntry[]
+  payments                 Payment[]
+  refunds                  Refund[]
+  chargebacks              Chargeback[]
+  adjustments              Adjustment[]
+  approvalPolicies         ApprovalPolicy[]
+  approvalRequests         ApprovalRequest[]
+  approvalDecisions        ApprovalDecision[]
+  reconciliationRuns       ReconciliationRun[]
+  reconciliationExceptions ReconciliationException[]
+  paymentIntakeEvents      PaymentIntakeEvent[]
+  financeReviewFlags       FinanceReviewFlag[]
 }
 
 model LegalEntity {
@@ -205,6 +221,9 @@ model LegalEntity {
   orgUnits  OrgUnit[]
   employees Employee[]
   scopes    AccessScope[]
+
+  ledgerEntries      LedgerEntry[]
+  reconciliationRuns ReconciliationRun[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -255,6 +274,16 @@ model OrgUnit {
   recoveryRules  RecoveryRule[]
   recoveryCases  LeadRecoveryCase[]
   followUpTasks  FollowUpTask[]
+
+  ledgerEntries    LedgerEntry[]     @relation("LedgerEntryOrgUnit")
+  payments         Payment[]         @relation("PaymentOrgUnit")
+  refunds          Refund[]          @relation("RefundOrgUnit")
+  chargebacks      Chargeback[]      @relation("ChargebackOrgUnit")
+  adjustments      Adjustment[]      @relation("AdjustmentOrgUnit")
+  approvalRequests ApprovalRequest[] @relation("ApprovalRequestOrgUnit")
+
+  reconciliationExceptions ReconciliationException[] @relation("ReconciliationExceptionOrgUnit")
+  financeReviewFlags       FinanceReviewFlag[]       @relation("FinanceReviewFlagOrgUnit")
 
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
@@ -441,6 +470,25 @@ model User {
   followUpsCreated         FollowUpTask[]                @relation("FollowUpCreatedBy")
 
   shiftsReviewed Shift[] @relation("ShiftReviewedBy")
+
+  // Phase 4
+  materialsCreated                 Material[]                @relation("MaterialCreatedBy")
+  materialCostVersionsCreated      MaterialCostVersion[]     @relation("MaterialCostVersionCreatedBy")
+  ledgerEntriesPosted              LedgerEntry[]             @relation("LedgerEntryActor")
+  paymentsRecorded                 Payment[]                 @relation("PaymentRecordedBy")
+  refundsRequested                 Refund[]                  @relation("RefundRequestedBy")
+  chargebacksRecorded              Chargeback[]              @relation("ChargebackRecordedBy")
+  adjustmentsRequested             Adjustment[]              @relation("AdjustmentRequestedBy")
+  approvalPoliciesCreated          ApprovalPolicy[]          @relation("ApprovalPolicyCreatedBy")
+  approvalRequestsRequested        ApprovalRequest[]         @relation("ApprovalRequestRequestedBy")
+  approvalRequestsCancelled        ApprovalRequest[]         @relation("ApprovalRequestCancelledBy")
+  approvalDecisionsMade            ApprovalDecision[]        @relation("ApprovalDecisionDecider")
+  reconciliationRunsStarted        ReconciliationRun[]       @relation("ReconciliationRunStartedBy")
+  reconciliationExceptionsAssigned ReconciliationException[] @relation("ReconciliationExceptionAssignedTo")
+  reconciliationExceptionsResolved ReconciliationException[] @relation("ReconciliationExceptionResolvedBy")
+  financeReviewFlagsRaised         FinanceReviewFlag[]       @relation("FinanceReviewFlagRaisedBy")
+  financeReviewFlagsAssigned       FinanceReviewFlag[]       @relation("FinanceReviewFlagAssignedTo")
+  financeReviewFlagsResolved       FinanceReviewFlag[]       @relation("FinanceReviewFlagResolvedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -1054,6 +1102,14 @@ model Customer {
 
   recoveryRuleRuns RecoveryRuleRun[]
 
+  ledgerEntries      LedgerEntry[]
+  payments           Payment[]
+  refunds            Refund[]
+  chargebacks        Chargeback[]
+  adjustments        Adjustment[]
+  approvalRequests   ApprovalRequest[]
+  financeReviewFlags FinanceReviewFlag[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, number])
   @@index([tenantId, archivedAt, createdAt])
@@ -1183,7 +1239,7 @@ model Lead {
   preferredWindowEnd   DateTime?    @db.Timestamptz(3)
   preferredTimeNote    String?
   notes                String?      @db.Text
-  quotedAmountMinor    Int?
+  quotedAmountMinor    BigInt?
   currency             String       @default("USD") @db.Char(3)
   /// Service-area org unit (routing). Null = unrouted, visible only to tenant-level scopes.
   orgUnitId            String?
@@ -1598,7 +1654,7 @@ model Job {
   /// IANA zone the appointment is expressed in; null = the org unit's, then the tenant's.
   timeZone                 String?
   estimatedDurationMinutes Int
-  quotedAmountMinor        Int?
+  quotedAmountMinor        BigInt?
   currency                 String       @default("USD") @db.Char(3)
   /// Phase 3 execution milestones (denormalized for lists; the full trail is JobEvent).
   /// The visit being worked: JobOutcome / JobCompletion rows of this job use it as `visitNumber`. Starts at 1 and is
@@ -1646,6 +1702,16 @@ model Job {
   recoveryCases        LeadRecoveryCase[]    @relation("RecoveryCaseJob")
   recoveredByCases     LeadRecoveryCase[]    @relation("RecoveredJob")
   followUpTasks        FollowUpTask[]
+
+  ledgerEntries            LedgerEntry[]
+  payments                 Payment[]
+  refunds                  Refund[]
+  chargebacks              Chargeback[]
+  adjustments              Adjustment[]
+  approvalRequests         ApprovalRequest[]
+  reconciliationExceptions ReconciliationException[]
+  paymentIntakeEvents      PaymentIntakeEvent[]
+  financeReviewFlags       FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   // Lets a recovery case reference (job, customer) so a case and its job can never disagree on the customer.
@@ -2388,32 +2454,44 @@ model JobCompletion {
   @@index([tenantId, formDefinitionId])
 }
 
-/// Material used on a visit. Free text until the Phase 4 materials catalog exists: `materialRef` is
-/// a placeholder id for that catalog (no FK yet).
+/// Material used on a visit: free-text `name` as the technician recorded it, linked to the Phase 4 catalog through
+/// `materialId` when known. `materialRef` is the Phase 3 placeholder id (no FK), kept for rows recorded before the catalog.
 model JobMaterialUsage {
-  id            String   @id @default(cuid())
-  tenantId      String
-  jobId         String
-  completionId  String?
-  employeeId    String?
-  name          String
-  materialRef   String?
-  quantity      Decimal  @db.Decimal(12, 3)
-  unit          String   @default("each")
-  note          String?
-  occurredAt    DateTime @default(now()) @db.Timestamptz(3)
-  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
-  clientEventId String?
+  id                String    @id @default(cuid())
+  tenantId          String
+  jobId             String
+  completionId      String?
+  employeeId        String?
+  name              String
+  materialRef       String?
+  /// Phase 4: the catalog material and the cost version in force when the usage was costed. The three cost columns are a
+  /// snapshot (all set or all null, CHECK) and never change once set (trigger), so a later cost change cannot rewrite a past job.
+  materialId        String?
+  costVersionId     String?
+  unitCostMinor     BigInt?
+  extendedCostMinor BigInt?
+  costCurrency      String?   @db.Char(3)
+  costedAt          DateTime? @db.Timestamptz(3)
+  quantity          Decimal   @db.Decimal(12, 3)
+  unit              String    @default("each")
+  note              String?
+  occurredAt        DateTime  @default(now()) @db.Timestamptz(3)
+  recordedAt        DateTime  @default(now()) @db.Timestamptz(3)
+  clientEventId     String?
 
-  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  job        Job            @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  completion JobCompletion? @relation(fields: [completionId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
-  employee   Employee?      @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job                  @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  completion    JobCompletion?       @relation(fields: [completionId, jobId, tenantId], references: [id, jobId, tenantId], onDelete: Restrict)
+  employee      Employee?            @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  material      Material?            @relation(fields: [materialId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  costVersion   MaterialCostVersion? @relation(fields: [costVersionId, materialId, tenantId], references: [id, materialId, tenantId], onDelete: Restrict)
+  ledgerEntries LedgerEntry[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, jobId, clientEventId])
   @@index([tenantId, jobId, occurredAt])
   @@index([tenantId, completionId])
+  @@index([tenantId, materialId])
 }
 
 /// Notes the technician records during work (spec 8.5): plain notes, work performed, additional work
@@ -2426,7 +2504,7 @@ model JobFieldNote {
   kind             FieldNoteKind @default(NOTE)
   body             String        @db.Text
   /// ADDITIONAL_WORK_REQUESTED: the estimate; CUSTOMER_APPROVAL: the approved amount (minor units).
-  amountMinor      Int?
+  amountMinor      BigInt?
   currency         String        @default("USD") @db.Char(3)
   /// CUSTOMER_APPROVAL only: whether the customer approved (false = declined).
   customerApproved Boolean?
@@ -2515,10 +2593,10 @@ model JobOutcome {
   outcome                   JobOutcomeType
   lostReasonId              String?
   notes                     String?        @db.Text
-  quotedAmountMinor         Int?
-  approvedAmountMinor       Int?
-  chargedAmountMinor        Int?
-  collectedAmountMinor      Int?
+  quotedAmountMinor         BigInt?
+  approvedAmountMinor       BigInt?
+  chargedAmountMinor        BigInt?
+  collectedAmountMinor      BigInt?
   currency                  String         @default("USD") @db.Char(3)
   paymentMethod             PaymentMethod?
   paymentStatus             PaymentStatus  @default(NOT_APPLICABLE)
@@ -2538,6 +2616,12 @@ model JobOutcome {
   recoveryCases LeadRecoveryCase[]
 
   ruleRuns RecoveryRuleRun[]
+
+  ledgerEntries            LedgerEntry[]
+  payments                 Payment[]
+  adjustments              Adjustment[]
+  reconciliationExceptions ReconciliationException[]
+  financeReviewFlags       FinanceReviewFlag[]
 
   @@unique([id, tenantId])
   @@unique([id, jobId, tenantId])
@@ -2636,14 +2720,14 @@ model LeadRecoveryCase {
   presenceAccuracyM       Int?
   /// Machine code when UNKNOWN: "no_location", "stale_location", "inaccurate_location", "no_coordinates".
   presenceReason          String?
-  initialValueMinor       Int?
+  initialValueMinor       BigInt?
   /// An estimate of what recovery could bring in; NEVER mixed into confirmed revenue.
-  estimatedValueMinor     Int?
+  estimatedValueMinor     BigInt?
   currency                String         @default("USD") @db.Char(3)
   /// Confirmed result (spec 9.7), recorded together with `recoveredAt`.
   recoveredAt             DateTime?      @db.Timestamptz(3)
-  recoveredAmountMinor    Int?
-  collectedAmountMinor    Int?
+  recoveredAmountMinor    BigInt?
+  collectedAmountMinor    BigInt?
   recoveredJobId          String?
   recoveredLeadId         String?
   recoveredById           String?
@@ -2716,7 +2800,7 @@ model RecoveryAttempt {
   occurredAt         DateTime        @default(now()) @db.Timestamptz(3)
   durationSeconds    Int?
   notes              String?         @db.Text
-  offeredAmountMinor Int?
+  offeredAmountMinor BigInt?
   recordedAt         DateTime        @default(now()) @db.Timestamptz(3)
   recordedById       String?
 
@@ -2815,4 +2899,714 @@ model RecoveryRuleRun {
   @@unique([tenantId, ruleId, jobOutcomeId])
   @@index([tenantId, ruleId, customerId, firedAt])
   @@index([tenantId, jobOutcomeId])
+}
+
+// ═════════════════════════ Phase 4: financial core (spec Part 11, 21.3, 25.4, 26.4) ═════════════════════════
+// Money = BigInt minor units + ISO currency, never floats. No compensation / commission tables: those wait for the
+// owner's compensation specification (spec 28.4, docs/DECISIONS.md).
+
+enum MaterialCostStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum LedgerEntryType {
+  CHARGE
+  PAYMENT
+  REFUND
+  CHARGEBACK
+  ADJUSTMENT
+  REVERSAL
+  MATERIAL_COST
+}
+
+/// What produced the entry (spec 11.8): the record the posting refers to.
+enum LedgerSource {
+  JOB
+  OUTCOME
+  PAYMENT
+  REFUND
+  CHARGEBACK
+  ADJUSTMENT
+  MATERIAL_USAGE
+  REVERSAL
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  RECEIVED
+  FAILED
+  VOIDED
+}
+
+/// Who created a payment record: a person recording it, or the authenticated provider intake.
+enum PaymentOrigin {
+  MANUAL
+  PROVIDER
+}
+
+enum RefundStatus {
+  REQUESTED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  POSTED
+  CANCELLED
+}
+
+enum ChargebackStatus {
+  OPEN
+  DISPUTED
+  WON
+  LOST
+  WRITE_OFF_PENDING_APPROVAL
+  WRITTEN_OFF
+}
+
+enum AdjustmentStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  POSTED
+  CANCELLED
+}
+
+enum ApprovalSubjectType {
+  MATERIAL_COST_CHANGE
+  ADJUSTMENT
+  REFUND
+  CHARGEBACK_WRITE_OFF
+  HIGH_VALUE_DISCOUNT
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum ApprovalDecisionKind {
+  APPROVE
+  REJECT
+}
+
+enum ReconciliationRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ReconciliationExceptionKind {
+  UNPAID
+  PARTIAL_PAYMENT
+  OVERPAYMENT
+  FAILED_PAYMENT
+  DUPLICATE_EXTERNAL_EVENT
+  OUTCOME_LEDGER_MISMATCH
+  REFUND_WITHOUT_PAYMENT
+  UNMATCHED_PROVIDER_EVENT
+  OTHER
+}
+
+enum ReconciliationExceptionStatus {
+  OPEN
+  ASSIGNED
+  RESOLVED
+}
+
+enum FinanceReviewFlagStatus {
+  OPEN
+  ASSIGNED
+  RESOLVED
+}
+
+/// What the authenticated intake did with an external payment event (spec 18.3, 26.4).
+enum PaymentIntakeStatus {
+  RECEIVED
+  ACCEPTED
+  REJECTED
+  DUPLICATE
+  UNMATCHED
+}
+
+/// A material in the tenant's catalog (spec 11.4). Its cost lives in MaterialCostVersion, never on this row.
+model Material {
+  id          String    @id @default(cuid())
+  tenantId    String
+  /// Stable lowercase code, unique per tenant (CHECK material_code_format).
+  code        String
+  name        String
+  description String?   @db.Text
+  unit        String    @default("each")
+  supplier    String?
+  active      Boolean   @default(true)
+  archivedAt  DateTime? @db.Timestamptz(3)
+  createdById String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy    User?                 @relation("MaterialCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  costVersions MaterialCostVersion[]
+  usages       JobMaterialUsage[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, active])
+}
+
+/// One cost of a material for a period (spec 11.4, 25.4). Once APPROVED the cost, currency, start and version number
+/// never change (trigger material_cost_version_guard); a later cost is a new version that closes this one by setting
+/// `effectiveTo`. Approved versions of one material never overlap (exclusion constraint). `approvalRequestId` is null
+/// when no approval policy applied to the change.
+model MaterialCostVersion {
+  id                String             @id @default(cuid())
+  tenantId          String
+  materialId        String
+  versionNumber     Int
+  unitCostMinor     BigInt
+  currency          String             @default("USD") @db.Char(3)
+  effectiveFrom     DateTime           @db.Timestamptz(3)
+  effectiveTo       DateTime?          @db.Timestamptz(3)
+  status            MaterialCostStatus @default(PENDING_APPROVAL)
+  approvalRequestId String?
+  note              String?            @db.Text
+  createdById       String?
+  createdAt         DateTime           @default(now()) @db.Timestamptz(3)
+  approvedAt        DateTime?          @db.Timestamptz(3)
+
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  material        Material           @relation(fields: [materialId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest?   @relation(fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy       User?              @relation("MaterialCostVersionCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  usages          JobMaterialUsage[]
+
+  @@unique([id, tenantId])
+  @@unique([id, materialId, tenantId])
+  @@unique([tenantId, materialId, versionNumber])
+  @@index([tenantId, materialId, effectiveFrom])
+  @@index([tenantId, status])
+}
+
+/// Append-only money ledger (spec 11.8). The database rejects UPDATE/DELETE/TRUNCATE; a correction is a REVERSAL entry
+/// (`reversesEntryId`, amount = minus the original) or an ADJUSTMENT. Sign convention (CHECKs): CHARGE and PAYMENT are
+/// positive, REFUND, CHARGEBACK and MATERIAL_COST are negative, ADJUSTMENT either sign, REVERSAL the opposite of the
+/// reversed entry; zero is never valid. Balances are always derived from the entries.
+model LedgerEntry {
+  id              String          @id @default(cuid())
+  tenantId        String
+  type            LedgerEntryType
+  source          LedgerSource
+  amountMinor     BigInt
+  currency        String          @db.Char(3)
+  jobId           String?
+  customerId      String?
+  outcomeId       String?
+  paymentId       String?
+  refundId        String?
+  chargebackId    String?
+  adjustmentId    String?
+  materialUsageId String?
+  /// Snapshot at posting (an entry is immutable): the job's service-area unit and its legal entity.
+  orgUnitId       String?
+  legalEntityId   String?
+  reversesEntryId String?
+  /// Unique per tenant: re-posting the same business event is a no-op (spec 20.3, 26.4).
+  idempotencyKey  String
+  /// A person, or a machine actor such as "system:provider-intake"; exactly one is set (CHECK).
+  actorUserId     String?
+  systemActor     String?
+  memo            String?         @db.Text
+  occurredAt      DateTime        @db.Timestamptz(3)
+  recordedAt      DateTime        @default(now()) @db.Timestamptz(3)
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job?                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer      Customer?           @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome       JobOutcome?         @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment       Payment?            @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  refund        Refund?             @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  chargeback    Chargeback?         @relation(fields: [chargebackId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  adjustment    Adjustment?         @relation(fields: [adjustmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  materialUsage JobMaterialUsage?   @relation(fields: [materialUsageId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit       OrgUnit?            @relation("LedgerEntryOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  legalEntity   LegalEntity?        @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reverses      LedgerEntry?        @relation("LedgerReversal", fields: [reversesEntryId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reversedBy    LedgerEntry[]       @relation("LedgerReversal")
+  reviewFlags   FinanceReviewFlag[]
+  actor         User?               @relation("LedgerEntryActor", fields: [actorUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, jobId, occurredAt])
+  @@index([tenantId, customerId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+  @@index([tenantId, orgUnitId, occurredAt])
+  @@index([tenantId, legalEntityId, occurredAt])
+  @@index([tenantId, paymentId])
+  @@index([tenantId, outcomeId])
+  @@index([tenantId, reversesEntryId])
+}
+
+/// A payment against a job (spec 11.1). The money itself is the PAYMENT ledger entry posted when status becomes RECEIVED.
+/// Provider payments carry (provider, providerRef), unique per tenant, so a webhook can never post twice.
+model Payment {
+  id             String              @id @default(cuid())
+  tenantId       String
+  jobId          String
+  customerId     String?
+  outcomeId      String?
+  method         PaymentMethod
+  status         PaymentRecordStatus @default(PENDING)
+  origin         PaymentOrigin       @default(MANUAL)
+  amountMinor    BigInt
+  currency       String              @default("USD") @db.Char(3)
+  /// Check number, terminal slip, bank reference typed by whoever recorded it.
+  reference      String?
+  provider       String?
+  providerRef    String?
+  intakeEventId  String?
+  orgUnitId      String?
+  idempotencyKey String?
+  receivedAt     DateTime?           @db.Timestamptz(3)
+  failedAt       DateTime?           @db.Timestamptz(3)
+  failureReason  String?
+  voidedAt       DateTime?           @db.Timestamptz(3)
+  voidReason     String?
+  recordedById   String?
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
+
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job           Job                       @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer      Customer?                 @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome       JobOutcome?               @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  intakeEvent   PaymentIntakeEvent?       @relation("PaymentIntake", fields: [intakeEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit       OrgUnit?                  @relation("PaymentOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy    User?                     @relation("PaymentRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ledgerEntries LedgerEntry[]
+  refunds       Refund[]
+  chargebacks   Chargeback[]
+  exceptions    ReconciliationException[]
+  reviewFlags   FinanceReviewFlag[]
+
+  @@unique([id, tenantId])
+  @@unique([id, jobId, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, jobId, status])
+  @@index([tenantId, status, receivedAt])
+  @@index([tenantId, orgUnitId, createdAt])
+}
+
+/// Money returned to a customer (spec 11.7). Posted as a negative REFUND ledger entry; approval per policy.
+model Refund {
+  id                String       @id @default(cuid())
+  tenantId          String
+  jobId             String
+  paymentId         String?
+  customerId        String?
+  amountMinor       BigInt
+  currency          String       @default("USD") @db.Char(3)
+  reason            String       @db.Text
+  status            RefundStatus @default(REQUESTED)
+  approvalRequestId String?
+  orgUnitId         String?
+  idempotencyKey    String?
+  providerRef       String?
+  requestedById     String?
+  requestedAt       DateTime     @default(now()) @db.Timestamptz(3)
+  postedAt          DateTime?    @db.Timestamptz(3)
+  decidedAt         DateTime?    @db.Timestamptz(3)
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime     @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job             Job                       @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment         Payment?                  @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer        Customer?                 @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest?          @relation("RefundApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit         OrgUnit?                  @relation("RefundOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requestedBy     User?                     @relation("RefundRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ledgerEntries   LedgerEntry[]
+  exceptions      ReconciliationException[]
+  reviewFlags     FinanceReviewFlag[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, jobId, status])
+  @@index([tenantId, status, requestedAt])
+  @@index([tenantId, paymentId])
+}
+
+/// A card or bank dispute (spec 11.7): OPEN until won or lost; a lost one is a negative CHARGEBACK entry, a write-off
+/// of an unrecoverable loss needs approval per policy.
+model Chargeback {
+  id                        String           @id @default(cuid())
+  tenantId                  String
+  jobId                     String
+  paymentId                 String?
+  customerId                String?
+  amountMinor               BigInt
+  currency                  String           @default("USD") @db.Char(3)
+  status                    ChargebackStatus @default(OPEN)
+  reasonCode                String?
+  notes                     String?          @db.Text
+  provider                  String?
+  providerRef               String?
+  intakeEventId             String?
+  writeOffApprovalRequestId String?
+  orgUnitId                 String?
+  idempotencyKey            String?
+  openedAt                  DateTime         @default(now()) @db.Timestamptz(3)
+  resolvedAt                DateTime?        @db.Timestamptz(3)
+  recordedById              String?
+  createdAt                 DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt                 DateTime         @updatedAt @db.Timestamptz(3)
+
+  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job              Job                 @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment          Payment?            @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer         Customer?           @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  intakeEvent      PaymentIntakeEvent? @relation("ChargebackIntake", fields: [intakeEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  writeOffApproval ApprovalRequest?    @relation("ChargebackWriteOffApproval", fields: [writeOffApprovalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit          OrgUnit?            @relation("ChargebackOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy       User?               @relation("ChargebackRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ledgerEntries    LedgerEntry[]
+  reviewFlags      FinanceReviewFlag[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, jobId, status])
+  @@index([tenantId, status, openedAt])
+  @@index([tenantId, paymentId])
+}
+
+/// A signed correction of a job's or customer's balance (spec 11.7, 25.4), e.g. after a job was reopened. Posted as an
+/// ADJUSTMENT ledger entry; the original entries are never edited.
+model Adjustment {
+  id                String           @id @default(cuid())
+  tenantId          String
+  jobId             String?
+  customerId        String?
+  outcomeId         String?
+  /// Positive increases what is owed / revenue, negative decreases it; never zero (CHECK).
+  amountMinor       BigInt
+  currency          String           @default("USD") @db.Char(3)
+  reasonCode        String?
+  reason            String           @db.Text
+  status            AdjustmentStatus @default(PENDING_APPROVAL)
+  approvalRequestId String?
+  orgUnitId         String?
+  idempotencyKey    String?
+  requestedById     String?
+  requestedAt       DateTime         @default(now()) @db.Timestamptz(3)
+  decidedAt         DateTime?        @db.Timestamptz(3)
+  postedAt          DateTime?        @db.Timestamptz(3)
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job             Job?                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer        Customer?           @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome         JobOutcome?         @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest?    @relation("AdjustmentApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit         OrgUnit?            @relation("AdjustmentOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requestedBy     User?               @relation("AdjustmentRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ledgerEntries   LedgerEntry[]
+  reviewFlags     FinanceReviewFlag[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, jobId, status])
+  @@index([tenantId, status, requestedAt])
+}
+
+/// Which changes need approval and from whom (spec 21.3, 11.5). A policy row is immutable apart from `active` (trigger
+/// approval_policy_guard): changing it creates version + 1 of the same `code` and deactivates the old one. A request
+/// snapshots the policy it was resolved with, so later edits never change a pending request.
+/// The policy applies to an amount in `currency` that is >= `minAmountMinor` and (when set) < `maxAmountMinor`;
+/// amount-less subjects (MATERIAL_COST_CHANGE) use minAmountMinor = 0.
+model ApprovalPolicy {
+  id                 String              @id @default(cuid())
+  tenantId           String
+  /// Stable key of the policy across versions, e.g. "refund_over_500".
+  code               String
+  subjectType        ApprovalSubjectType
+  name               String
+  version            Int                 @default(1)
+  active             Boolean             @default(true)
+  currency           String              @default("USD") @db.Char(3)
+  minAmountMinor     BigInt              @default(0)
+  maxAmountMinor     BigInt?
+  /// 1 = single approval, 2 = dual approval (two different people).
+  requiredApprovals  Int                 @default(1)
+  /// Permission key the approver must hold, e.g. "finance_refunds.approve".
+  approverPermission String
+  /// Request expires this many hours after creation; null = never.
+  expiresAfterHours  Int?
+  createdById        String?
+  createdAt          DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime            @updatedAt @db.Timestamptz(3)
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy User?             @relation("ApprovalPolicyCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requests  ApprovalRequest[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code, version])
+  @@index([tenantId, subjectType, active])
+}
+
+/// One generic approval request (spec 21.3). `subjectId` points at the record being approved (material cost version,
+/// refund, adjustment, ...); it is polymorphic, so it has no foreign key; the subject module owns the link. At most one
+/// PENDING request exists per subject. People in `excludedApproverIds` (editors / submitters besides the requester) and
+/// the requester can never decide it (separation of duties, enforced by approval_decision_guard).
+model ApprovalRequest {
+  id                  String                @id @default(cuid())
+  tenantId            String
+  subjectType         ApprovalSubjectType
+  subjectId           String
+  policyId            String
+  policyCode          String
+  policyVersion       Int
+  requiredApprovals   Int
+  approverPermission  String
+  status              ApprovalRequestStatus @default(PENDING)
+  amountMinor         BigInt?
+  currency            String?               @db.Char(3)
+  jobId               String?
+  customerId          String?
+  /// Scope of the subject, so the approver queue can be filtered by the approver's access scope.
+  orgUnitId           String?
+  reason              String?               @db.Text
+  /// Ids and numbers only (no free text): what the approver is shown, snapshotted at request time.
+  details             Json?
+  idempotencyKey      String?
+  requestedById       String?
+  excludedApproverIds String[]              @default([])
+  requestedAt         DateTime              @default(now()) @db.Timestamptz(3)
+  expiresAt           DateTime?             @db.Timestamptz(3)
+  decidedAt           DateTime?             @db.Timestamptz(3)
+  cancelledAt         DateTime?             @db.Timestamptz(3)
+  cancelledById       String?
+  cancelReason        String?
+  createdAt           DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  policy       ApprovalPolicy        @relation(fields: [policyId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  job          Job?                  @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer     Customer?             @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit      OrgUnit?              @relation("ApprovalRequestOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  requestedBy  User?                 @relation("ApprovalRequestRequestedBy", fields: [requestedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  cancelledBy  User?                 @relation("ApprovalRequestCancelledBy", fields: [cancelledById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  decisions    ApprovalDecision[]
+  costVersions MaterialCostVersion[]
+  refunds      Refund[]              @relation("RefundApproval")
+  adjustments  Adjustment[]          @relation("AdjustmentApproval")
+  chargebacks  Chargeback[]          @relation("ChargebackWriteOffApproval")
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, requestedAt])
+  @@index([tenantId, subjectType, subjectId])
+  @@index([tenantId, orgUnitId, status])
+  @@index([tenantId, requestedById])
+}
+
+/// One person's decision on a request. Append-only (trigger), one per (request, decider); the request's status is
+/// derived from the decisions by the approval service, in the same transaction.
+model ApprovalDecision {
+  id        String               @id @default(cuid())
+  tenantId  String
+  requestId String
+  deciderId String
+  decision  ApprovalDecisionKind
+  comment   String?              @db.Text
+  decidedAt DateTime             @default(now()) @db.Timestamptz(3)
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  request ApprovalRequest @relation(fields: [requestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  decider User            @relation("ApprovalDecisionDecider", fields: [deciderId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, requestId, deciderId])
+  @@index([tenantId, requestId, decidedAt])
+  @@index([tenantId, deciderId, decidedAt])
+}
+
+/// One reconciliation of expected (charged) against recorded (paid) money for a period (spec 5.7, 25.4).
+model ReconciliationRun {
+  id             String                  @id @default(cuid())
+  tenantId       String
+  legalEntityId  String?
+  currency       String                  @default("USD") @db.Char(3)
+  periodStart    DateTime                @db.Timestamptz(3)
+  periodEnd      DateTime                @db.Timestamptz(3)
+  status         ReconciliationRunStatus @default(RUNNING)
+  jobsExamined   Int                     @default(0)
+  exceptionCount Int                     @default(0)
+  expectedMinor  BigInt                  @default(0)
+  recordedMinor  BigInt                  @default(0)
+  startedById    String?
+  startedAt      DateTime                @default(now()) @db.Timestamptz(3)
+  completedAt    DateTime?               @db.Timestamptz(3)
+  failureReason  String?
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  legalEntity LegalEntity?              @relation(fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  startedBy   User?                     @relation("ReconciliationRunStartedBy", fields: [startedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  exceptions  ReconciliationException[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, startedAt])
+  @@index([tenantId, legalEntityId, periodStart])
+}
+
+/// Something a reconciliation run found that a person must look at. Resolved only with a reason (CHECK).
+model ReconciliationException {
+  id                  String                        @id @default(cuid())
+  tenantId            String
+  runId               String
+  kind                ReconciliationExceptionKind
+  status              ReconciliationExceptionStatus @default(OPEN)
+  jobId               String?
+  paymentId           String?
+  intakeEventId       String?
+  /// Added by 20261125100000_phase4_review_flags: the refund (REFUND_WITHOUT_PAYMENT) and the outcome
+  /// (OUTCOME_LEDGER_MISMATCH) an exception is about, and the job's service-area unit at detection time (scope filter;
+  /// null for an exception without a job, which only tenant-wide finance scope sees).
+  refundId            String?
+  outcomeId           String?
+  orgUnitId           String?
+  currency            String                        @default("USD") @db.Char(3)
+  expectedAmountMinor BigInt?
+  recordedAmountMinor BigInt?
+  /// Ids and numbers only.
+  details             Json?
+  assignedToId        String?
+  assignedAt          DateTime?                     @db.Timestamptz(3)
+  resolvedAt          DateTime?                     @db.Timestamptz(3)
+  resolvedById        String?
+  resolutionReason    String?                       @db.Text
+  createdAt           DateTime                      @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                      @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  run         ReconciliationRun   @relation(fields: [runId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  job         Job?                @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment     Payment?            @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  intakeEvent PaymentIntakeEvent? @relation("ReconciliationIntake", fields: [intakeEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  refund      Refund?             @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome     JobOutcome?         @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit     OrgUnit?            @relation("ReconciliationExceptionOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedTo  User?               @relation("ReconciliationExceptionAssignedTo", fields: [assignedToId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  resolvedBy  User?               @relation("ReconciliationExceptionResolvedBy", fields: [resolvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, runId, status])
+  @@index([tenantId, status, kind])
+  @@index([tenantId, jobId])
+  @@index([tenantId, orgUnitId, status])
+}
+
+/// Log of every external payment event the authenticated intake received (spec 18.3, 26.4). Written BEFORE any core
+/// record is touched; (tenant, provider, externalId) is unique, so a repeated webhook finds its first row and never posts
+/// twice. The raw payload is not stored (it may carry card or bank data): only its SHA-256 and the validated fields.
+/// Identity columns never change after insert (trigger payment_intake_event_guard); outcome columns are set once.
+model PaymentIntakeEvent {
+  id             String              @id @default(cuid())
+  tenantId       String
+  provider       String
+  externalId     String
+  eventType      String
+  /// SHA-256 of the raw body, lowercase hex (CHECK).
+  payloadHash    String              @db.Char(64)
+  signatureValid Boolean
+  status         PaymentIntakeStatus @default(RECEIVED)
+  /// Machine code when REJECTED / UNMATCHED / DUPLICATE, e.g. "bad_signature", "unknown_job", "currency_mismatch".
+  rejectionCode  String?
+  /// The validated, normalized fields (ids, amounts as strings, currency); never raw provider payload.
+  parsed         Json?
+  amountMinor    BigInt?
+  currency       String?             @db.Char(3)
+  jobId          String?
+  paymentId      String?
+  duplicateOfId  String?
+  occurredAt     DateTime?           @db.Timestamptz(3)
+  receivedAt     DateTime            @default(now()) @db.Timestamptz(3)
+  processedAt    DateTime?           @db.Timestamptz(3)
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job         Job?                      @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payments    Payment[]                 @relation("PaymentIntake")
+  chargebacks Chargeback[]              @relation("ChargebackIntake")
+  exceptions  ReconciliationException[] @relation("ReconciliationIntake")
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, provider, externalId])
+  @@index([tenantId, status, receivedAt])
+  @@index([tenantId, jobId])
+}
+
+/// "Flag for finance review" (spec 11.7, 25.4): a money record or job a person in finance must look at, e.g. a job reopened
+/// after money was posted, a refund of an already-reconciled payment, a chargeback lost. Added by migration
+/// 20261125100000_phase4_review_flags. A flag never changes money: the reviewer acts through adjustments / reversals and
+/// resolves the flag with a reason. Raised by a person or a machine actor (exactly one, CHECK); `idempotencyKey` (unique per
+/// tenant) lets a service raise the same flag for the same event once. `orgUnitId` is the job's unit at raise time (scope).
+model FinanceReviewFlag {
+  id               String                  @id @default(cuid())
+  tenantId         String
+  /// Machine code, lowercase dotted, e.g. "job.reopened_after_posting" (CHECK finance_review_flag_reason_code_format).
+  reasonCode       String
+  /// Optional free text from a person; never written by a machine actor (keep machine detail in `details`).
+  note             String?                 @db.Text
+  /// Ids, codes and numbers only (amounts as decimal strings).
+  details          Json?
+  status           FinanceReviewFlagStatus @default(OPEN)
+  jobId            String?
+  customerId       String?
+  outcomeId        String?
+  paymentId        String?
+  refundId         String?
+  chargebackId     String?
+  adjustmentId     String?
+  ledgerEntryId    String?
+  orgUnitId        String?
+  idempotencyKey   String?
+  raisedById       String?
+  systemActor      String?
+  raisedAt         DateTime                @default(now()) @db.Timestamptz(3)
+  assignedToId     String?
+  assignedAt       DateTime?               @db.Timestamptz(3)
+  resolvedAt       DateTime?               @db.Timestamptz(3)
+  resolvedById     String?
+  resolutionReason String?                 @db.Text
+  createdAt        DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job         Job?         @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  customer    Customer?    @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  outcome     JobOutcome?  @relation(fields: [outcomeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payment     Payment?     @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  refund      Refund?      @relation(fields: [refundId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  chargeback  Chargeback?  @relation(fields: [chargebackId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  adjustment  Adjustment?  @relation(fields: [adjustmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ledgerEntry LedgerEntry? @relation(fields: [ledgerEntryId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit     OrgUnit?     @relation("FinanceReviewFlagOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  raisedBy    User?        @relation("FinanceReviewFlagRaisedBy", fields: [raisedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedTo  User?        @relation("FinanceReviewFlagAssignedTo", fields: [assignedToId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  resolvedBy  User?        @relation("FinanceReviewFlagResolvedBy", fields: [resolvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, raisedAt])
+  @@index([tenantId, orgUnitId, status])
+  @@index([tenantId, jobId])
+  @@index([tenantId, assignedToId, status])
 }

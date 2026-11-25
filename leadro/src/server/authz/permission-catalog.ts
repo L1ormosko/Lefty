@@ -77,6 +77,26 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   ...mod("recovery", "lead recovery cases and rules", ["VIEW", "CREATE", "EDIT", "ASSIGN", "APPROVE", "MANAGE"]),
   // Generic follow-up tasks (spec 5.6, 5.9, 9.3).
   ...mod("follow_ups", "follow-up tasks", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
+
+  // ── Phase 4: financial core (spec Part 11, 21.3) ──
+  // Material catalog. VIEW lists materials and units; costs are the opt-in `cost` field set (`materials.cost_fields`).
+  // CREATE proposes a cost version, EDIT changes catalog data, APPROVE decides a cost change (an approval policy's approver).
+  ...mod("materials", "material catalog and costs", ["VIEW", "CREATE", "EDIT", "ARCHIVE", "APPROVE", "EXPORT"], ["APPROVE", "EXPORT"]),
+  // The money ledger (spec 11.8): read-only for everyone; entries are only ever posted by services. Finance never gains
+  // operational permissions (spec 26.3): none of the finance_* modules grants anything on jobs, dispatch or employees.
+  ...mod("finance_ledger", "the money ledger", ["VIEW", "EXPORT"], ["VIEW", "EXPORT"]),
+  // CREATE records a payment, EDIT marks one failed or voids it.
+  ...mod("finance_payments", "payments", ["VIEW", "CREATE", "EDIT"], ["CREATE", "EDIT"]),
+  // CREATE requests a refund; APPROVE is the permission an approval policy names as approver.
+  ...mod("finance_refunds", "refunds", ["VIEW", "CREATE", "APPROVE"], ["CREATE", "APPROVE"]),
+  // CREATE records a chargeback, EDIT moves it through its dispute, APPROVE decides a write-off.
+  ...mod("finance_chargebacks", "chargebacks", ["VIEW", "CREATE", "EDIT", "APPROVE"], ["CREATE", "EDIT", "APPROVE"]),
+  ...mod("finance_adjustments", "ledger adjustments", ["VIEW", "CREATE", "APPROVE"], ["CREATE", "APPROVE"]),
+  // CREATE starts a run, ASSIGN gives an exception to someone, EDIT resolves it, EXPORT downloads a run.
+  ...mod("finance_reconciliation", "financial reconciliation", ["VIEW", "CREATE", "EDIT", "ASSIGN", "EXPORT"], ["EXPORT"]),
+  // Approval engine (spec 21.3). Who may DECIDE a request is the policy's `approverPermission`, not this module:
+  // VIEW = the approver queue and own requests, MANAGE = see every request in scope and cancel others', CONFIGURE = policies.
+  ...mod("approvals", "approval requests and policies", ["VIEW", "MANAGE", "CONFIGURE"], ["CONFIGURE"]),
 ];
 
 export const permissionKey = (p: Pick<PermissionDef, "module" | "action">) =>
@@ -117,6 +137,12 @@ export const SENSITIVE_FIELD_CATEGORIES = [
     module: "job_outcomes",
     tag: "financial",
     description: "Amounts, currency and payment of visit outcomes (spec 9.1); a plain job_outcomes.view grant never reveals them",
+  },
+  {
+    key: "materials.cost_fields",
+    module: "materials",
+    tag: "cost",
+    description: "Unit costs and cost history of materials (spec 11.4); a plain materials.view grant never reveals them",
   },
   {
     key: "location.coordinate_fields",

@@ -58,6 +58,9 @@ export function findCoordinateKey(value: unknown, path = ""): string | null {
 /** JSON with object keys sorted at every depth, so equal content always serialises equally. */
 function canonicalJson(value: unknown): string {
   if (value === undefined) return "null";
+  // Money is bigint since Phase 4. Bare digits, exactly as the same amount hashed when it was a number, so a replay of an
+  // event stored before the BigInt migration still matches its hash.
+  if (typeof value === "bigint") return value.toString();
   if (value instanceof Date) return JSON.stringify(value.toISOString());
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {

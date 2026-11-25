@@ -80,7 +80,7 @@ describe("the full flow over HTTP: rule -> outcome -> case -> work -> recovery",
     expect(list.status).toBe(200);
     expect(list.json.data).toHaveLength(1);
     const caseRow = list.json.data[0];
-    expect(caseRow).toMatchObject({ status: "NEW", jobId: job.id, priority: "HIGH", recommendation: "call_customer", presenceStatus: "UNKNOWN", ruleVersion: 1, estimatedValueMinor: 120_000 });
+    expect(caseRow).toMatchObject({ status: "NEW", jobId: job.id, priority: "HIGH", recommendation: "call_customer", presenceStatus: "UNKNOWN", ruleVersion: 1, estimatedValueMinor: "120000" });
 
     // Lead Ops can open the original job (recovery_related set); a job without a case in the same unit stays closed to them.
     expect((await call(getJobRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: job.id } })).status).toBe(200);
@@ -112,11 +112,11 @@ describe("the full flow over HTTP: rule -> outcome -> case -> work -> recovery",
     expect((await call(statusRoute, "POST", "/x", { cookie: leadOpsCookie, params: { id: caseId }, body: { status: "CUSTOMER_REACHED" } })).status).toBe(200);
     const recovered = await call(recoverRoute, "POST", "/x", { cookie: leadOpsCookie, params: { id: caseId }, body: { recoveredAmountMinor: 100_000, collectedAmountMinor: 50_000 } });
     expect(recovered.status).toBe(200);
-    expect(recovered.json.data).toMatchObject({ status: "RECOVERED", recoveredAmountMinor: 100_000, estimatedValueMinor: 120_000 });
+    expect(recovered.json.data).toMatchObject({ status: "RECOVERED", recoveredAmountMinor: "100000", estimatedValueMinor: "120000" });
     const detail = await call(getCaseRoute, "GET", "/x", { cookie: leadOpsCookie, params: { id: caseId } });
     expect(detail.json.data.statusHistory.map((entry: { toStatus: string }) => entry.toStatus).reverse()).toEqual(["NEW", "ASSIGNED", "CONTACTING", "CUSTOMER_REACHED", "RECOVERED"]);
     const summary = await call(summaryRoute, "GET", "/x", { cookie: leadOpsCookie });
-    expect(summary.json.data.confirmed).toMatchObject([{ currency: "USD", recoveredAmountMinor: 100_000 }]);
+    expect(summary.json.data.confirmed).toMatchObject([{ currency: "USD", recoveredAmountMinor: "100000" }]);
   });
 
   it("a failing engine never blocks the technician's outcome: a corrupt stored rule is skipped", async () => {

@@ -120,7 +120,7 @@ describe("editing a job (field-level write limits)", () => {
 
     expect((await patch(w.cookie.dispatcher, job.id, { quotedAmountMinor: 500 })).status).toBe(403);
     const priced = await patch(w.cookie.ceo, job.id, { quotedAmountMinor: 12_500 });
-    expect(priced.json.data.quotedAmountMinor).toBe(12_500);
+    expect(priced.json.data.quotedAmountMinor).toBe("12500");
     expect((await auditEvents(w.tenantId, "job.update", job.id)).some((row) => JSON.stringify(row.newValue).includes("12500"))).toBe(false);
     expect((await get(w.cookie.dispatcher, job.id)).json.data).not.toHaveProperty("quotedAmountMinor");
   });

@@ -71,7 +71,7 @@ describe("field notes (§8.5)", () => {
 
     const extra = await note(w.cookie.techA1, job.id, { kind: "ADDITIONAL_WORK_REQUESTED", body: "Customer wants the vent replaced too", amountMinor: 18000 });
     expect(extra.status).toBe(201);
-    expect(extra.json.data.note).toMatchObject({ kind: "ADDITIONAL_WORK_REQUESTED", amountMinor: 18000, currency: "USD" });
+    expect(extra.json.data.note).toMatchObject({ kind: "ADDITIONAL_WORK_REQUESTED", amountMinor: "18000", currency: "USD" });
 
     const approval = await note(w.cookie.techA1, job.id, { kind: "CUSTOMER_APPROVAL", body: "Approved on site", customerApproved: true, amountMinor: 18000 });
     expect(approval.json.data.note).toMatchObject({ kind: "CUSTOMER_APPROVAL", customerApproved: true });

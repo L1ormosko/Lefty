@@ -2,6 +2,7 @@ import { assertPasswordMeetsPolicy, hashPassword } from "../src/server/auth";
 import { PERMISSION_CATALOG, permissionKey } from "../src/server/authz";
 import { prisma } from "../src/server/db";
 import { seedFieldOperationsData } from "./seed/seed-field-operations";
+import { seedFinanceData } from "./seed/seed-finance";
 import { seedOperationalData } from "./seed/seed-operations";
 import { seedTenant } from "./seed/seed-tenant";
 import { TENANT_SPECS } from "./seed/tenant-specs";
@@ -75,6 +76,11 @@ async function main(): Promise<void> {
     const field = await seedFieldOperationsData(result.tenantId);
     console.log(
       `  field operations: ${field.lostReasons} lost reasons, ${field.completionForms} completion forms, ${field.recoveryRules} recovery rule(s) (inactive)`,
+    );
+    // Phase 4 starter data (demo materials with approved costs, default approval policies); idempotent.
+    const finance = await seedFinanceData(result.tenantId);
+    console.log(
+      `  finance: ${finance.materials} materials, ${finance.costVersions} cost versions, ${finance.approvalPolicies} approval policies`,
     );
   }
   // Both tenants share the password from SEED_PASSWORD; it is intentionally not echoed.

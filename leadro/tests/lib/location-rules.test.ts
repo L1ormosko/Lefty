@@ -55,4 +55,8 @@ describe("hashFieldEventContent", () => {
     expect(hashFieldEventContent(base)).not.toBe(hashFieldEventContent({ ...base, at: new Date("2026-11-23T10:00:01Z") }));
     expect(hashFieldEventContent(base)).toMatch(/^[0-9a-f]{64}$/);
   });
+  it("hashes bigint money exactly like the same safe-integer number (events stored before Phase 4 still replay)", () => {
+    expect(hashFieldEventContent({ chargedAmountMinor: 45000n })).toBe(hashFieldEventContent({ chargedAmountMinor: 45000 }));
+    expect(hashFieldEventContent({ a: 9_007_199_254_740_993n })).not.toBe(hashFieldEventContent({ a: 9_007_199_254_740_992n }));
+  });
 });

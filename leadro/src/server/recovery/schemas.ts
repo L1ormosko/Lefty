@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { moneyAmountSchema } from "@/lib/money";
 import { PRESENCE_VALUES, RECOVERY_PRIORITIES } from "@/lib/recovery-rules";
 import { RECOVERY_STATUSES } from "@/lib/recovery-lifecycle";
 import { pageQuerySchema } from "@/server/core";
@@ -7,7 +8,7 @@ import { pageQuerySchema } from "@/server/core";
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const id = z.string().trim().min(1).max(64);
-const money = z.number().int().min(0).max(2_000_000_000);
+const money = moneyAmountSchema;
 
 // ───────────── Rules ─────────────
 
