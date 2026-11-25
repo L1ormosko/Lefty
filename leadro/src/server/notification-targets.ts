@@ -3,6 +3,7 @@ import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
 import { registerJobNotificationTarget } from "@/server/jobs";
 import { registerLeadNotifications } from "@/server/leads";
+import { registerMaterialCostApprovalSubject } from "@/server/materials";
 import { registerRecoveryEngine, registerRecoveryFollowUpTarget, registerRecoveryNotificationTarget } from "@/server/recovery";
 
 /**
@@ -23,6 +24,7 @@ export function registerNotificationTargets(): void {
   registerRecoveryEngine();
   // Approvals: notifications that link to a request. Subject modules add their `registerApprovalSubject(...)` call here too.
   registerApprovalNotificationTarget();
+  registerMaterialCostApprovalSubject();
 }
 
 registerNotificationTargets();

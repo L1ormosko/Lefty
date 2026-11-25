@@ -2664,3 +2664,97 @@ The three status changes share one description:
 ### GET /api/v1/finance/payment-providers
 - `200 { data: { configured: [] } }`: the provider keys this deployment accepts events from (empty: "not configured"). **Permission**:
   `finance_payments.view`.
+
+## Materials (`/api/v1/materials`) - Phase 4
+
+Code: `src/server/materials` (README there), routes `src/app/api/v1/materials/**`, pure rules `src/lib/material-cost-rules.ts`. Design decisions:
+`DECISIONS.md` "Phase 4 Task 2". Spec 11.4 (material costs), 25.4 (historical integrity).
+
+**Access**: materials are tenant-wide reference data (no org unit). Reading the catalog is the `materials.view` capability (any scope: technicians
+pick from it); `materials.create` / `.edit` / `.archive` need TENANT scope (`403`). **Costs are the opt-in `cost` field set**
+(`materials.cost_fields`, Owner and Finance Director by default): `currentCost` / `pendingCost` are projected away without it; the cost history,
+proposing or withdrawing a cost and every job-costing endpoint answer `403` without it. Job-costing endpoints also need `jobs.view` over the job
+(`404` outside scope).
+
+**Material fields**: `id, code, name, description, unit, supplier, active, archivedAt, createdById, createdAt, updatedAt` (base);
+`currentCost`, `pendingCost` (`cost` set): `{ versionId, versionNumber, unitCostMinor (decimal string), currency, effectiveFrom, effectiveTo,
+status, approvalRequestId }` or null. `currentCost` is the APPROVED version in effect now.
+
+**Cost version fields** (`MaterialCostVersion`): `id, materialId, versionNumber, unitCostMinor, currency, effectiveFrom, effectiveTo,
+status (PENDING_APPROVAL | APPROVED | REJECTED | CANCELLED), approvalRequestId (null = no policy applied), note, createdById, createdAt,
+approvedAt`. Labels: `MATERIAL.COST_STATUS.*`. A cost is never edited: a change is a new version. Approving a version effective at D closes the
+current approved version at D (`effectiveTo = D`); approved versions never overlap. One pending version per material.
+
+**Costing** (`JobMaterialUsage`): a usage line is costed once with the APPROVED version in effect at the line's `occurredAt`;
+`extendedCostMinor = quantity x unitCostMinor`, rounded half-even to whole minor units. The snapshot (`materialId, costVersionId,
+unitCostMinor, extendedCostMinor, costCurrency, costedAt`) and the quantity are frozen by the database; later cost changes never rewrite it.
+Line view: `usageId, jobId, employeeId, name, materialRef, materialId, quantity (number), unit, occurredAt, costed, costVersionId,
+unitCostMinor, extendedCostMinor, currency, costedAt`. Skip / refusal codes (detail `code`, labels `MATERIAL.COSTING.*`):
+`material.usage_already_costed`, `material.usage_not_linked` (no material and no `materialRef` matching a code), `material.unit_mismatch` (no
+unit conversion), `material.no_effective_cost`, `material.cost_out_of_range`, `material.usage_linked_elsewhere`.
+
+### GET /api/v1/materials
+
+- **Permission**: `materials.view`. **Purpose**: the catalog by code. Query: `includeArchived` (`true|false`, default false), `q?` (code or name
+  contains), `cursor`, `limit`. Cost fields per the `cost` set.
+
+### POST /api/v1/materials
+
+- **Permission**: `materials.create` (TENANT). **Body** (strict): `code` (`[a-z0-9][a-z0-9_.-]*`, unique per tenant, `409`), `name`,
+  `description?`, `unit` (default `each`), `supplier?`. No cost (see `/costs`). `Idempotency-Key` supported. Audit `material.create`.
+
+### GET /api/v1/materials/{id}
+
+- **Permission**: `materials.view`. **Purpose**: one material (`404` when missing or of another tenant).
+
+### PATCH /api/v1/materials/{id}
+
+- **Permission**: `materials.edit` (TENANT). **Body** (strict, at least one): `name`, `description` (null clears), `supplier` (null clears),
+  `unit`. The unit is locked once the material has a cost version or linked usage (`409`, detail `material.unit_locked`). Archived: `409`.
+  Audit `material.update` (changed fields).
+
+### POST /api/v1/materials/{id}/archive
+
+- **Permission**: `materials.archive` (TENANT). **Body**: `{ reason? }`. **Purpose**: leaves the active catalog; a pending cost change is
+  CANCELLED with its approval request. History and costed usage stay; past usage can still be costed. `409` when already archived. Audit
+  `material.archive`.
+
+### GET /api/v1/materials/{id}/costs
+
+- **Permission**: `materials.view` + `cost` set (`403`). **Purpose**: the cost history, newest version first. Query: `status?`, `cursor`, `limit`.
+
+### POST /api/v1/materials/{id}/costs
+
+- **Permission**: `materials.create` (TENANT) + `cost` set. **Body** (strict): `unitCostMinor` (integer or decimal string), `currency` (ISO 4217,
+  required), `effectiveFrom` (ISO-8601 with offset), `note?`. **Answers** `201 { version, approvalRequired, approvalRequestId }`: with an active
+  `MATERIAL_COST_CHANGE` policy the version is PENDING_APPROVAL and an approval request is opened (the proposer is the requester and cannot
+  approve it; deciding goes through `/api/v1/approvals/{id}/decide` with the policy's permission, default `materials.approve`, at TENANT scope);
+  without a policy it is APPROVED at once. The version takes effect on `effectiveFrom`, whenever it is approved. **Errors**: `409
+  INVALID_STATE_TRANSITION` archived material; `409 CONFLICT` a version is already pending, `effectiveFrom` not after the current version's
+  start (`material.cost_not_after_current`), or a usage at/after `effectiveFrom` is already costed with the current version
+  (`material.cost_before_costed_usage`); `400` a currency no policy covers. The same placement check runs again at approval: if it fails then, the
+  decision answers `409` and nothing is stored (reject the request instead). Audit `material_cost_version.propose`, `.approved`, `.rejected`,
+  `.cancelled`. `Idempotency-Key` supported.
+
+### POST /api/v1/materials/{id}/costs/{versionId}/withdraw
+
+- **Permission**: `cost` set, and the proposer or `materials.create` (TENANT). **Body**: `{ reason }`. **Purpose**: PENDING_APPROVAL ->
+  CANCELLED; the approval request is cancelled. `409` when not pending.
+
+### GET /api/v1/materials/job-costs/{jobId}
+
+- **Permission**: `jobs.view` over the job + `cost` set. **Purpose**: the direct material cost of a job: `{ jobId, lines [...], totals
+  [{ currency, directMaterialCostMinor, costedLineCount }], lineCount, uncostedLineCount }`. Totals sum costed lines only; uncosted lines are
+  counted, never estimated.
+
+### POST /api/v1/materials/job-costs/{jobId}/cost
+
+- **Permission**: `jobs.view` over the job + `cost` set. **Body**: `{}`. **Purpose**: costs every uncosted line that resolves to a catalog
+  material (its link, or `materialRef` read as a code). **Answers** `{ results: [{ usageId, status: COSTED, line } | { usageId, status: SKIPPED,
+  code }], cost }`. Safe to repeat. Audit `job_material.costed` per line.
+
+### POST /api/v1/materials/usages/{usageId}/cost
+
+- **Permission**: `jobs.view` over the usage's job + `cost` set. **Body** (strict): `{ materialId? }` links an unlinked line first (`404` for a
+  material of another tenant, `409 material.usage_linked_elsewhere` when linked to another one). **Answers** the costed line; `409` with the
+  skip code when it cannot be costed.

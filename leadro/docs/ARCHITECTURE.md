@@ -48,6 +48,7 @@ in `src/`); tests may import internals when they need to.
 | Approvals | `approvals` | Phase 4: the generic approval engine: versioned policies (subject type, currency, amount band), requests that snapshot them, append-only decisions, single / dual approval, separation of duties, expiry sweep, the approver queue, and the subject registry (`registerApprovalSubject`) through which materials and finance subjects are called back |
 | Ledger (Phase 4) | `ledger` | the append-only ledger: the one idempotent posting / reversal path, derived balances and payment status per job / customer / legal entity |
 | Payments (Phase 4) | `payments` | payment records (manual, status changes), finance-confirmed revenue from outcomes, the `PaymentProvider` port (not configured) and the authenticated provider intake |
+| Materials | `materials` | Phase 4: the material catalog, versioned costs (proposed through the approval engine as `MATERIAL_COST_CHANGE`, effective on their date, never overlapping) and the costing of job material usage (frozen snapshot of the version in effect at usage time, half-even extended cost), direct material cost per job |
 
 Not built (spec 2.2 modules for later phases): performance, finance and compensation (blocked on an
 approved compensation spec, 28.4), automation, reporting, integrations, and every UI for the Phase 2
