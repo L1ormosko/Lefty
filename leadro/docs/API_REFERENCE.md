@@ -2665,6 +2665,84 @@ The three status changes share one description:
 - `200 { data: { configured: [] } }`: the provider keys this deployment accepts events from (empty: "not configured"). **Permission**:
   `finance_payments.view`.
 
+## Finance: reconciliation (`/api/v1/finance/reconciliation/**`) - Phase 4
+
+Code: `src/server/reconciliation` (README there), pure rules `src/lib/reconciliation-rules.ts`, routes
+`src/app/api/v1/finance/reconciliation/**`. Spec 5.7, 13.3, 25.4. Design decisions: `DECISIONS.md` "Phase 4 Task 6". The finance
+conventions above apply (money as decimal strings, ids and codes only, out of scope = audited `404`, no grant = `403`).
+
+- **Scope**: an exception belongs to the unit recorded at detection (`orgUnitId`, the job's service-area unit then); ORG_UNIT and
+  LEGAL_ENTITY scopes reach it through that unit; one without a unit (a provider event naming no job) needs TENANT scope. A run covers a
+  legal entity (or the tenant): only TENANT or that LEGAL_ENTITY scope sees it; unit-scoped managers see exceptions, never runs.
+- **Run** fields: `id, legalEntityId (null = whole tenant), coverage (TENANT | LEGAL_ENTITY), currency, periodStart, periodEnd, status
+  (RUNNING | COMPLETED | FAILED), jobsExamined, exceptionCount (findings of this run: new + still open), expectedMinor (sum billed),
+  recordedMinor (sum net collected), differenceMinor, startedById, startedAt, completedAt, failureReason (internal_error | abandoned)`.
+  Labels `FINANCE.RECONCILIATION.RUN.*`.
+- **Exception** fields: `id, runId (the run that raised it), kind, code, status (OPEN | ASSIGNED | RESOLVED), currency, jobId, paymentId,
+  intakeEventId, refundId, outcomeId, orgUnitId, expectedAmountMinor, recordedAmountMinor (both frozen at detection), moneyRedacted,
+  details (lastSeenRunId, lastSeenAt, latestExpectedMinor, latestRecordedMinor and kind-specific ids / codes), assignedToId, assignedAt,
+  resolvedById, resolvedAt, resolutionReason, createdAt, updatedAt`. Kinds: `UNPAID, PARTIAL_PAYMENT, OVERPAYMENT` (job: expected =
+  billed, recorded = net collected), `FAILED_PAYMENT` (paymentId), `DUPLICATE_EXTERNAL_EVENT, UNMATCHED_PROVIDER_EVENT` (intakeEventId),
+  `OUTCOME_LEDGER_MISMATCH` (outcomeId; expected = outcome charged, recorded = active CHARGE), `REFUND_WITHOUT_PAYMENT` (refundId; code
+  `refund_no_payment | refund_payment_not_received | refund_exceeds_payment`), `OTHER` with code `finance_confirmation_pending` (a SOLD
+  outcome finance has not confirmed; `details.chargePending`, `details.collectionPending`). Labels `FINANCE.RECONCILIATION.EXCEPTION.*`.
+- **Outcome money** (`OUTCOME_LEDGER_MISMATCH`, `finance_confirmation_pending`) is the technician's report: without the `job_outcomes`
+  `financial` set over the exception's unit the amounts are `null` and `moneyRedacted: true` (`FINANCE.RECONCILIATION.MONEY_REDACTED`).
+- Error detail codes: `FINANCE.ERROR.RECONCILIATION.*` (`reconciliation.period_empty`, `.period_too_long`, `.invalid_transition`,
+  `.exception_changed`, `.assignee_not_eligible`).
+
+### POST /api/v1/finance/reconciliation/runs
+- **Purpose**: reconcile one period of one currency, for one legal entity or the whole tenant, now (synchronous). **Permission**:
+  `finance_reconciliation.create` with TENANT or that LEGAL_ENTITY scope (unknown / out-of-scope entity `404`); a tenant-wide run needs
+  TENANT scope (`403`). Accepts `Idempotency-Key`.
+- **Body**: `{ legalEntityId?: string | null, currency, periodStart, periodEnd }` (ISO; `[start, end)`, at most 366 days).
+- **What it examines**: jobs with ledger activity in the period (by the entry's legal-entity snapshot; material cost excluded), a SOLD
+  outcome, a payment created / received / failed / voided, or a refund requested / posted in the period (by the job's current unit);
+  for each, expected vs recorded over ALL of its entries in the currency as the ledger knows them now. Also failed payments, refunds without
+  received money, outcome vs CHARGE, pending confirmations, DUPLICATE / UNMATCHED provider events received in the period.
+- **Re-runs**: a finding whose fingerprint (kind, code, currency, referenced records; not the amounts) matches an OPEN / ASSIGNED exception
+  is not raised again (its `details.lastSeenRunId` moves to the new run); one RESOLVED with the same amounts stays closed; changed
+  amounts after a resolution raise a new exception. Runs of one tenant never interleave (advisory lock).
+- **Response**: `201 { data: { run, findings: { created, alreadyOpen, acceptedEarlier } } }`. Errors: `400` period, `403`, `404`. A failure
+  leaves the run `FAILED internal_error` and answers `500`; a run left RUNNING over 15 minutes is closed `FAILED abandoned` by the next run
+  of the same entity and currency. Audit: `reconciliation_run.start`, `.complete`, `.fail`.
+
+### GET /api/v1/finance/reconciliation/runs
+- Runs the caller may see, newest first (`startedAt desc, id desc`). **Permission**: `finance_reconciliation.view`. **Query**: `cursor,
+  limit, legalEntityId, currency, status`. **Response**: `200 { data: [run], page }` (empty for unit-scoped callers).
+
+### GET /api/v1/finance/reconciliation/runs/{id}
+- One run plus `raised: { total, byKind, byStatus }` (exceptions it raised, visible to the caller, by their status now) and `alreadyOpen`
+  (its findings that were open from earlier runs). **Permission**: `finance_reconciliation.view` over the run.
+
+### GET /api/v1/finance/reconciliation/exceptions
+- Exceptions in scope, newest first (`createdAt desc, id desc`). **Permission**: `finance_reconciliation.view`. **Query**: `cursor, limit,
+  runId, jobId, kind, status, state (all | unresolved), assignedToId (a user id or me), currency`. **Response**: `200 { data: [exception], page }`.
+
+### GET /api/v1/finance/reconciliation/exceptions/{id}
+- One exception. **Permission**: `finance_reconciliation.view` over it.
+
+### POST /api/v1/finance/reconciliation/exceptions/{id}/assign
+- **Body**: `{ assignedToId, note? }`. OPEN -> ASSIGNED, or ASSIGNED to someone else; the same assignee again is a replay
+  (`replayed: true`). **Permission**: `finance_reconciliation.assign` over it. The assignee must hold `finance_reconciliation.edit` over
+  it (`400 reconciliation.assignee_not_eligible`). RESOLVED: `409 reconciliation.invalid_transition`. Audit
+  `reconciliation_exception.assign`. Accepts `Idempotency-Key`. **Response**: `200 { data: { replayed, exception } }`.
+
+### POST /api/v1/finance/reconciliation/exceptions/{id}/unassign
+- **Body**: `{ reason? }`. ASSIGNED -> OPEN (assignee cleared); OPEN is a replay. **Permission**: `finance_reconciliation.assign`.
+  Audit `reconciliation_exception.unassign`.
+
+### POST /api/v1/finance/reconciliation/exceptions/{id}/resolve
+- **Body**: `{ reason }` (required). OPEN | ASSIGNED -> RESOLVED (final), `resolvedById` = the caller. The same person with the same reason
+  again is a replay; anything else on a RESOLVED exception is `409`. A concurrent change is `409 reconciliation.exception_changed`.
+  **Permission**: `finance_reconciliation.edit` over it. Resolving moves no money (fix the cause with payments, reversals or adjustments).
+  Audit `reconciliation_exception.resolve`.
+
+### GET /api/v1/finance/reconciliation/summary
+- The work queue at a glance: `{ coverage (TENANT | SCOPE), unresolved: { <kind>: { open, assigned } } (every kind), unresolvedTotal,
+  oldestUnresolvedAt, latestRuns: [run] }` (the latest COMPLETED run per legal entity and currency the caller may see). Counts only.
+  **Permission**: `finance_reconciliation.view`. **Query**: `legalEntityId, currency`.
+
 ## Materials (`/api/v1/materials`) - Phase 4
 
 Code: `src/server/materials` (README there), routes `src/app/api/v1/materials/**`, pure rules `src/lib/material-cost-rules.ts`. Design decisions:
