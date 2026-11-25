@@ -25,6 +25,10 @@ export const NOTIFICATION_EVENTS = {
   // Lead recovery (§9.3): Lead Operations hear about a new case. Links to the case; the text carries only its number.
   "recovery.case_created": { templateKey: "NOTIFICATION.RECOVERY_CASE_CREATED", critical: false, targetType: "recovery_case", params: ["caseNumber"] },
   "recovery.case_assigned": { templateKey: "NOTIFICATION.RECOVERY_CASE_ASSIGNED", critical: false, targetType: "recovery_case", params: ["caseNumber"] },
+  // Approvals (§21.3): eligible approvers hear about a new request; the requester hears how it ended. No params: the text
+  // never carries the subject or the amount, the linked request shows them to whoever may still see it.
+  "approval.requested": { templateKey: "NOTIFICATION.APPROVAL_REQUESTED", critical: false, targetType: "approval_request", params: [] },
+  "approval.decided": { templateKey: "NOTIFICATION.APPROVAL_DECIDED", critical: false, targetType: "approval_request", params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
 } as const;
 
