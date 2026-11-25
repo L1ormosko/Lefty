@@ -1,6 +1,6 @@
 import { authenticateRequest } from "@/server/auth";
 import { requirePermission, requireTenantLevelPermission } from "@/server/authz";
-import { actorOf, created, defineRoute, ok, type Actor, type RequestContext } from "@/server/core";
+import { actorOf, created, defineRoute, respond, type Actor, type RequestContext } from "@/server/core";
 import { listReconciliationRuns, listRunsQuerySchema, startReconciliationRun, startRunSchema, type StartRunInput } from "@/server/reconciliation";
 
 /** GET /api/v1/finance/reconciliation/runs: runs the caller may see (TENANT / LEGAL_ENTITY scopes), newest first. */
@@ -8,7 +8,7 @@ export const GET = defineRoute({
   schemas: { query: listRunsQuerySchema },
   authenticate: authenticateRequest,
   authorize: requirePermission("finance_reconciliation.view"),
-  handler: async ({ ctx, input }) => ok(await listReconciliationRuns(actorOf(ctx), input.query)),
+  handler: async ({ ctx, input }) => respond(200, await listReconciliationRuns(actorOf(ctx), input.query)),
 });
 
 // A legal-entity run needs TENANT or that LEGAL_ENTITY scope (unknown / out-of-scope entity = 404); a tenant-wide run
