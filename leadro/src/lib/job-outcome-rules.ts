@@ -70,10 +70,10 @@ export const OUTCOMES_WITH_PAYMENT: readonly JobOutcomeTypeValue[] = ["SOLD"];
 export interface OutcomeFacts {
   outcome: JobOutcomeTypeValue;
   hasLostReason: boolean;
-  quotedAmountMinor?: number | null;
-  approvedAmountMinor?: number | null;
-  chargedAmountMinor?: number | null;
-  collectedAmountMinor?: number | null;
+  quotedAmountMinor?: bigint | null;
+  approvedAmountMinor?: bigint | null;
+  chargedAmountMinor?: bigint | null;
+  collectedAmountMinor?: bigint | null;
   paymentMethod?: string | null;
   paymentStatus?: string | null;
 }

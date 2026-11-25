@@ -17,7 +17,7 @@ const facts = (overrides: Partial<CompletionFacts> = {}): CompletionFacts => ({
   followUpRequired: undefined,
   ...overrides,
 });
-const sold = { type: "SOLD", quotedAmountMinor: null, approvedAmountMinor: null, chargedAmountMinor: 100, collectedAmountMinor: null, paymentMethod: null };
+const sold = { type: "SOLD", quotedAmountMinor: null, approvedAmountMinor: null, chargedAmountMinor: 100n, collectedAmountMinor: null, paymentMethod: null };
 
 describe("formSchemaProblems", () => {
   it("accepts a valid schema and reports each kind of problem with its path", () => {

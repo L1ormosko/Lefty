@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { moneyAmountSchema } from "@/lib/money";
 import { JOB_OUTCOME_TYPES } from "@/lib/job-outcome-rules";
 import { pageQuerySchema } from "@/server/core";
 
@@ -8,7 +9,7 @@ const id = z.string().trim().min(1).max(64);
 const text = (max: number) => z.string().trim().min(1).max(max);
 const instant = z.string().datetime({ offset: true }).transform((value) => new Date(value));
 /** §11.8: money is integer minor units, never a float. */
-const money = z.number().int().min(0).max(2_000_000_000);
+const money = moneyAmountSchema;
 const currency = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "ISO 4217 code");
 
 export const outcomeTypeSchema = z.enum(JOB_OUTCOME_TYPES);

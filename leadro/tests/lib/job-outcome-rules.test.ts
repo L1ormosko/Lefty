@@ -41,7 +41,7 @@ describe("outcomeProblem", () => {
   it("requires a lost reason for NOT_SOLD and WORK_NOT_POSSIBLE", () => {
     expect(outcomeProblem({ outcome: "NOT_SOLD", hasLostReason: false })).toEqual({ code: "LOST_REASON_REQUIRED", field: "lostReasonId" });
     expect(outcomeProblem({ outcome: "WORK_NOT_POSSIBLE", hasLostReason: false })?.code).toBe("LOST_REASON_REQUIRED");
-    expect(outcomeProblem({ outcome: "NOT_SOLD", hasLostReason: true, quotedAmountMinor: 5000 })).toBeNull();
+    expect(outcomeProblem({ outcome: "NOT_SOLD", hasLostReason: true, quotedAmountMinor: 5000n })).toBeNull();
   });
 
   it("forbids a lost reason on a sale", () => {
@@ -50,15 +50,15 @@ describe("outcomeProblem", () => {
   });
 
   it("allows sale money and payment only on a sale", () => {
-    expect(outcomeProblem({ outcome: "NOT_SOLD", hasLostReason: true, chargedAmountMinor: 1 })?.code).toBe("AMOUNTS_NOT_APPLICABLE");
+    expect(outcomeProblem({ outcome: "NOT_SOLD", hasLostReason: true, chargedAmountMinor: 1n })?.code).toBe("AMOUNTS_NOT_APPLICABLE");
     expect(outcomeProblem({ outcome: "CUSTOMER_UNAVAILABLE", hasLostReason: false, paymentMethod: "CASH" })?.code).toBe("PAYMENT_NOT_APPLICABLE");
-    expect(outcomeProblem({ outcome: "CUSTOMER_UNAVAILABLE", hasLostReason: false, quotedAmountMinor: 100 })).toBeNull();
+    expect(outcomeProblem({ outcome: "CUSTOMER_UNAVAILABLE", hasLostReason: false, quotedAmountMinor: 100n })).toBeNull();
   });
 
   it("needs a collected amount and a method once a payment is partial or paid", () => {
     expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PAID" })?.code).toBe("PAYMENT_NEEDS_COLLECTED_AMOUNT");
-    expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PAID", collectedAmountMinor: 100 })?.code).toBe("PAYMENT_NEEDS_COLLECTED_AMOUNT");
-    expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PAID", collectedAmountMinor: 100, paymentMethod: "CARD", chargedAmountMinor: 100 })).toBeNull();
-    expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PENDING", chargedAmountMinor: 100 })).toBeNull();
+    expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PAID", collectedAmountMinor: 100n })?.code).toBe("PAYMENT_NEEDS_COLLECTED_AMOUNT");
+    expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PAID", collectedAmountMinor: 100n, paymentMethod: "CARD", chargedAmountMinor: 100n })).toBeNull();
+    expect(outcomeProblem({ outcome: "SOLD", hasLostReason: false, paymentStatus: "PENDING", chargedAmountMinor: 100n })).toBeNull();
   });
 });

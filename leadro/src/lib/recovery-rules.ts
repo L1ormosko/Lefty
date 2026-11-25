@@ -145,7 +145,7 @@ export interface RecoveryFacts {
   lostReasonRecoverable: boolean | null;
   jobTypeId: string;
   /** Quoted value of the visit (null = unknown). A condition on value never matches an unknown value. */
-  valueMinor: number | null;
+  valueMinor: bigint | null;
   presence: PresenceValue;
   customerRequestedFollowUp: boolean;
 }
@@ -172,8 +172,8 @@ export function matchConditions(conditions: RuleConditions, facts: RecoveryFacts
   if (conditions.lostReasonIds) check("lostReasonIds", facts.lostReasonId !== null && conditions.lostReasonIds.includes(facts.lostReasonId), conditions.lostReasonIds, facts.lostReasonId);
   if (conditions.jobTypeIds) check("jobTypeIds", conditions.jobTypeIds.includes(facts.jobTypeId), conditions.jobTypeIds, facts.jobTypeId);
   if (conditions.presence) check("presence", conditions.presence.includes(facts.presence), conditions.presence, facts.presence);
-  if (conditions.minValueMinor !== undefined) check("minValueMinor", facts.valueMinor !== null && facts.valueMinor >= conditions.minValueMinor, conditions.minValueMinor, facts.valueMinor);
-  if (conditions.maxValueMinor !== undefined) check("maxValueMinor", facts.valueMinor !== null && facts.valueMinor <= conditions.maxValueMinor, conditions.maxValueMinor, facts.valueMinor);
+  if (conditions.minValueMinor !== undefined) check("minValueMinor", facts.valueMinor !== null && facts.valueMinor >= BigInt(conditions.minValueMinor), conditions.minValueMinor, facts.valueMinor);
+  if (conditions.maxValueMinor !== undefined) check("maxValueMinor", facts.valueMinor !== null && facts.valueMinor <= BigInt(conditions.maxValueMinor), conditions.maxValueMinor, facts.valueMinor);
   if (conditions.recoverableReason !== undefined) {
     check("recoverableReason", facts.lostReasonRecoverable !== null && facts.lostReasonRecoverable === conditions.recoverableReason, conditions.recoverableReason, facts.lostReasonRecoverable);
   }

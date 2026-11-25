@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { moneyAmountSchema } from "@/lib/money";
 import { isValidTimeZone } from "@/lib/i18n";
 import { JOB_STATUSES } from "@/lib/job-lifecycle";
 import { pageQuerySchema } from "@/server/core";
@@ -13,7 +14,7 @@ const timeZone = z.string().trim().min(1).max(64).refine(isValidTimeZone, "Not a
 const priority = z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]);
 const currency = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "ISO 4217 code");
 const duration = z.number().int().min(5).max(24 * 60);
-const money = z.number().int().min(0).max(2_000_000_000);
+const money = moneyAmountSchema;
 
 const span = z
   .object({ start: instant, end: instant })

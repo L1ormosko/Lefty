@@ -370,8 +370,8 @@ export async function recoverySummary(actor: Actor, query: SummaryQuery): Promis
     });
     return {
       casesByStatus: Object.fromEntries(byStatus.map((entry) => [entry.status, entry._count._all])),
-      confirmed: confirmed.map((entry) => ({ currency: entry.currency, cases: entry._count._all, recoveredAmountMinor: entry._sum.recoveredAmountMinor ?? 0, collectedAmountMinor: entry._sum.collectedAmountMinor ?? 0 })),
-      estimated: estimated.map((entry) => ({ currency: entry.currency, openCases: entry._count._all, estimatedValueMinor: entry._sum.estimatedValueMinor ?? 0 })),
+      confirmed: confirmed.map((entry) => ({ currency: entry.currency, cases: entry._count._all, recoveredAmountMinor: entry._sum.recoveredAmountMinor ?? 0, collectedAmountMinor: entry._sum.collectedAmountMinor ?? 0n })),
+      estimated: estimated.map((entry) => ({ currency: entry.currency, openCases: entry._count._all, estimatedValueMinor: entry._sum.estimatedValueMinor ?? 0n })),
     };
   });
 }

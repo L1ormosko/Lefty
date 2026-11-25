@@ -1,4 +1,5 @@
 import type { z, ZodTypeAny } from "zod";
+import { stringifyJson } from "@/lib/money";
 import { logger, type Logger } from "@/server/logging";
 import type { Actor, RequestContext, SourceApp } from "./context";
 import { CORRELATION_HEADER, resolveCorrelationId } from "./correlation";
@@ -103,7 +104,9 @@ function buildResponse(result: RouteResult, correlationId: string, extraHeaders?
   if (result.status === 204 || result.body === null || result.body === undefined) {
     return new Response(null, { status: result.status, headers });
   }
-  return Response.json(result.body, { status: result.status, headers });
+  headers.set("content-type", "application/json");
+  // Money is a bigint in server code and a decimal string on the wire (docs/API_CONVENTIONS.md "Money").
+  return new Response(stringifyJson(result.body), { status: result.status, headers });
 }
 
 function parseWith(schema: ZodTypeAny | undefined, value: unknown, source: string): unknown {

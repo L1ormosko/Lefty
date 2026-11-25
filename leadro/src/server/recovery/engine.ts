@@ -49,7 +49,7 @@ interface OutcomeContext {
   outcome: string;
   lostReasonId: string | null;
   lostReasonRecoverable: boolean | null;
-  valueMinor: number | null;
+  valueMinor: bigint | null;
   currency: string;
   customerRequestedFollowUp: boolean;
   occurredAt: Date;

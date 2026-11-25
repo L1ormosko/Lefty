@@ -7,7 +7,7 @@ const facts: RecoveryFacts = {
   lostReasonId: "r1",
   lostReasonRecoverable: true,
   jobTypeId: "t1",
-  valueMinor: 150_000,
+  valueMinor: 150_000n,
   presence: "AT_LOCATION",
   customerRequestedFollowUp: false,
 };

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { withTenant } from "@/server/db";
+import { serializeJson } from "@/lib/money";
 import { logger } from "@/server/logging";
 import { ConflictError, ValidationError } from "./errors";
 
@@ -36,6 +37,7 @@ export interface IdempotentOutcome extends IdempotentResponse {
 /** JSON with object keys sorted, so `{a,b}` and `{b,a}` hash identically. */
 function canonicalJson(value: unknown): string {
   if (value === undefined) return "null";
+  if (typeof value === "bigint") return JSON.stringify(value.toString());
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const entries = Object.entries(value as Record<string, unknown>)
@@ -156,7 +158,7 @@ async function storeResponse(tenantId: string, recordId: string, response: Idemp
       data: {
         responseStatus: response.status,
         // Prisma rejects a plain null for Json columns; an empty body is stored as JSON null.
-        responseBody: response.body == null ? Prisma.JsonNull : (response.body as Prisma.InputJsonValue),
+        responseBody: response.body == null ? Prisma.JsonNull : (serializeJson(response.body) as Prisma.InputJsonValue),
         expiresAt: new Date(Date.now() + IDEMPOTENCY_RETENTION_MS),
       },
     }),
