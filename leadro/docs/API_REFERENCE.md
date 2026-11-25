@@ -2450,3 +2450,79 @@ Free text appears only in the record itself; events, audit and the offline log c
   in the order sent (`index`); `sequence` is the order applied. `status`: `ACCEPTED` (applied; `result` = what the endpoint would answer), `REPLAYED` (already applied earlier, same answer), `REJECTED` (a verdict on the content is remembered: send a corrected event with a new id; with `retryable: true` it was caused by order or configuration, is NOT remembered and the same event may be sent again once the earlier events synced),
   `CONFLICT` (the id was used for different content, or the module refused with a conflict), `FORBIDDEN` (not allowed or not visible; not remembered; retryable only for a job not yet visible to the caller), `UNSUPPORTED`, `FAILED` (server problem, `retryable: true`). Labels `FIELD.SYNC.STATUS.*`.
 - **Errors** (whole request): `400` malformed batch (empty, over 100 events, bad ids / times / type), `401`, `403` caller is not an employee. Sending the same batch again is safe.
+
+## Approvals (`/api/v1/approvals`) - Phase 4
+
+Code: `src/server/approvals` (README there), routes `src/app/api/v1/approvals/**`, pure rules `src/lib/approval-rules.ts`. Design decisions:
+`DECISIONS.md` "Phase 4 Task 3". One generic engine decides material cost changes, refunds, adjustments and chargeback write-offs (§21.3, §11.5);
+the subject modules open requests inside their own transaction (`createApprovalRequestInTx`) and are called back when a request ends. There is no
+endpoint that creates a request: a request is always a side effect of the change that needs it.
+
+**Who sees a request**: every endpoint needs `approvals.view`. Beyond it a request is visible to its requester, to an *eligible approver* (holds
+the policy's `approverPermission`, e.g. `finance_refunds.approve`, over the request's org unit), and to an *overseer* (`approvals.manage` over the
+unit). Anything else is `404`. The unit is snapshotted from the subject at creation (`orgUnitId`; null = tenant-level, TENANT scope only).
+`amountMinor`, `currency` and `details` are shown only to the requester and to eligible approvers; an overseer gets `moneyRedacted: true` and no
+amount fields.
+
+**Request fields** (`ApprovalRequest`): `id, subjectType (MATERIAL_COST_CHANGE | ADJUSTMENT | REFUND | CHARGEBACK_WRITE_OFF | HIGH_VALUE_DISCOUNT),
+subjectId, status (PENDING | APPROVED | REJECTED | CANCELLED | EXPIRED), policyId, policyCode, policyVersion, requiredApprovals (1 | 2),
+approverPermission, amountMinor (decimal string), currency, details (ids, codes and amounts only), jobId, customerId, orgUnitId, reason,
+requestedById (null = system), excludedApproverIds, requestedAt, expiresAt, decidedAt, cancelledAt, cancelledById, cancelReason`, derived
+`approvalCount`, `decisions [{ deciderId, decision, comment, decidedAt }]`, `viewer { isRequester, canDecide, canCancel, myDecision }`,
+`moneyRedacted`. Labels: `APPROVAL.STATUS.*`, `APPROVAL.SUBJECT.*`, `APPROVAL.DECISION.*`.
+
+**Separation of duties**: the requester and everyone in `excludedApproverIds` (the subject's editors / submitters, set by the subject module) can
+never decide (`403`, audited as `approval_request.decide` with outcome `DENIED`; a database trigger refuses it too). Each person decides once.
+**Dual approval**: `requiredApprovals: 2` needs two different people; any rejection ends the request. **Expiry**: a request past `expiresAt` leaves
+the queue at once; deciding or cancelling it marks it EXPIRED and answers `409`; the worker sweep `expireDueApprovalRequestsForAllTenants()` expires
+the rest. Notifications: `approval.requested` to eligible approvers in scope, `approval.decided` to the requester (no params, link to the request).
+
+### GET /api/v1/approvals/queue
+
+- **Permission**: `approvals.view`. **Purpose**: PENDING, unexpired requests the caller can decide now (approver permission over the unit, not the
+  requester, not excluded, not yet decided by them), oldest first. Query: `subjectType?`, `cursor`, `limit`.
+
+### GET /api/v1/approvals/mine
+
+- **Permission**: `approvals.view`. **Purpose**: the caller's own requests, newest first. Query: `status?`, `subjectType?`, `cursor`, `limit`.
+
+### GET /api/v1/approvals
+
+- **Permission**: `approvals.view` + `approvals.manage` (scope-filtered). **Purpose**: oversight list, newest first. Query: `status?`,
+  `subjectType?`, `subjectId?`, `cursor`, `limit`.
+
+### GET /api/v1/approvals/{id}
+
+- **Permission**: `approvals.view` and one of requester / eligible approver / overseer (`404` otherwise). **Purpose**: one request with its decisions.
+
+### POST /api/v1/approvals/{id}/decide
+
+- **Permission**: `approvals.view` plus the request's `approverPermission` over its unit (`403` without the grant, `404` outside its scope), not the
+  requester or an excluded editor (`403`). **Body** (strict): `decision: APPROVE | REJECT`, `comment?` (required for REJECT, max 2000).
+  `Idempotency-Key` supported. **Answers** the request as the caller now sees it. The final decision runs the subject's callback in the same
+  transaction (the subject moves on, or nothing is stored). **Errors**: `409 CONFLICT` already decided by the caller;
+  `409 INVALID_STATE_TRANSITION` not pending or expired. Audit: `approval_request.decide` per decision, then `approval_request.approved` / `.rejected`.
+
+### POST /api/v1/approvals/{id}/cancel
+
+- **Permission**: `approvals.view`; the requester or `approvals.manage` over the unit (`403` otherwise). **Body**: `{ reason }` (max 500).
+  **Purpose**: PENDING -> CANCELLED; the subject is told (`onRejected`, outcome CANCELLED). `409` when no longer pending. Audit `approval_request.cancelled`.
+
+### GET /api/v1/approvals/policies
+
+- **Permission**: `approvals.configure` (tenant-level). **Purpose**: policies, active versions by default (`activeOnly=false` for history). Query:
+  `subjectType?`, `code?`. Fields: `id, code, subjectType, name, version, active, currency, minAmountMinor, maxAmountMinor, requiredApprovals,
+  approverPermission, expiresAfterHours, createdById, createdAt, updatedAt`.
+
+### POST /api/v1/approvals/policies
+
+- **Permission**: `approvals.configure` (tenant-level). **Body** (strict): `code` (`[a-z0-9][a-z0-9_.-]*`), `subjectType`, `name`, `currency`
+  (default USD), `minAmountMinor` (default 0), `maxAmountMinor` (null = open), `requiredApprovals` (1 | 2), `approverPermission` (a catalog
+  `*.approve` key), `expiresAfterHours` (null = never). An existing `code` becomes version + 1 and the previous version is deactivated (same subject
+  type required, `400` otherwise). A band overlapping another active policy of the subject type and currency is `409`. Pending requests keep the
+  version they were made with. Audit `approval_policy.create` / `.new_version`.
+
+### POST /api/v1/approvals/policies/{id}/deactivate
+
+- **Permission**: `approvals.configure` (tenant-level). **Body**: `{ reason }`. **Purpose**: the version stops applying to new requests; `409` when
+  not active. Audit `approval_policy.deactivate`.

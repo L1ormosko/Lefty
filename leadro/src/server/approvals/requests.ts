@@ -176,7 +176,7 @@ export async function cancelApprovalForSubjectInTx(
   if (claim.count !== 1) return null;
   await recordAudit(tx, {
     ...systemAuditFields(input.tenantId, ctx),
-    action: "approval_request.cancel",
+    action: "approval_request.cancelled",
     targetType: "ApprovalRequest",
     targetId: pending.id,
     previousValue: { status: "PENDING" },
