@@ -18,6 +18,9 @@ const TENANT_OWNED_TABLES = [
   "Shift", "LocationEvent", "ArrivalVerification", "FieldEvent", "JobCompletionFormDefinition", "JobCompletion",
   "JobMaterialUsage", "JobFieldNote", "JobAttachment", "LostReason", "JobOutcome", "RecoveryRule", "LeadRecoveryCase",
   "RecoveryCaseStatusHistory", "RecoveryAttempt", "FollowUpTask", "RecoveryRuleRun",
+  // Phase 4 financial core (13)
+  "Material", "MaterialCostVersion", "LedgerEntry", "Payment", "Refund", "Chargeback", "Adjustment", "ApprovalPolicy",
+  "ApprovalRequest", "ApprovalDecision", "ReconciliationRun", "ReconciliationException", "PaymentIntakeEvent",
 ];
 
 let A: { id: string };

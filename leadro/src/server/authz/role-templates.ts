@@ -133,6 +133,16 @@ const unitManagerGrants = (): TemplateGrant[] => [
   ...view("completion_forms"),
   ...view("recovery"),
   ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
+  // Phase 4: scoped, mostly read-only finance for the unit. They request refunds and adjustments (a finance approver decides)
+  // and see reconciliation and the approval queue, but cannot record payments, decide, export or see material costs.
+  ...view("materials"),
+  ...view("finance_ledger"),
+  ...view("finance_payments"),
+  ...grantActions("finance_refunds", ["VIEW", "CREATE"]),
+  ...view("finance_chargebacks"),
+  ...grantActions("finance_adjustments", ["VIEW", "CREATE"]),
+  ...view("finance_reconciliation"),
+  ...view("approvals"),
 ];
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
@@ -171,6 +181,16 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...full("completion_forms"),
       ...full("recovery"),
       ...full("follow_ups"),
+      // Phase 4: the COO runs the material catalog (including costs and approving cost changes) and oversees finance
+      // read-only; money movements and their approval belong to the Finance Director.
+      ...full("materials", { includeFields: ["cost"] }),
+      ...view("finance_ledger"),
+      ...view("finance_payments"),
+      ...view("finance_refunds"),
+      ...view("finance_chargebacks"),
+      ...view("finance_adjustments"),
+      ...view("finance_reconciliation"),
+      ...grantActions("approvals", ["VIEW", "MANAGE"]),
       ...own("notifications"),
       ...view("compensation"),
       ...view("financial_reports"),
@@ -195,6 +215,17 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...own("notifications"),
       ...full("compensation"),
       ...full("financial_reports"),
+      // Phase 4: full finance (ledger, payments, refunds, chargebacks, adjustments, reconciliation, approval policies) and the
+      // material catalog's costs. Deliberately NO dispatch, jobs.edit or employees.edit: Finance does not gain operational
+      // permissions (spec 26.3), and `materials` is view + approve only, never catalog editing.
+      ...full("finance_ledger"),
+      ...full("finance_payments"),
+      ...full("finance_refunds"),
+      ...full("finance_chargebacks"),
+      ...full("finance_adjustments"),
+      ...full("finance_reconciliation"),
+      ...grantActions("materials", ["VIEW", "APPROVE", "EXPORT"], { includeFields: ["cost"] }),
+      ...full("approvals"),
     ],
   }),
   defineTemplate({
@@ -239,6 +270,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("job_outcomes"),
       ...view("completion_forms"),
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
+      ...view("materials"),
     ],
   }),
   defineTemplate({
@@ -284,6 +316,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("job_outcomes"),
       ...view("completion_forms"),
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
+      ...view("materials"),
     ],
   }),
   defineTemplate({
@@ -351,6 +384,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...grantActions("job_outcomes", ["VIEW", "CREATE"], { includeFields: ["financial"] }),
       ...view("completion_forms"),
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
+      // Phase 4: the material names and units to pick from when recording usage; never costs.
+      ...view("materials"),
     ],
   }),
 ];
