@@ -181,9 +181,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...full("completion_forms"),
       ...full("recovery"),
       ...full("follow_ups"),
-      // Phase 4: the COO runs the material catalog (including costs and approving cost changes) and oversees finance
-      // read-only; money movements and their approval belong to the Finance Director.
-      ...full("materials", { includeFields: ["cost"] }),
+      // Phase 4: the COO maintains the material catalog (no costs: the `cost` set is Owner / Finance only, like every other
+      // sensitive field set) and oversees finance read-only; money movements and their approval belong to the Finance Director.
+      ...grantActions("materials", ["VIEW", "CREATE", "EDIT", "ARCHIVE"]),
       ...view("finance_ledger"),
       ...view("finance_payments"),
       ...view("finance_refunds"),

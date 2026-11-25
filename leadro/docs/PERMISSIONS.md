@@ -374,7 +374,7 @@ Defaults (templates in `role-templates.ts`; a tenant edits its own copy afterwar
 
 | Module | Owner | COO | Finance Director | State / Regional / City Mgr | Team Leader, Dispatcher, Technician | Others |
 |---|---|---|---|---|---|---|
-| `materials` | full + `cost` set | full + `cost` set | view, approve, export + `cost` set (no catalog editing) | view (no costs) | view (no costs) | - |
+| `materials` | full + `cost` set | view, create, edit, archive (no costs, no approve) | view, approve, export + `cost` set (no catalog editing) | view (no costs) | view (no costs) | - |
 | `finance_ledger` | full | view | full | view (scope) | - | - |
 | `finance_payments` | full | view | full | view (scope) | - | - |
 | `finance_refunds` | full | view | full | view, create (request) | - | - |
