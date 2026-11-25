@@ -12,8 +12,8 @@ export { decisionHoldsFinancial, holdsOutcomeFinancialSet } from "./financial";
 export { listLostReasons, getLostReason, createLostReason, updateLostReason } from "./lost-reasons";
 
 // The domain event the recovery engine subscribes to, and notification wiring
-export { onJobOutcomeRecorded, resetJobOutcomeHandlers } from "./events";
-export type { OutcomeRecordedEvent, OutcomeRecordedHandler } from "./events";
+export { onJobOutcomeRecorded, resetJobOutcomeHandlers, onJobOutcomeCorrected, resetOutcomeCorrectedHandlers } from "./events";
+export type { OutcomeRecordedEvent, OutcomeRecordedHandler, OutcomeCorrectedEvent, OutcomeCorrectedHandler } from "./events";
 export { registerJobOutcomeNotificationTarget, outcomeResourceRef } from "./notify";
 
 export {

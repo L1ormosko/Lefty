@@ -49,3 +49,38 @@ export function resetJobOutcomeHandlers(): void {
 export async function publishOutcomeRecorded(tx: TenantTx, event: OutcomeRecordedEvent): Promise<void> {
   for (const handler of handlers.values()) await handler(tx, event);
 }
+
+/**
+ * The domain event "a recorded outcome was corrected" (§9.1, §25.4), published INSIDE the correcting transaction. The finance
+ * module subscribes to flag a correction of an outcome whose money was already posted (the ledger is never rewritten; finance
+ * decides on an adjustment). `jobEventId` (the `job.outcome_corrected` event row) identifies the correction.
+ * Payload: ids and field NAMES only, never money or free text.
+ */
+export interface OutcomeCorrectedEvent {
+  tenantId: string;
+  jobId: string;
+  outcomeId: string;
+  jobEventId: string;
+  changedFields: string[];
+  actorUserId: string;
+}
+
+export type OutcomeCorrectedHandler = (tx: TenantTx, event: OutcomeCorrectedEvent) => Promise<void>;
+
+const globalForCorrections = globalThis as unknown as { leadroOutcomeCorrectedHandlers?: Map<string, OutcomeCorrectedHandler> };
+const correctionHandlers: Map<string, OutcomeCorrectedHandler> = (globalForCorrections.leadroOutcomeCorrectedHandlers ??= new Map<string, OutcomeCorrectedHandler>());
+
+/** Subscribes `handler` once per `name` (re-registering replaces it). A throwing handler aborts the correction. */
+export function onJobOutcomeCorrected(name: string, handler: OutcomeCorrectedHandler): void {
+  correctionHandlers.set(name, handler);
+}
+
+/** Test hook: forget one correction subscriber (or all). */
+export function resetOutcomeCorrectedHandlers(name?: string): void {
+  if (name) correctionHandlers.delete(name);
+  else correctionHandlers.clear();
+}
+
+export async function publishOutcomeCorrected(tx: TenantTx, event: OutcomeCorrectedEvent): Promise<void> {
+  for (const handler of correctionHandlers.values()) await handler(tx, event);
+}

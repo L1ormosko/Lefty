@@ -19,6 +19,7 @@ import { recordJobEvent, recordStatusHistory, type TrailActor } from "./events";
 import { loadJobAccessFacts, lockJob, jobResourceRef } from "./job-access";
 import { notifyJobEmployees } from "./notify";
 import { viewJobAfterWrite } from "./read";
+import { publishJobStatusChanged } from "./status-events";
 import type { TransitionJobInput } from "./schemas";
 import { loadDisabledTransitions } from "./settings";
 
@@ -174,7 +175,7 @@ export async function changeJobStatus(
   }
 
   const trailActor: TrailActor = options.automatic ? null : actor;
-  await recordStatusHistory(tx, tenantId, job.id, { from: job.status, to, actor: trailActor, reason, occurredAt: changedAt });
+  const statusHistoryId = await recordStatusHistory(tx, tenantId, job.id, { from: job.status, to, actor: trailActor, reason, occurredAt: changedAt });
   await recordJobEvent(tx, tenantId, job.id, { type: "job.status_changed", actor: trailActor, payload: { from: job.status, to } });
   await recordAudit(tx, {
     ...audit,
@@ -184,6 +185,15 @@ export async function changeJobStatus(
     previousValue: { status: job.status },
     newValue: { status: to },
     reason: reason ?? undefined,
+  });
+  await publishJobStatusChanged(tx, {
+    tenantId,
+    jobId: job.id,
+    from: job.status,
+    to,
+    statusHistoryId,
+    startedNextVisit: startsNextVisit && currentVisitHasOutcome,
+    actorUserId: trailActor?.userId ?? null,
   });
   return { from: job.status, to, releasedEmployeeIds };
 }

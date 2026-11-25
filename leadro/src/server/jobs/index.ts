@@ -20,6 +20,8 @@ export { assignedEmployeeIdsByJob, jobResourceRef, resolveJobListAccess } from "
 export { registerJobNotificationTarget } from "./notify";
 export { assignJobInTx, lockJob } from "./dispatch-port";
 export { changeJobStatus, loadJobForChange, recordJobEvent } from "./field-port";
+export { onJobStatusChanged, resetJobStatusHandlers } from "./status-events";
+export type { JobStatusChangedEvent, JobStatusChangedHandler } from "./status-events";
 export type { JobForChange, StatusChangeOptions, StatusChangeResult } from "./field-port";
 export type { AssignmentProvenance } from "./dispatch-port";
 
