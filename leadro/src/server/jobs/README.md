@@ -40,3 +40,5 @@ Invariants:
   AWAITING_REVIEW: that is rework of the same visit). `field-port.ts` (`changeJobStatus`, `loadJobForChange`,
   `recordJobEvent`) is what field-execution modules use; the `job-outcomes` module applies a visit outcome's status change through it
   (outcome > status mapping: `src/lib/job-outcome-rules.ts`). Technicians do not call `transition` for these steps.
+- Phase 4: `changeJobStatus` publishes `onJobStatusChanged` (`status-events.ts`, ids and statuses only, inside the transaction); the finance
+  module flags a job reopened after money was posted. A throwing subscriber aborts the status change.

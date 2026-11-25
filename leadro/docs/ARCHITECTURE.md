@@ -49,6 +49,7 @@ in `src/`); tests may import internals when they need to.
 | Ledger (Phase 4) | `ledger` | the append-only ledger: the one idempotent posting / reversal path, derived balances and payment status per job / customer / legal entity |
 | Payments (Phase 4) | `payments` | payment records (manual, status changes), finance-confirmed revenue from outcomes, the `PaymentProvider` port (not configured) and the authenticated provider intake |
 | Materials | `materials` | Phase 4: the material catalog, versioned costs (proposed through the approval engine as `MATERIAL_COST_CHANGE`, effective on their date, never overlapping) and the costing of job material usage (frozen snapshot of the version in effect at usage time, half-even extended cost), direct material cost per job |
+| Finance corrections (Phase 4) | `finance-adjustments` | refunds against received payments, chargebacks (manual and provider intake, dispute, write-off), adjustments of what a customer owes, all with approval per policy and ledger postings / reversals; finance review flags (raised once per triggering event: reopened job, corrected outcome, refund paid out, chargeback opened) and their assign / resolve workflow |
 
 Not built (spec 2.2 modules for later phases): performance, finance and compensation (blocked on an
 approved compensation spec, 28.4), automation, reporting, integrations, and every UI for the Phase 2
@@ -66,7 +67,7 @@ separately, so a module-level Map would be filled in one bundle and empty in the
 registries therefore live on `globalThis` (same pattern as the Prisma client): the notification
 target resolvers (`notifications/target-access.ts`), the outcome-recorded handlers
 (`job-outcomes/events.ts`) and the follow-up target access (`follow-ups/targets.ts`; the unregistered
-recovery-case default fails closed). The approval subject handlers (`approvals/registry.ts`) follow the same pattern. `src/server/notification-targets.ts` is the one place that
+recovery-case default fails closed). The approval subject handlers (`approvals/registry.ts`), the job status-change handlers (`jobs/status-events.ts`), the outcome-corrected handlers (`job-outcomes/events.ts`) and the provider intake event handlers (`payments/intake-handlers.ts`) follow the same pattern. `src/server/notification-targets.ts` is the one place that
 registers them at start-up (called from `src/instrumentation.ts` and the notifications route).
 
 **Shared offline gate.** Every technician write that can arrive late from a device (shifts, location

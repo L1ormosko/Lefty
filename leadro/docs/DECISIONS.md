@@ -1091,3 +1091,69 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
   uncosted line is reported as such (never estimated). The unit of a material is locked once it has a version or linked usage.
 - **Not done here**: posting `MATERIAL_COST` ledger entries (`LedgerEntry.materialUsageId`) belongs to the ledger service (Task 4, parallel);
   the snapshot columns are what such a posting would read. No `materials.export` endpoint yet (no export framework exists).
+
+## Phase 4 Task 5: refunds, chargebacks, adjustments, finance review flags
+
+Module `src/server/finance-adjustments` (one module: the three record types share the payment lock, the approval wiring and the flags).
+
+- **Money moves on the real event, not on approval.** A refund is APPROVED (by policy or because none applies) and only POSTED when finance
+  says it was paid out (`/complete`): that transaction posts the REFUND entry (`refund:<id>:posted`). The payment must still be RECEIVED at
+  that moment (a payment voided after approval is `409 refund.payment_not_received`; cancel the refund). An adjustment moves no outside money,
+  so approved = posted in the same transaction (`adjustment:<id>:posted`, the deciding approver is the ledger actor). A chargeback posts its
+  CHARGEBACK entry when it OPENS (the processor debits the funds then); WON posts the REVERSAL of that entry (`chargeback:<id>:won`); LOST
+  moves no money. Cost if the owner wants refunds posted at approval: call `completeRefund`'s posting from the approval callback.
+- **Write-off = a system adjustment.** Writing a lost chargeback off posts an Adjustment of minus its amount (`reasonCode
+  chargeback_write_off`, `Adjustment.idempotencyKey = chargeback:<id>:write_off`, `approvalRequestId` = the write-off request, requester = the
+  write-off requester), so billed drops by exactly what was lost and the job's outstanding returns to where it was before the chargeback.
+  No schema link from the adjustment to the chargeback exists; the key and the audit (`chargeback.written_off` with `adjustmentId`) carry it.
+  The approval callback reads the request's `requestedById` / `reason` from `ApprovalRequest` directly (the engine's own record of who asked).
+- **Over-return guard.** Refunds holding a payment (REQUESTED, PENDING_APPROVAL, APPROVED, POSTED) plus chargebacks not WON may never exceed
+  the payment on the manual paths (`refund.exceeds_payment`, `chargeback.exceeds_payment`), checked under `SELECT ... FOR UPDATE` on the payment
+  row (concurrent requests queue). A PROVIDER chargeback is never refused for its amount (the money is already gone): it is accepted and its
+  review flag carries `exceedsRemaining`. Known gap (Task 6 / payments): voiding a payment that already has a POSTED refund is not blocked by
+  the payments module; reconciliation's REFUND_WITHOUT_PAYMENT exception is where it surfaces.
+- **Adjustment policy bands compare the ABSOLUTE amount** (a 600.00 credit is as sensitive as a 600.00 debit); the request `details` carry
+  the signed amount and `direction`. Adjustments always name a job (the ledger posts against jobs; customer-only adjustments are not built).
+  A POSTED adjustment is never cancelled or reversed through this API: a mistake is corrected by a counter-adjustment (its own reason and
+  approval). Reason codes: `billing_correction | goodwill_credit | price_change | job_reopened | outcome_corrected | other` (+ the system's
+  `chargeback_write_off`). The body has no employee field: no wage deduction and no commission effect is possible (spec 11.7, 28.4).
+- **Separation of duties.** The engine excludes the requester; a write-off also excludes whoever recorded the chargeback (`recordedById`,
+  the editor of the subject). Write-off approval keys carry an attempt number (`CHARGEBACK_WRITE_OFF:<id>:<n>`, n = earlier requests + 1), so a
+  rejected write-off can be requested again; refund / adjustment keys are `REFUND:<id>` / `ADJUSTMENT:<id>`. Request scope = the job's current
+  unit (`resolveResource`). Cancelling a refund or adjustment: the requester (if they can still see it) or a `*.create` holder.
+- **Client keys become record keys** (`manual:<userId>:<Idempotency-Key>`, required, like payments): a replay with the same body returns the
+  record; another body is `409 <kind>.idempotency_key_reused`. Provider chargebacks: `provider:<provider>:<chargebackRef>` plus the unique
+  (tenant, provider, providerRef) index; the intake event row itself makes a repeated delivery a no-op.
+- **Provider chargebacks** come through the existing intake: the payments module gained `registerIntakeEventHandler(eventType, handler)`
+  (globalThis registry) and `ProviderEvent.chargeback`; this module registers `chargeback.opened`. Validation before any write: chargeback
+  fields present, a provider payment of the same provider with that reference (else UNMATCHED `unknown_payment`), same currency, chargeback
+  reference not seen (else DUPLICATE). Payments stays independent of this module (no import cycle).
+- **Finance review flags** (spec 11.7 "flag for finance review"): raised by `system:finance-review` once per triggering event with a
+  deterministic key: `job_reopened:<statusHistoryId>`, `outcome_corrected:<jobEventId>`, `refund_posted:<refundId>`,
+  `chargeback_opened:<chargebackId>`, `material_cost_currency:<usageId>`; manual ones `manual:<userId>:<key>`. Insert = `ON CONFLICT DO
+  NOTHING` + read, so concurrent triggers raise one flag (audit only when created). Workflow: assign (OPEN | ASSIGNED > ASSIGNED, only to an
+  active user who can see the flag), unassign, resolve with a reason (final). No notification to the assignee yet (no `finance` notification
+  event type; adding one is a catalog change). Refund-posted and chargeback-opened flags are the explicit "human decides about compensation"
+  step while compensation is blocked; if they turn out noisy, drop them in `refunds.ts` / `chargebacks.ts` (one call each).
+- **"Job reopened"** (spec 25.4) = `isJobReopening` in `src/lib/finance-correction-rules.ts`: AWAITING_REVIEW > IN_PROGRESS (review rejected),
+  COMPLETED | FAILED > REQUIRES_RETURN_VISIT, or the start of the next visit after an outcome. CLOSED / CANCELLED have no way out (a closed
+  job is a new job). The jobs module gained `onJobStatusChanged` (in-transaction, ids and statuses only, `recordStatusHistory` now returns the
+  row id); the flag is raised only when the job has revenue-side ledger entries (anything but MATERIAL_COST). Outcome corrections: the
+  job-outcomes module gained `onJobOutcomeCorrected`; a flag when a field of the outcome `financial` set changed (one definition:
+  `JOB_OUTCOME_FIELD_MAP`) and the outcome has posted entries. Posted entries are never touched: finance records an adjustment.
+- **Materials > ledger (manager decision point): integrated.** Costing a usage line posts its MATERIAL_COST entry in the costing transaction
+  (minus the extended cost, `MATERIAL_COST:<usageId>` via `ledgerKeys.materialCost`, `materialUsageId`, `occurredAt` = usage time, actor =
+  the person costing). The ledger already keeps material cost in its own bucket (`materialCostMinor`, never part of billed / outstanding),
+  so the job's direct cost and revenue live in one auditable place, which future gross-profit and commission bases need (spec 11.3, 11.6).
+  A zero cost posts nothing (the ledger has no zero entries); a cost in a currency other than the job's cannot be posted (entries are in the
+  job's currency) and raises a `material_cost.currency_mismatch` flag instead. Lines costed before this change have no entry (no backfill;
+  none exist in production). A costed line is frozen, so correcting a material cost after the fact still needs a design decision (a
+  MATERIAL_COST reversal + re-costing is not possible today); recorded as open.
+- **Permissions (no catalog change)**: refunds `finance_refunds.view | create`, adjustments `finance_adjustments.view | create`, chargebacks
+  `finance_chargebacks.view | create | edit`, deciding = the policy's approver permission; flags `finance_reconciliation.view | create |
+  assign | edit` (PERMISSIONS.md section 11). Unit managers (templates) request refunds and adjustments in their unit and read chargebacks and
+  flags; they do not record chargebacks, raise, assign or resolve flags. A requester holding `finance_refunds.create` may also pay out the
+  refund once approved; the seeded default policies (`refund_standard` from 0, `adjustment_standard` from 0) make every refund and
+  adjustment need an approver, so by default nobody moves money alone. A tenant that leaves a gap below its bands chooses otherwise.
+- **Not built**: notifications for flags, refunds via a provider (no provider exists; the payout `reference` is stored in `Refund.providerRef`),
+  customer-only adjustments, exports, UI.

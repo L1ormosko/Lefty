@@ -414,3 +414,12 @@ Rules:
   receiving / failing / voiding a payment and reversing a charge `finance_payments.edit`; payments, the confirmation queue and providers
   `finance_payments.view`; the provider intake log `finance_payments.view` at TENANT scope. Finance reaches a job through its unit only:
   OWN / ASSIGNED scopes never match finance records. A legal entity's totals need TENANT or that LEGAL_ENTITY scope.
+- **Refunds, chargebacks, adjustments, review flags in practice (Task 5)**: requesting a refund (against a payment of the job) and paying it
+  out `finance_refunds.create`; requesting an adjustment `finance_adjustments.create`; recording a chargeback `finance_chargebacks.create`,
+  its dispute / won / lost / write-off request `finance_chargebacks.edit`; reads `*.view`; all over the job's CURRENT unit (never OWN /
+  ASSIGNED). Deciding is the approval policy's approver permission (defaults `finance_refunds.approve`, `finance_adjustments.approve`,
+  `finance_chargebacks.approve`); the requester, and for a write-off the person who recorded the chargeback, never decide. Unit managers
+  (templates) may request refunds and adjustments in their unit and pay out the refunds they may request; the Finance Director / Owner
+  record chargebacks. Review flags: read `finance_reconciliation.view` over the flag's unit, raise by hand `finance_reconciliation.create`,
+  assign / unassign `finance_reconciliation.assign` (only to someone who can see the flag), resolve `finance_reconciliation.edit`. None of
+  these touches employees' pay: there is no wage deduction or commission effect anywhere (spec 11.7).

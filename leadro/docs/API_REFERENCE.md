@@ -2656,6 +2656,12 @@ The three status changes share one description:
   `duplicate_provider_ref`). A repeated delivery (same provider + event id, sequential or concurrent) returns the event on record with
   `duplicate: true` and never posts twice; the same id with different content is `409 payment_intake.payload_mismatch`. ACCEPTED creates
   a PROVIDER payment (RECEIVED) and its PAYMENT entry by `system:provider-intake`. **Audit**: `payment_intake.process` (system actor).
+- **`chargeback.opened`** (Phase 4 Task 5, handled by `src/server/finance-adjustments`): the provider's dispute of one of its payments
+  (normalized fields `paymentProviderRef, chargebackRef, amountMinor, currency, reasonCode?`). Validated before any write: unknown payment of
+  this provider = UNMATCHED `unknown_payment`, other currency = REJECTED `currency_mismatch`, chargeback reference already known = DUPLICATE
+  `duplicate_provider_ref`, no chargeback fields = REJECTED `missing_chargeback`. ACCEPTED opens the chargeback (CHARGEBACK entry by
+  `system:provider-intake`, `chargeback.opened` review flag); it is never refused for its amount (the money is gone already); the flag's
+  `details.exceedsRemaining` tells finance when it is more than was left of the payment.
 
 ### GET /api/v1/finance/intake-events
 - The intake log, newest first (hashes and normalized fields only). **Permission**: `finance_payments.view` with a TENANT scope (`403`
@@ -2664,6 +2670,155 @@ The three status changes share one description:
 ### GET /api/v1/finance/payment-providers
 - `200 { data: { configured: [] } }`: the provider keys this deployment accepts events from (empty: "not configured"). **Permission**:
   `finance_payments.view`.
+
+## Finance: refunds, chargebacks, adjustments, review flags (`/api/v1/finance/**`) - Phase 4
+
+Code: `src/server/finance-adjustments` (README there), pure rules `src/lib/finance-correction-rules.ts`, routes
+`src/app/api/v1/finance/{refunds,chargebacks,adjustments,review-flags}/**`. Spec 11.1, 11.7, 11.8, 21.3, 25.4. Decisions:
+`DECISIONS.md` "Phase 4 Task 5". The conventions of the ledger / payments section above apply (money as decimal strings, scope through the
+job's unit, ids and money only, detail codes translated as `FINANCE.ERROR.<CODE UPPERCASED>`).
+
+Shared rules:
+- **Explicit events, never edits.** A refund, chargeback or adjustment is its own record; its core facts (job, payment, amount, currency,
+  reason, requester) are frozen by the database, records are never deleted, and every money movement is a ledger entry with a
+  deterministic key. A posted entry is corrected only by a REVERSAL or a new adjustment.
+- **Approval per policy** (`/approvals`): REFUND, ADJUSTMENT and CHARGEBACK_WRITE_OFF requests are opened by these endpoints when an active
+  policy covers the amount (adjustments: the ABSOLUTE amount); otherwise the change applies at once (`approvalRequired: false`). The
+  requester (and for a write-off, whoever recorded the chargeback) can never decide. Decisions go through `POST /approvals/{id}/decide`.
+- **Creating** a refund, adjustment, chargeback or manual flag needs an `Idempotency-Key` header (`400 <kind>.idempotency_key_required`);
+  it becomes the record's own key (`manual:<userId>:<key>`): `201` first time, `200 { replayed: true }` for the same key and body, `409
+  <kind>.idempotency_key_reused` for the same key with a different body.
+- **Scope**: the job's current service-area unit (like payments); review flags: the flag's `orgUnitId` (no unit = TENANT scope only).
+- **Nothing about employees.** No endpoint here deducts from wages or changes commission (spec 11.7; compensation is blocked on the owner's
+  specification): an adjustment changes what a CUSTOMER owes on a job; a refund posted or a chargeback opened raises a review flag so a
+  person decides about any compensation effect.
+- **Refund** fields: `id, jobId, paymentId, customerId, amountMinor, currency, reason, status, approvalRequestId, orgUnitId, providerRef (the
+  payout reference), requestedById, requestedAt, decidedAt, postedAt, createdAt, updatedAt`. Status (labels `FINANCE.REFUND.STATUS.*`):
+  `REQUESTED > PENDING_APPROVAL | APPROVED`, `PENDING_APPROVAL > APPROVED | REJECTED | CANCELLED`, `APPROVED > POSTED | CANCELLED`.
+- **Adjustment** fields: `id, jobId, customerId, outcomeId, amountMinor (signed: positive = debit, negative = credit), currency, reasonCode,
+  reason, status, approvalRequestId, orgUnitId, requestedById, requestedAt, decidedAt, postedAt, createdAt, updatedAt`. Status (labels
+  `FINANCE.ADJUSTMENT.STATUS.*`): `PENDING_APPROVAL > APPROVED > POSTED` (approved = posted in the same transaction), `> REJECTED |
+  CANCELLED`. `reasonCode` (labels `FINANCE.ADJUSTMENT.REASON.*`): `billing_correction | goodwill_credit | price_change | job_reopened |
+  outcome_corrected | other`, plus the system's `chargeback_write_off`.
+- **Chargeback** fields: `id, jobId, paymentId, customerId, amountMinor, currency, status, reasonCode, notes, provider, providerRef,
+  intakeEventId, writeOffApprovalRequestId, orgUnitId, openedAt, resolvedAt, recordedById, createdAt, updatedAt`. Status (labels
+  `FINANCE.CHARGEBACK.STATUS.*`): `OPEN > DISPUTED > WON | LOST`, `OPEN > WON | LOST`, `LOST > WRITE_OFF_PENDING_APPROVAL > WRITTEN_OFF |
+  LOST`, `LOST > WRITTEN_OFF`.
+- **Review flag** fields: `id, reasonCode, note, details (ids, codes, amounts as strings), status (OPEN | ASSIGNED | RESOLVED), jobId,
+  customerId, outcomeId, paymentId, refundId, chargebackId, adjustmentId, ledgerEntryId, orgUnitId, raisedById, systemActor, raisedAt,
+  assignedToId, assignedAt, resolvedAt, resolvedById, resolutionReason, createdAt, updatedAt`. Reason codes (labels
+  `FINANCE.REVIEW_FLAG.REASON.<CODE UPPERCASED>`): `job.reopened_after_posting`, `outcome.corrected_after_posting`, `refund.posted`,
+  `chargeback.opened`, `material_cost.currency_mismatch` (all raised by `system:finance-review`, once per triggering event) and
+  `manual.review_requested`.
+
+### GET /api/v1/finance/refunds
+- Refunds in scope, newest first (`requestedAt desc, id desc`). **Permission**: `finance_refunds.view`. **Query**: `cursor, limit, jobId,
+  paymentId, status`. `200 { data: [refund], page }`.
+
+### POST /api/v1/finance/refunds
+- **Purpose**: request a (partial) refund of a RECEIVED payment. **Permission**: `finance_refunds.create` over the payment's job (Owner,
+  Finance Director, unit managers). **Headers**: `Idempotency-Key` required.
+- **Body** (strict): `paymentId, amountMinor (> 0), reason (<= 1000)`, optional `currency` (must be the payment's:
+  `400 refund.currency_mismatch`).
+- **Response**: `201 { data: { refund, replayed, approvalRequired, approvalRequestId } }`: `PENDING_APPROVAL` with a request, or `APPROVED`
+  when no policy applies. Nothing is posted yet.
+- **Errors**: `409 refund.payment_not_received`, `409 refund.exceeds_payment` (refunds holding the payment plus chargebacks not won may never
+  exceed it; checked under the payment row lock), `400` (no REFUND policy in this currency while others exist), `403`, `404`.
+  **Audit**: `refund.request`, `refund.approved` (`by: no_policy`), `approval_request.create`.
+
+### GET /api/v1/finance/refunds/{id}
+- One refund (`finance_refunds.view` over its job). `200 { data: refund }`.
+
+### POST /api/v1/finance/refunds/{id}/complete
+- **Purpose**: the APPROVED refund was paid out. **Permission**: `finance_refunds.create` over the job. **Body**: `{ refundedAt?, reference? }`
+  (`refundedAt` default now, never more than 5 minutes ahead).
+- **Effect**: `POSTED` + one REFUND entry (negative, key `refund:<id>:posted`, refs refund and payment) + a `refund.posted` review flag.
+  Repeating it is a replay (`200 { data: { refund, replayed: true } }`).
+- **Errors**: `409 INVALID_STATE_TRANSITION refund.invalid_transition` (not approved), `409 refund.payment_not_received` (the payment was voided
+  meanwhile: cancel the refund). **Audit**: `refund.post`.
+
+### POST /api/v1/finance/refunds/{id}/cancel
+- **Purpose**: withdraw a refund not paid out (REQUESTED, PENDING_APPROVAL, APPROVED), cancelling its pending approval request. **Permission**:
+  the requester (who must still see it, `finance_refunds.view`), or `finance_refunds.create` over the job. **Body**: `{ reason }`.
+  `200 { data: { refund, replayed } }`. **Audit**: `refund.cancel`.
+
+### GET /api/v1/finance/adjustments
+- Adjustments in scope, newest first. **Permission**: `finance_adjustments.view`. **Query**: `cursor, limit, jobId, status, reasonCode`.
+
+### POST /api/v1/finance/adjustments
+- **Purpose**: a credit or debit on a job with a reason (spec 25.4: reopened jobs, corrected outcomes and price changes are adjusted, never
+  edited). **Permission**: `finance_adjustments.create` over the job. **Headers**: `Idempotency-Key` required.
+- **Body** (strict; there is no employee field): `jobId, amountMinor (signed, never 0), reasonCode, reason (<= 1000)`, optional `currency`
+  (the job's: `400 adjustment.currency_mismatch`), `outcomeId` (an outcome of the same job: `400 adjustment.outcome_not_of_job`).
+- **Response**: `201 { data: { adjustment, replayed, approvalRequired, approvalRequestId } }`. Without a policy for the absolute amount the
+  adjustment is `POSTED` at once with one ADJUSTMENT entry (key `adjustment:<id>:posted`); with one it waits (`PENDING_APPROVAL`) and is posted
+  in the approving transaction (the deciding approver is the entry's actor). **Audit**: `adjustment.request`, `.approved`, `.post`.
+
+### GET /api/v1/finance/adjustments/{id}
+- One adjustment (`finance_adjustments.view` over its job).
+
+### POST /api/v1/finance/adjustments/{id}/cancel
+- Withdraw a PENDING_APPROVAL adjustment (and its approval request). Requester or `finance_adjustments.create`. **Body**: `{ reason }`.
+  A POSTED adjustment answers `409 adjustment.invalid_transition`: correct it with a counter-adjustment. **Audit**: `adjustment.cancel`.
+
+### GET /api/v1/finance/chargebacks
+- Chargebacks in scope, newest first (`openedAt desc, id desc`). **Permission**: `finance_chargebacks.view`. **Query**: `cursor, limit, jobId,
+  paymentId, status`.
+
+### POST /api/v1/finance/chargebacks
+- **Purpose**: record a chargeback by hand (the processor's notice) against a RECEIVED payment. **Permission**: `finance_chargebacks.create`
+  over the job (Owner, Finance Director). **Headers**: `Idempotency-Key` required.
+- **Body** (strict): `paymentId, amountMinor (> 0)`, optional `currency`, `reasonCode` (network code, e.g. `10.4`), `notes`, `openedAt`.
+- **Effect**: `OPEN` + one CHARGEBACK entry (negative, key `chargeback:<id>:opened`) + a `chargeback.opened` review flag. `201 { data:
+  { chargeback, replayed } }`. **Errors**: `409 chargeback.payment_not_received | chargeback.exceeds_payment`, `400
+  chargeback.currency_mismatch`. **Audit**: `chargeback.record`. Provider chargebacks arrive through the intake (`chargeback.opened`).
+
+### GET /api/v1/finance/chargebacks/{id}
+- One chargeback (`finance_chargebacks.view` over its job).
+
+### POST /api/v1/finance/chargebacks/{id}/dispute
+
+### POST /api/v1/finance/chargebacks/{id}/won
+
+### POST /api/v1/finance/chargebacks/{id}/lost
+
+The three dispute steps share one description:
+- **Permission**: `finance_chargebacks.edit` over the job. **Body**: `{ notes? }` (replaces the notes).
+- `dispute`: OPEN > DISPUTED, no money. `won`: OPEN | DISPUTED > WON, posts the REVERSAL of the CHARGEBACK entry (key `chargeback:<id>:won`).
+  `lost`: OPEN | DISPUTED > LOST, no money (it stays charged back). `200 { data: { chargeback, replayed } }`; the current status again is a
+  replay. **Errors**: `409 chargeback.invalid_transition`. **Audit**: `chargeback.disputed | won | lost`.
+
+### POST /api/v1/finance/chargebacks/{id}/write-off
+- **Purpose**: write a LOST chargeback off (the amount will not be collected). **Permission**: `finance_chargebacks.edit`. **Body**: `{ reason }`.
+- With a CHARGEBACK_WRITE_OFF policy for the amount: `WRITE_OFF_PENDING_APPROVAL` + an approval request (key `CHARGEBACK_WRITE_OFF:<id>:<n>`,
+  a new attempt after a rejection gets `n + 1`); approval > `WRITTEN_OFF`, rejection / expiry / cancel > back to `LOST`. Without a policy:
+  `WRITTEN_OFF` at once. Writing off posts a system adjustment of minus the chargeback amount (`reasonCode: chargeback_write_off`, key
+  `chargeback:<id>:write_off`), so the job's billed amount drops by exactly the lost amount. `200 { data: { chargeback, approvalRequired,
+  approvalRequestId } }`. **Audit**: `chargeback.write_off_request`, `.written_off`, `.write_off_rejected`, `adjustment.post`.
+
+### GET /api/v1/finance/review-flags
+- Flags in scope (the flag's unit), newest first (`raisedAt desc, id desc`). **Permission**: `finance_reconciliation.view`. **Query**: `cursor,
+  limit, status, jobId, assignedToId, reasonCode`.
+
+### POST /api/v1/finance/review-flags
+- **Purpose**: a person flags a job for finance review. **Permission**: `finance_reconciliation.create` over the job (Owner, Finance
+  Director). **Headers**: `Idempotency-Key` required. **Body** (strict): `jobId, note (<= 2000)`, optional `paymentId, refundId,
+  chargebackId, adjustmentId, ledgerEntryId` (each must belong to the job, else `400`). `201 { data: { flag, replayed } }`.
+  **Audit**: `finance_review_flag.raise`.
+
+### GET /api/v1/finance/review-flags/{id}
+- One flag (`finance_reconciliation.view` over its unit; a tenant-level flag needs TENANT scope).
+
+### POST /api/v1/finance/review-flags/{id}/assign
+- OPEN | ASSIGNED > ASSIGNED. **Permission**: `finance_reconciliation.assign`. **Body**: `{ assigneeUserId }`: an active user who can see the
+  flag (`400 review_flag.assignee_cannot_see`). Same assignee again is a no-op. **Audit**: `finance_review_flag.assign`.
+
+### POST /api/v1/finance/review-flags/{id}/unassign
+- ASSIGNED > OPEN (OPEN again is a no-op). **Permission**: `finance_reconciliation.assign`. No body. **Audit**: `finance_review_flag.unassign`.
+
+### POST /api/v1/finance/review-flags/{id}/resolve
+- > RESOLVED (final; a new concern is a new flag). **Permission**: `finance_reconciliation.edit`. **Body**: `{ resolutionReason }`.
+  **Errors**: `409 review_flag.invalid_transition`. **Audit**: `finance_review_flag.resolve`.
 
 ## Materials (`/api/v1/materials`) - Phase 4
 

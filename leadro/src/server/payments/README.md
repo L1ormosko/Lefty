@@ -20,7 +20,9 @@ Public API (`index.ts`):
 - **Intake** (`intake.ts`): `receiveProviderEvent`: not configured / unknown tenant = 409 before any write; bad signature = 401 + REJECTED row
   under `unverified:<hash>`; verified event stored first (unique per tenant / provider / externalId), then processed under a row lock:
   validate (event type, job, currency, provider reference) before creating a PROVIDER payment + PAYMENT entry (`system:provider-intake`).
-  `listIntakeEvents` (TENANT scope), `listPaymentProviders`.
+  `listIntakeEvents` (TENANT scope), `listPaymentProviders`. Other event types are applied by the module that registered them with
+  `registerIntakeEventHandler` (`chargeback.opened`: finance-adjustments), under the same store-first / row-lock / validate-first rules;
+  unregistered types are REJECTED `unsupported_event_type`.
 
 Invariants:
 - A payment record is never deleted; amount, currency, method, origin and provider fields are frozen (DB triggers).

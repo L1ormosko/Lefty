@@ -18,6 +18,8 @@ Public API (`index.ts`):
   `lostReasonId`, `lostReasonRecoverable`, `notConverted`, `customerRequestedFollowUp`, `jobStatus`); handlers run INSIDE the recording
   transaction (a throwing handler rolls the outcome back). The same facts are in the job's event log as `job.outcome_recorded` and, for
   NOT_SOLD / WORK_NOT_POSSIBLE, `job.not_converted`. Also `registerJobOutcomeNotificationTarget`, `outcomeResourceRef`.
+- **Correction event** (Phase 4 Task 5): `onJobOutcomeCorrected(name, handler)` gets `OutcomeCorrectedEvent` (ids, changed field NAMES, the
+  `job.outcome_corrected` event id) inside the correcting transaction; finance flags a money correction of an outcome already posted.
 
 Invariants:
 - One outcome per `(job, visitNumber)` (DB unique); `visitNumber = Job.currentVisitNumber`, advanced by the jobs lifecycle.
