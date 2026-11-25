@@ -1,3 +1,4 @@
+import { registerApprovalNotificationTarget } from "@/server/approvals";
 import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
 import { registerJobNotificationTarget } from "@/server/jobs";
@@ -20,6 +21,8 @@ export function registerNotificationTargets(): void {
   registerRecoveryNotificationTarget();
   registerRecoveryFollowUpTarget();
   registerRecoveryEngine();
+  // Approvals: notifications that link to a request. Subject modules add their `registerApprovalSubject(...)` call here too.
+  registerApprovalNotificationTarget();
 }
 
 registerNotificationTargets();

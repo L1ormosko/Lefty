@@ -949,3 +949,52 @@ Code: `src/server/recovery` (README), `src/lib/recovery-rules.ts`, `src/lib/reco
   `FinanceReviewFlag` with a deterministic `idempotencyKey` per triggering event.
 - **Task 6 (reconciliation)**: one `ReconciliationRun` per period / legal entity / currency (RUNNING -> COMPLETED | FAILED, totals on the
   run); exceptions carry the typed references above and `orgUnitId`; OPEN <-> ASSIGNED -> RESOLVED with `resolvedById` + reason.
+
+## Phase 4 Task 3: approval engine
+
+- **Registry contract** (`registerApprovalSubject(subjectType, { resolveResource, onApproved, onRejected })`, on `globalThis` like the other
+  registries). `onRejected` covers every ending without approval (`outcome`: REJECTED, EXPIRED, CANCELLED), so a subject module writes one handler
+  for "the change did not happen". Callbacks run inside the transaction that ends the request: the subject and the request never disagree, and a
+  throwing callback rolls the decision back. A subject module that withdraws its own change calls `cancelApprovalForSubjectInTx` and is NOT called
+  back (it is the caller). Subject modules (Tasks 2 and 5) register their type at module load and add the call to
+  `src/server/notification-targets.ts`. `HIGH_VALUE_DISCOUNT` stays unregistered (no discount record exists, Task 1 note): requesting it is a 500
+  (programming error), never a silent approval.
+- **Requests are opened only by subject modules** (`createApprovalRequestInTx` inside their transaction; requester = `ctx.actor`, null ctx =
+  system). There is no "create request" endpoint: the subject module checks its own permission (`finance_refunds.create`, ...) and decides the
+  excluded approvers (editors / submitters). The engine validates that those ids are users of the tenant and merges duplicates; the requester is
+  excluded by the trigger and is not repeated in the list.
+- **Policy resolution**: amount given -> active policies of the subject type in that currency whose band `[min, max)` covers it; no amount
+  (material cost change) -> any active policy of the subject type. Several matches (overlap is refused on write, so only a race or a manual edit)
+  -> the strictest (most approvals, then highest lower bound, then id). **No policy, or an amount in a gap between bands, means no approval**
+  (`{ required: false }`, the contract's `approvalRequestId = null`); a gap is how a tenant says "small refunds need nobody". But **a currency
+  with no policy at all is refused** (`400`, field `currency`) when the subject type has policies in other currencies: approval is never skipped
+  because nobody configured EUR. Cost if wrong: one branch in `resolvePolicy`.
+- **Scope of a request** = the `orgUnitId` that the subject's `resolveResource` reports at creation (null = tenant-level). Every later check (queue
+  SQL filter, get, decide, notifications) uses that snapshot, so the list and the single read always agree even if the subject moves later.
+  LEGAL_ENTITY scopes match through the unit's legal entity; OWN / ASSIGNED reach no request (the requester rule covers "my own").
+- **Visibility**: every endpoint needs `approvals.view` (capability). Requester, eligible approvers (the snapshotted `approverPermission` over the
+  unit) and overseers (`approvals.manage` over the unit) see a request; nobody else (`404`). Deciding additionally needs the approver permission
+  (`403` without any grant, `404` outside scope); `approvals.view` alone never decides. Cancelling: requester or overseer.
+- **Amounts are hidden from manage-only viewers** (`moneyRedacted: true`, no `amountMinor` / `currency` / `details`): the COO template oversees
+  approvals but holds neither the `cost` set nor finance approval permissions (Task 1 ruling); showing a cost-change amount through approvals would
+  bypass that. Requester and eligible approvers see the amount.
+- **Concurrency**: `SELECT ... FOR UPDATE` on the request row before reading decisions; the status change is additionally guarded by
+  `updateMany(where status = PENDING)`. Two approvers of a dual request at the same moment both succeed and it is approved once; two deciders of a
+  single request: one wins, the other gets `409 INVALID_STATE_TRANSITION`; the same person twice: one decision (`409 CONFLICT`).
+- **Expiry** without a scheduler: a request past `expiresAt` is closed immediately for the queue (SQL filter) and for decide / cancel (the
+  service expires it in its own transaction, then answers `409`); `expireDueApprovalRequests(ForAllTenants)` is the worker entry and expires each
+  request in its own transaction (one failing subject handler cannot block the batch). Expiry is a SYSTEM audit event.
+- **Rejection needs a comment** (`400`), it is the reason the requester and the subject receive. A cancel needs a reason (DB CHECK).
+- **Audit actions**: `approval_request.create`, `.decide` (each decision; outcome `DENIED` for a separation-of-duties refusal, written in its own
+  transaction after the rollback), `.approved`, `.rejected`, `.expired`, `.cancelled` (`newValue.by = "subject"` when the subject module withdrew);
+  `approval_policy.create`, `.new_version`, `.deactivate`. Status history of requests = the audit trail (Task 1 decision).
+- **Notifications**: `approval.requested` (eligible approvers, minus requester and excluded) and `approval.decided` (requester, unless they ended it
+  themselves). No params: the subject and amount stay out of notification text. Recipients must also hold `approvals.view` over the request
+  (the target permission, re-checked at read time). Approvers are resolved by the engine (not `resolveRecipientsByPermission`, which needs a unit)
+  so tenant-level requests reach TENANT-scoped approvers.
+- **Policies API** (`/approvals/policies`, `approvals.configure` at TENANT): the contract's "new version + deactivate old" lives in `createPolicy`
+  (posting an existing code), serialized per code by an advisory lock; overlapping active bands of the same subject type and currency are `409`;
+  `approverPermission` must be a catalog `*.approve` key.
+- **Idempotency**: `createApprovalRequestInTx` takes the subject module's deterministic `idempotencyKey` (unique per tenant: subject modules
+  should prefix it with their subject type); a repeat returns the same request (`replayed: true`); the same key for another subject is `409`.
+  The decide / cancel / policy routes accept `Idempotency-Key`.

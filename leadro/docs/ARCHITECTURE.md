@@ -45,6 +45,7 @@ in `src/`); tests may import internals when they need to.
 | Job outcomes | `job-outcomes` | the outcome of every visit, lost reasons, the `job.not_converted` domain event, `holdsOutcomeFinancialSet` |
 | Recovery | `recovery` | recovery rules (versioned, approval for high impact), the engine subscribed to the outcome event, cases, attempts, presence snapshot, recovery summary |
 | Follow-ups | `follow-ups` | follow-up tasks about a lead, customer, job or recovery case; overdue / due-soon sweep; per-target access registry |
+| Approvals | `approvals` | Phase 4: the generic approval engine: versioned policies (subject type, currency, amount band), requests that snapshot them, append-only decisions, single / dual approval, separation of duties, expiry sweep, the approver queue, and the subject registry (`registerApprovalSubject`) through which materials and finance subjects are called back |
 
 Not built (spec 2.2 modules for later phases): performance, finance and compensation (blocked on an
 approved compensation spec, 28.4), automation, reporting, integrations, and every UI for the Phase 2
@@ -62,7 +63,7 @@ separately, so a module-level Map would be filled in one bundle and empty in the
 registries therefore live on `globalThis` (same pattern as the Prisma client): the notification
 target resolvers (`notifications/target-access.ts`), the outcome-recorded handlers
 (`job-outcomes/events.ts`) and the follow-up target access (`follow-ups/targets.ts`; the unregistered
-recovery-case default fails closed). `src/server/notification-targets.ts` is the one place that
+recovery-case default fails closed). The approval subject handlers (`approvals/registry.ts`) follow the same pattern. `src/server/notification-targets.ts` is the one place that
 registers them at start-up (called from `src/instrumentation.ts` and the notifications route).
 
 **Shared offline gate.** Every technician write that can arrive late from a device (shifts, location

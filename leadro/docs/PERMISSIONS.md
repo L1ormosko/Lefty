@@ -389,6 +389,9 @@ Rules:
 - **Who decides** a request is the approval policy's `approverPermission` (a key such as `finance_refunds.approve`), checked inside the
   request's scope by the approval service. Holding `approvals.view` alone never lets someone decide. The requester and anyone listed in
   `excludedApproverIds` can never decide it (service check + database trigger).
+- **Seeing a request** needs `approvals.view` plus one of: being its requester, holding its `approverPermission` over its unit, or
+  `approvals.manage` over its unit (else 404). Manage-only viewers (the COO template) do not see the amount or details (`moneyRedacted`).
+  Cancelling: the requester or `approvals.manage`. Policies (`/approvals/policies`) need `approvals.configure` at TENANT scope.
 - **Sensitive** (`*` above): reading or exporting the ledger, recording / deciding money, and `approvals.configure` (an `.configure`
   key also forces MFA). Custom roles holding any of them require MFA (the existing `customRoleRequiresMfa` rule).
 - **Scopes**: finance data carries `orgUnitId` (and `legalEntityId` on the ledger and reconciliation runs), so ORG_UNIT and LEGAL_ENTITY
