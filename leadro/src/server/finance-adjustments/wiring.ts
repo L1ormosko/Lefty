@@ -4,7 +4,7 @@ import { JOB_OUTCOME_FIELD_MAP } from "@/server/authz";
 import type { TenantTx } from "@/server/db";
 import { onJobOutcomeCorrected, type OutcomeCorrectedEvent } from "@/server/job-outcomes";
 import { onJobStatusChanged, type JobStatusChangedEvent } from "@/server/jobs";
-import { loadFinanceJob } from "@/server/ledger";
+import { loadFinanceJob, onLedgerCorrection, type LedgerCorrectionEvent } from "@/server/ledger";
 import { adjustmentResourceRef, onAdjustmentApproved, onAdjustmentRejected } from "./adjustments";
 import { registerChargebackIntake } from "./chargeback-intake";
 import { chargebackResourceRef, onWriteOffApproved, onWriteOffRejected } from "./chargebacks";
@@ -75,10 +75,29 @@ export async function flagCorrectedOutcome(tx: TenantTx, event: OutcomeCorrected
   });
 }
 
-/** Everything at once: approval subjects, the provider chargeback intake and the two domain reactions. */
+/**
+ * A CHARGE reversal or the void of a RECEIVED payment took money out of the books with no approval behind it (one person,
+ * `finance_payments.edit`): flag it so a second finance person reviews it (spec 21.3, 11.7; review P4-R2). One flag per
+ * correction (keyed by its REVERSAL entry). Whether these corrections should need an approval is an owner decision.
+ */
+export async function flagLedgerCorrection(tx: TenantTx, event: LedgerCorrectionEvent): Promise<void> {
+  await raiseFinanceReviewFlagInTx(tx, {
+    tenantId: event.tenantId,
+    reasonCode: event.kind === "CHARGE_REVERSED" ? REVIEW_FLAG_REASONS.chargeReversed : REVIEW_FLAG_REASONS.paymentVoided,
+    idempotencyKey: reviewFlagKeys.ledgerCorrection(event.reversalEntryId),
+    refs: { jobId: event.jobId, customerId: event.customerId, outcomeId: event.outcomeId, paymentId: event.paymentId, ledgerEntryId: event.reversalEntryId },
+    orgUnitId: event.orgUnitId,
+    details: { originalEntryId: event.originalEntryId, amountMinor: event.amountMinor, currency: event.currency, correctedById: event.actorUserId },
+    raisedBy: { system: FINANCE_REVIEW_SYSTEM_ACTOR },
+    ctx: null,
+  });
+}
+
+/** Everything at once: approval subjects, the provider chargeback intake and the three domain reactions. */
 export function registerFinanceAdjustments(): void {
   registerFinanceApprovalSubjects();
   registerChargebackIntake();
   onJobStatusChanged("finance-review.job-reopened", flagReopenedJob);
   onJobOutcomeCorrected("finance-review.outcome-corrected", flagCorrectedOutcome);
+  onLedgerCorrection("finance-review.ledger-correction", flagLedgerCorrection);
 }

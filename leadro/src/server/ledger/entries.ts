@@ -4,6 +4,7 @@ import { buildScopeWhere, enforceInTx, resolveScope, withinScope, type ResourceR
 import { InvalidStateTransitionError, NotFoundError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
 import { financeJobRef, ledgerEntryScopeColumns, loadFinanceJob } from "./job-ref";
+import { publishLedgerCorrection } from "./correction-events";
 import { ledgerKeys } from "./keys";
 import { reverseLedgerEntryInTx } from "./post";
 import type { ListLedgerQuery, ReverseEntryInput } from "./schemas";
@@ -108,8 +109,23 @@ export async function reverseCharge(actor: Actor, ctx: RequestContext, entryId: 
         newValue: { reversalEntryId: reversal.id, type: entry.type, amountMinor: reversal.amountMinor.toString(), currency: reversal.currency, jobId: entry.jobId, outcomeId: entry.outcomeId },
         reason: input.reason,
       });
+      // No approval stands behind a charge reversal: subscribers (finance review flags) make a second person see it.
+      await publishLedgerCorrection(tx, {
+        tenantId: actor.tenantId,
+        kind: "CHARGE_REVERSED",
+        jobId: job.id,
+        customerId: job.customerId,
+        orgUnitId: job.orgUnitId,
+        originalEntryId: entry.id,
+        reversalEntryId: reversal.id,
+        paymentId: entry.paymentId,
+        outcomeId: entry.outcomeId,
+        amountMinor: entry.amountMinor,
+        currency: entry.currency,
+        actorUserId: actor.userId,
+      });
     }
-    const row = await tx.ledgerEntry.findFirstOrThrow({ where: { id: reversal.id, tenantId: actor.tenantId }, include: entryInclude });
+    const row =await tx.ledgerEntry.findFirstOrThrow({ where: { id: reversal.id, tenantId: actor.tenantId }, include: entryInclude });
     return { reversal: toView(row), replayed };
   });
 }

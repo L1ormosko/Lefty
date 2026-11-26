@@ -1300,6 +1300,8 @@
     "FINANCE.REVIEW_FLAG.REASON.REFUND.POSTED": "Refund paid out",
     "FINANCE.REVIEW_FLAG.REASON.CHARGEBACK.OPENED": "Chargeback opened",
     "FINANCE.REVIEW_FLAG.REASON.MATERIAL_COST.CURRENCY_MISMATCH": "Material cost in another currency than the job",
+    "FINANCE.REVIEW_FLAG.REASON.LEDGER.CHARGE_REVERSED": "Charge reversed without approval",
+    "FINANCE.REVIEW_FLAG.REASON.PAYMENT.VOIDED_AFTER_RECEIPT": "Received payment voided",
     "FINANCE.REVIEW_FLAG.REASON.MANUAL.REVIEW_REQUESTED": "Review requested by a person",
     "FINANCE.INTAKE.REJECTION.UNKNOWN_PAYMENT": "No matching payment",
     "FINANCE.INTAKE.REJECTION.MISSING_CHARGEBACK": "The chargeback details are missing",

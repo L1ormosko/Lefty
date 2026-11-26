@@ -1300,6 +1300,8 @@
     "FINANCE.REVIEW_FLAG.REASON.REFUND.POSTED": "Reembolso pagado",
     "FINANCE.REVIEW_FLAG.REASON.CHARGEBACK.OPENED": "Contracargo abierto",
     "FINANCE.REVIEW_FLAG.REASON.MATERIAL_COST.CURRENCY_MISMATCH": "Costo de material en otra moneda que el trabajo",
+    "FINANCE.REVIEW_FLAG.REASON.LEDGER.CHARGE_REVERSED": "Cargo revertido sin aprobación",
+    "FINANCE.REVIEW_FLAG.REASON.PAYMENT.VOIDED_AFTER_RECEIPT": "Pago recibido anulado",
     "FINANCE.REVIEW_FLAG.REASON.MANUAL.REVIEW_REQUESTED": "Revisión solicitada por una persona",
     "FINANCE.INTAKE.REJECTION.UNKNOWN_PAYMENT": "Ningún pago coincide",
     "FINANCE.INTAKE.REJECTION.MISSING_CHARGEBACK": "Faltan los datos del contracargo",

@@ -3,7 +3,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { InvalidStateTransitionError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { financeJobRef, ledgerKeys, reverseLedgerEntryInTx, type FinanceJob } from "@/server/ledger";
+import { financeJobRef, ledgerKeys, publishLedgerCorrection, reverseLedgerEntryInTx, type FinanceJob } from "@/server/ledger";
 import type { MarkReceivedInput, ReasonInput } from "./schemas";
 import { loadPaymentWithJob, postPaymentReceivedInTx, toPaymentView, type PaymentView } from "./store";
 
@@ -84,7 +84,7 @@ export async function markPaymentFailed(actor: Actor, ctx: RequestContext, payme
  */
 export async function voidPayment(actor: Actor, ctx: RequestContext, paymentId: string, input: ReasonInput): Promise<Change> {
   return withTenant(actor.tenantId, async (tx) => {
-    await loadForChange(tx, actor, paymentId);
+    const { job } = await loadForChange(tx, actor, paymentId);
     // The same row lock refunds and chargebacks take (finance-adjustments `lockPayment`): a payout or a chargeback against
     // this payment and its void are serialized, so the check below sees every one of them.
     await tx.$queryRaw`SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} AND "tenantId" = ${actor.tenantId} FOR UPDATE`;
@@ -101,12 +101,27 @@ export async function voidPayment(actor: Actor, ctx: RequestContext, paymentId: 
       });
       // Every RECEIVED payment was posted in the transaction that received it; a missing entry would be a broken invariant.
       if (!posted) throw new Error(`payment ${payment.id} is RECEIVED without its ledger entry`);
-      await reverseLedgerEntryInTx(tx, {
+      const { entry: reversal } = await reverseLedgerEntryInTx(tx, {
         tenantId: actor.tenantId,
         entryId: posted.id,
         actor: { userId: actor.userId },
         reason: input.reason,
         idempotencyKey: ledgerKeys.paymentVoided(payment.id),
+      });
+      // No approval stands behind a void: subscribers (finance review flags) make a second person see it (review P4-R2).
+      await publishLedgerCorrection(tx, {
+        tenantId: actor.tenantId,
+        kind: "PAYMENT_VOIDED",
+        jobId: job.id,
+        customerId: job.customerId,
+        orgUnitId: job.orgUnitId,
+        originalEntryId: posted.id,
+        reversalEntryId: reversal.id,
+        paymentId: payment.id,
+        outcomeId: payment.outcomeId,
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        actorUserId: actor.userId,
       });
     }
     await audit(tx, ctx, "payment.void", payment, updated, input.reason);
