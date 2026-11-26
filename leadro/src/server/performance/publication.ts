@@ -36,6 +36,14 @@ export async function submitDefinition(actor: Actor, ctx: RequestContext, defini
 
     // Each submission is a new request (a rejected one stays in the history), so the key carries the submission count.
     const submissions = await tx.approvalRequest.count({ where: { tenantId: actor.tenantId, subjectType: METRIC_DEFINITION_SUBJECT, subjectId: definitionId } });
+    // Separation of duties (spec 21.3, review P5-R3): nobody who wrote this version's content decides its publication, i.e.
+    // its author AND everyone who edited the draft. Editors are recorded only in the audit trail (no column), so they are
+    // read from it; the requester is excluded by the engine itself.
+    const edits = await tx.auditEvent.findMany({
+      where: { tenantId: actor.tenantId, targetType: "PerformanceMetricDefinition", targetId: definitionId, action: "performance_metric_definition.update", actorUserId: { not: null } },
+      select: { actorUserId: true },
+    });
+    const contentAuthors = new Set<string>([...(definition.createdById ? [definition.createdById] : []), ...edits.flatMap((event) => (event.actorUserId ? [event.actorUserId] : []))]);
     const approval = await createApprovalRequestInTx(tx, ctx, {
       tenantId: actor.tenantId,
       subjectType: METRIC_DEFINITION_SUBJECT,
@@ -51,8 +59,7 @@ export async function submitDefinition(actor: Actor, ctx: RequestContext, defini
         replacesDefinitionId: published?.id ?? null,
         replacesVersion: published?.version ?? null,
       },
-      // The author of the version may not publish it either (the requester is excluded by the engine already).
-      excludedApproverIds: definition.createdById ? [definition.createdById] : [],
+      excludedApproverIds: [...contentAuthors],
       idempotencyKey: `${METRIC_DEFINITION_SUBJECT}:${definitionId}:${submissions + 1}`,
     });
     if (!approval.required) {

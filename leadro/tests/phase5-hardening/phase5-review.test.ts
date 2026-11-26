@@ -168,6 +168,14 @@ describe("P5-R3: whoever edited a metric definition version never approves its p
     await expect(decideApprovalRequest(w.ceo.actor, ctx(w.ceo.actor), requestId, decideApprovalSchema.parse({ decision: "APPROVE" }))).rejects.toMatchObject({ httpStatus: 403 });
     const definition = await withTenant(w.tenantId, (tx) => tx.performanceMetricDefinition.findUniqueOrThrow({ where: { id: draft.id } }));
     expect(definition.status).toBe("PENDING_APPROVAL");
+
+    // A publisher who did not write the content decides.
+    const publisherRole = await makeRole(w.tenantId, "metric publisher", [{ permission: "performance.publish" }, { permission: "approvals.view" }]);
+    const publisher = await createPerson(w.tenantId, "publisher", { withEmployee: false });
+    await grantTemplate(w.tenantId, publisher, publisherRole, [{ type: "TENANT" }]);
+    await decideApprovalRequest(publisher.actor, ctx(publisher.actor), requestId, decideApprovalSchema.parse({ decision: "APPROVE" }));
+    const published = await withTenant(w.tenantId, (tx) => tx.performanceMetricDefinition.findUniqueOrThrow({ where: { id: draft.id } }));
+    expect(published.status).toBe("PUBLISHED");
   });
 });
 
