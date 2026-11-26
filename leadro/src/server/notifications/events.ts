@@ -41,6 +41,9 @@ export const NOTIFICATION_EVENTS = {
   "data_challenge.raised": { templateKey: "NOTIFICATION.DATA_CHALLENGE_RAISED", critical: false, targetType: "data_challenge", params: [] },
   "data_challenge.assigned": { templateKey: "NOTIFICATION.DATA_CHALLENGE_ASSIGNED", critical: false, targetType: "data_challenge", params: [] },
   "data_challenge.decided": { templateKey: "NOTIFICATION.DATA_CHALLENGE_DECIDED", critical: false, targetType: null, params: [] },
+  // Development plans (spec 10.4, 5.11): the employee hears that a plan about them became active, without a link (they read
+  // it through self-service) and without params (the title is free text).
+  "development_plan.activated": { templateKey: "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED", critical: false, targetType: null, params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
 } as const;
 

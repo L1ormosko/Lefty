@@ -1095,6 +1095,9 @@ model OperationsSettings {
   locationRetentionDays     Int                   @default(90)
   /// The follow-up sweep raises "due soon" this many minutes before a task is due.
   followUpDueSoonMinutes    Int                   @default(60)
+  /// Phase 5. Development thresholds of the "metric below threshold" training-recommendation rule: an array of
+  /// { metricKey, belowMilli, courseId } (src/server/development). Null = rule disabled. Development use only (spec 10.3).
+  developmentThresholds     Json?
   updatedAt                 DateTime              @updatedAt @db.Timestamptz(3)
   updatedById               String?
 
