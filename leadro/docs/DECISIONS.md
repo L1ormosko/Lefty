@@ -1324,3 +1324,80 @@ These are manager-level choices made to keep moving; each is one template line o
     A legal erasure request would need a dedicated, audited purge path (not built).
 12. **Dimensions WORK_QUALITY and PRODUCTIVITY** exist in the enum (spec 10.2 lists them) but no kind measures them yet: no defined data
     source, and no invented formula.
+
+## Phase 5 Task 3: performance engine
+
+Module `src/server/performance`, pure formulas `src/lib/performance-formulas.ts`, routes `/api/v1/performance/**`. No migration, no dependency.
+
+### The formula catalog (final; replaces the "proposed" mapping in ERD.md)
+
+Every kind turns records into **opportunities** (denominator = sample size); each adds 0/1 (rate) or its rating (feedback) to the numerator.
+Periods are tenant-local dates `[periodStart, periodEnd)` converted with the tenant's `defaultTimeZone`; "in the period" means the named
+instant falls in `[start of periodStart, start of periodEnd)`. Breakdown = the job's `jobTypeId` (default) or `JobType.category`
+(`params.breakdown = JOB_CATEGORY`), read at computation time.
+
+| Kind | Opportunity (denominator, evidence) | Numerator | Employee |
+|---|---|---|---|
+| REPEAT_VISIT_RATE (`windowDays` 1-365, required) | a `Job` whose `completedAt` is in the period AND `completedAt + windowDays <= now` | another job, not CANCELLED, same customer and job type, `createdAt` in `(completedAt, completedAt + windowDays]` | the LEAD assignment in effect at `completedAt` |
+| ON_TIME_ARRIVAL | an `ArrivalVerification` with `arrivedAt` in the period, status RECORDED or MANAGER_VERIFIED, at a job with an appointment window | `arrivedAt <= appointmentWindowEnd` | the arrival's employee |
+| DOCUMENTATION_COMPLETENESS | a `Job` completed in the period whose job type or category had a completion form version published before `completedAt` | a `JobCompletion` exists for the job's current visit | LEAD assignment at completion |
+| OUTCOME_CONVERSION | a `JobOutcome` with `occurredAt` in the period and outcome SOLD or NOT_SOLD | SOLD | the outcome's employee |
+| RECOVERY_CONVERSION | a `LeadRecoveryCase` assigned to the employee (`assignedToId`), status RECOVERED / NOT_RECOVERED / CLOSED, decided in the period (`recoveredAt`, or `closedAt` when never recovered) | `recoveredAt` set | the assignee (recovery employee) |
+| CUSTOMER_FEEDBACK_AVERAGE | a non-voided `CustomerFeedback` about the employee with a rating, `receivedAt` in the period | sum of ratings (average = numerator / denominator) | the feedback's employee |
+| TRAINING_PROGRESS (no breakdown) | a `TrainingAssignment`, not CANCELLED, `dueDate` in the period | status COMPLETED at computation time (on time or late) | the assignee |
+
+Choices behind the table (each is one line of `src/lib/performance-formulas.ts` or `sources.ts` to change):
+- **Repeat visits only count once their window has elapsed**, so a recent visit is never counted as "not repeated" before it could be; a
+  period computed too early simply has a smaller sample (and may show "not enough data"). A cancelled later job never happened for the
+  customer. The trigger is "another job created", whatever its origin.
+- **Early arrival is on time**: the dimension is timeliness towards the customer (lateness); arriving before the window is not penalised.
+  Arrivals waiting for a manager's decision or rejected are not verified, so not counted.
+- **A submitted completion is complete**: the field-execution module accepts a submission only with every required field. "Required" =
+  a form version for the job type or its category was published before the job was completed (published versions are immutable).
+- **Outcome conversion counts sales decisions only**: customer unavailable, reschedule, work not possible and pending approval are not
+  opportunities to sell.
+- **Visits are attributed to the LEAD assignment** active at `completedAt` (CREW members and team assignments are not attributed); visits
+  without a LEAD among the computed employees count for nobody. Job-based kinds produce rows only for breakdowns with at least one
+  opportunity; TRAINING_PROGRESS writes one row per computed employee, sample 0 included, so "not enough data" is explicit.
+
+### Definitions and publication
+
+- **One kind per key** (versions copy it; PATCH cannot change it). Content is editable only while DRAFT and before any value was computed from
+  that version (`409 performance.definition_has_values`): a preview value must keep meaning what it meant. **One open version per key**
+  (DRAFT or PENDING_APPROVAL, `409 performance.open_version_exists`). Every change to a key's versions takes `FOR UPDATE` on the key's rows.
+- `params` are stored **normalized** (unknown keys refused, `breakdown` defaulted, absent keys omitted), so the stored object is what is computed.
+- **Publication always needs approval** (ruling 3): submit calls `createApprovalRequestInTx`; a `{ required: false }` answer is refused with
+  `409 performance.publication_policy_missing` before anything is written. The version's author is in `excludedApproverIds` (the submitter is the
+  requester and excluded by the engine). Each submission uses idempotency key `PERFORMANCE_METRIC_DEFINITION:<id>:<n>` (n = number of requests
+  for the subject + 1), so a resubmission after a rejection is a new request. Request `details`: definition id, key, version, kind, dimension,
+  minSample, and the PUBLISHED version it replaces.
+- **On approval**: the key's PUBLISHED version is RETIRED (`by: superseded`) first, then this one PUBLISHED with `publishedAt = decision time`.
+  On rejection / expiry / cancellation through the approvals API: back to DRAFT (`approvalRequestId` and `submittedAt` keep the last
+  submission). Withdrawal by the author: back to DRAFT and the request cancelled (no callback). A PENDING version cannot be retired.
+- Retiring needs no approval (it only stops a metric being current; its values stay readable as history).
+
+### Values, visibility, computation
+
+- **Append-only** (`createManyAndReturn`); the newest `computedAt` per (definition, employee, period, breakdown) is current
+  (`/performance/employees/{id}/values`); `/performance/values` lists every snapshot. Lists return `evidenceCount`; the single value returns
+  `evidenceIds`. A value would carry more than 10,000 ids -> `400` (compute a shorter period). Periods are at most 366 days.
+- **Scope follows the employee's CURRENT placements / employer / OWN** (same as employee records and `requirePermission({ employeeId })`), not
+  the `orgUnitId` snapshot: a manager stops seeing the values of someone who left their unit. The snapshot is for later team comparisons (Task 6).
+- **Visibility of unpublished versions**: values are visible when the version was ever published (`publishedAt` set, so retired versions keep
+  their history). Values of never-published versions are previews for holders of `performance.configure` or `performance.manage`, and never
+  about the caller themselves. Never-published definitions are visible to `performance.configure` holders only.
+- **Who computes**: `performance.manage` over every employee (404 for one outside scope); without `employeeIds`, every non-terminated employee
+  in scope, at most 500. DRAFT (preview), PENDING_APPROVAL and PUBLISHED versions can be computed; RETIRED cannot.
+  `computeMetricValuesAsSystem(tenantId, definitionId, input, name)` is the worker entry point (PUBLISHED only, `systemActor = system:<name>`).
+- **No universal score**: no endpoint returns a sum, average, rank or ratio across definitions or employees; the API returns numerator and
+  denominator, never a stored rate.
+- **Spec 10.3 architecture test** (`tests/performance/architecture.test.ts`): dispatch, qualifications, jobs, ledger, payments, approvals,
+  employees and finance-adjustments never import the performance module (alias or relative path), and the performance module imports only
+  approvals, audit, authz, core, db and notifications. Training tables are read directly (read model; Task 2 owns their writes).
+
+### Known gaps
+
+- The approvals `createPolicySchema` only accepts `*.approve` approver permissions, so the seeded `performance_metric_publication` policy
+  (`performance.publish`) cannot be re-versioned through `POST /approvals/policies`; a tenant without the seeded policy cannot create one
+  through the API. Fix belongs to the approvals module (allow `performance.publish`), not done here (approvals core is out of this task's scope).
+- No notification is sent to the author when a version is published or rejected beyond the engine's own `approval_request` decision notice.
