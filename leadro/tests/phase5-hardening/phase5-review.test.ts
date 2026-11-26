@@ -13,6 +13,7 @@ import {
   listContextNotesQuerySchema,
 } from "@/server/coaching";
 import { recordCustomerFeedback, recordFeedbackSchema, voidCustomerFeedback, voidFeedbackSchema } from "@/server/customer-feedback";
+import { assignDataChallengeReviewer, assignDataChallengeSchema, raiseDataChallenge, raiseDataChallengeSchema } from "@/server/data-challenges";
 import { withTenant } from "@/server/db";
 import {
   acceptRecommendation,
@@ -214,5 +215,25 @@ describe("P5-R5: nobody records or voids customer feedback about themselves", ()
     // Feedback about the job only (nobody named) stays open to them.
     const aboutJob = await recordCustomerFeedback(me, ctx(me), recordFeedbackSchema.parse({ jobId, rating: 4 }));
     expect(aboutJob.employeeId).toBeNull();
+  });
+});
+
+describe("P5-R6: the author of a challenged coaching note never reviews the challenge", () => {
+  it("refuses the author as reviewer and accepts another HR user", async () => {
+    const tech = w.techA1.actor;
+    const note = await createCoachingRecord(
+      w.hr.actor,
+      ctx(w.hr.actor),
+      createCoachingRecordSchema.parse({ employeeId: w.techA1.employeeId, body: "Late three times", shareWithEmployee: true }),
+    );
+    const challenge = await raiseDataChallenge(tech, ctx(tech), raiseDataChallengeSchema.parse({ targetType: "COACHING_RECORD", targetId: note.id, statement: "Only once" }));
+    await expect(
+      assignDataChallengeReviewer(w.hr.actor, ctx(w.hr.actor), challenge.id, assignDataChallengeSchema.parse({ reviewerUserId: w.hr.userId })),
+    ).rejects.toMatchObject({ httpStatus: 400, field: "reviewerUserId" });
+
+    const otherHr = await createPerson(w.tenantId, "hr-2", { withEmployee: false });
+    await grantTemplate(w.tenantId, otherHr, w.roles.HR_MANAGER, [{ type: "TENANT" }]);
+    const routed = await assignDataChallengeReviewer(w.hr.actor, ctx(w.hr.actor), challenge.id, assignDataChallengeSchema.parse({ reviewerUserId: otherHr.userId }));
+    expect(routed).toMatchObject({ status: "UNDER_REVIEW", reviewerId: otherHr.userId });
   });
 });
