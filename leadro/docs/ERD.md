@@ -869,3 +869,60 @@ erDiagram
   module (Task 2), which also sets `TrainingRecord.qualificationId`.
 - `PerformanceMetricValue.orgUnitId` is the employee's primary unit at computation time; the computation sets it.
 - Recommendations are produced only by the documented deterministic rules (Task 5) and never create an assignment by themselves.
+
+# Phase 6: enterprise analytics
+
+Migration `20261127100000_phase6_analytics` (schema only; KPI engine, dashboards and the report builder arrive in Phase 6 Tasks 2-5, none
+of which add a migration). 3 new tenant-owned tables (95 in total) with `tenantId`, `(id, tenantId)` unique keys, composite
+`(ref, tenantId)` FKs and FORCE RLS (the DO-block runs again over the whole schema), two enums (`ReportExportFormat`,
+`ReportExportStatus`), and four analytics indexes on existing tables. Names are asserted in `tests/db/phase6-schema.test.ts`.
+
+**No analytics copy of the data.** KPIs are computed from the business tables (spec 13.4 source records), through the read client of
+`src/server/analytics` (Tasks 2-4). The new tables only remember what the report builder needs: saved views and the export log.
+
+```mermaid
+erDiagram
+  User ||--o{ SavedReportView : owns
+  OrgUnit |o--o{ SavedReportView : "scope filter"
+  SavedReportView ||--o{ SavedReportViewShare : "shared with"
+  Role ||--o{ SavedReportViewShare : ""
+  User ||--o{ ReportExport : "exported by"
+  SavedReportView |o--o{ ReportExport : "started from"
+  OrgUnit |o--o{ ReportExport : "scope filter"
+```
+
+## Model guide
+
+| Table | Purpose |
+|---|---|
+| `SavedReportView` | A saved report-builder view (spec 13.5): owner, name (1-120 chars; one active view per owner and name, case-insensitive), `datasetKey` of the code-defined dataset catalog, `columns` (1-200 distinct column keys, in order), `filters` (JSON object, validated by the dataset), optional `scopeOrgUnitId` (unit + descendants, intersected with the runner's scope). Owner and dataset frozen; archived (with who), never deleted. |
+| `SavedReportViewShare` | A view shared with a role (one row per view and role). Inserted or deleted (unshare), never edited. |
+| `ReportExport` | Append-only log of every export attempt: actor, dataset, optional saved view, filters (JSON + SHA-256 hex of the canonical JSON), org-unit filter, exported columns (after field-set gating), format (CSV), status COMPLETED / REFUSED_TOO_LARGE / FAILED, `rowCount`, the synchronous `rowLimit` in force, `failureCode`. |
+
+## Database-level rules (Phase 6)
+
+- **Append-only**: `ReportExport` (UPDATE, DELETE, TRUNCATE rejected by `leadro_append_only`).
+- **Never deleted** (`leadro_no_delete`): `SavedReportView`. A `SavedReportViewShare` may be deleted (unshare) but not updated.
+- **Frozen columns** (`leadro_immutable_columns`): a view's tenant, owner, dataset and creation time; every column of a share.
+- **Shape**: `leadro_report_columns_valid(text[])` (1-200 distinct identifier-like keys, no NULL) on both column lists; dataset keys
+  `^[a-z][a-z0-9_]{0,62}$`; filters are JSON objects; `filtersHash` is 64 lower-case hex characters.
+- **Truthful export outcome** (`report_export_row_count_matches_status`): COMPLETED has `rowCount <= rowLimit`, REFUSED_TOO_LARGE has
+  `rowCount > rowLimit`, FAILED may have no count; `failureCode` (a stable snake_case code, never an internal message) exactly for FAILED.
+- **Partial unique index**: `saved_report_view_owner_name_active` on `(tenantId, ownerId, lower(btrim(name)))` while not archived.
+- **Analytics indexes** (justified in DECISIONS.md "Phase 6 Task 1"): `Job (tenantId, orgUnitId, createdAt)`,
+  `Job (tenantId, orgUnitId, completedAt)`, `Lead (tenantId, orgUnitId, createdAt)`, `LeadRecoveryCase (tenantId, orgUnitId, outcomeAt)`.
+
+## Contracts for JSON and arrays (Phase 6)
+
+- `SavedReportView.filters` / `ReportExport.filters`: an object whose keys the dataset's Zod schema defines (date range, statuses, ...);
+  the org unit is never inside it (it is the `scopeOrgUnitId` column). Unknown keys are refused when saving and when running.
+- `ReportExport.filtersHash`: SHA-256 (hex) of the canonical JSON of `filters` (keys sorted, no whitespace), so identical filter sets
+  compare equal across exports.
+- `columns`: keys of the dataset's column catalog; a saved view may keep a column the runner may not see, which is then left out of
+  that run (the response says which), never shown.
+
+## Documented rules not expressible in the database
+
+- Running or exporting a saved / shared view uses the runner's permissions, scope and field sets, never the owner's.
+- A share points at a non-archived view and a role of the tenant; archiving a view leaves its shares, which then match nothing.
+- An export writes its `ReportExport` row and an audit event in the same transaction, also when it is refused or fails.

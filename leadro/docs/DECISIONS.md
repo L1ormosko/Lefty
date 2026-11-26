@@ -1619,3 +1619,92 @@ finance-adjustments (compensation lives nowhere yet; the finance modules stand i
 `customer-feedback`; training, performance, coaching, data-challenges and development never import the dashboard; the dashboard's value
 imports from `@/server/*` are limited to the read functions listed above. The qualifications module's new `listOwnQualifications` is a
 read of the caller's own rows and imports no performance module (the existing performance / development tests still pass).
+
+## Phase 6 Task 1: schema, analytics indexes, permission catalog, role templates
+
+- **One migration** `20261127100000_phase6_analytics`: 3 tables (`SavedReportView`, `SavedReportViewShare`, `ReportExport`), enums
+  `ReportExportFormat` (CSV) and `ReportExportStatus` (COMPLETED | REFUSED_TOO_LARGE | FAILED), the RLS DO-block, CHECKs, a column-list
+  shape function `leadro_report_columns_valid`, frozen columns, no-delete for views, append-only for the export log, and four indexes on
+  existing tables (below). Developed against a private `leadro_p6t1_test` database (dropped at the end); the shared `leadro` /
+  `leadro_test` databases were NOT migrated by this task (the next `prisma migrate deploy` / test run applies it).
+- **Shares are a table, not an array.** The brief's "shared with roles?" became `SavedReportViewShare (viewId, roleId)` so the role is a
+  real composite FK (tenant-safe, no dangling ids); one row per view and role; unsharing deletes the row (the service audits it), a share
+  is never edited. Sharing only hands over the definition: the runner's own permissions, scope and field sets apply every time.
+- **Scope filter** = one optional org unit (`scopeOrgUnitId`, the unit and its descendants), a composite FK, always intersected with the
+  runner's scope; null = the runner's whole scope. Several units in one view would be a JSON list with no FK; not needed by spec 13.5.
+- **Export log columns beyond the brief**: `rowLimit` (the cap in force, so REFUSED_TOO_LARGE is checkable: `rowCount > rowLimit`),
+  `failureCode` (stable code for FAILED only; never an internal message, spec CODING_STANDARDS "Errors"), `savedViewId` and
+  `scopeOrgUnitId` (what was exported, as FKs). `rowCount` is null only for FAILED (an attempt can fail before counting). The brief's
+  "filters hash + JSON" is `filtersHash` (SHA-256 hex of the canonical JSON) + `filters`.
+- **Frozen**: a view's owner and dataset (another dataset is another view; views are shared by role, never handed over). Name, columns,
+  filters and scope may change. Views are archived (with `archivedById`), never deleted; one active view per owner and name.
+- **No field maps** for the new tables: they hold no sensitive field set. `filters` may contain the caller's own search input (e.g. a
+  customer name); reading the export log is gated like the audit log (contract below).
+- **Permission keys** are `analytics_<family>.view` (the brief's "analytics.* VIEW per dashboard family"): keys are `module.action`, so a
+  family is a module with one action. `analytics_financial.view` and `reports.export` are sensitive (custom roles holding them need MFA).
+- **Labels**: `ANALYTICS.FAMILY.*`, `REPORT_EXPORT.FORMAT.*`, `REPORT_EXPORT.STATUS.*` in en-US, es-US, he-IL, pinned by
+  `tests/authz/analytics-catalog.test.ts`. Module names are not translated in the role grid (existing behaviour), so no module labels.
+
+### Index review for the KPI aggregates
+
+KPIs filter by tenant, by a set of org units (the caller's scope or a group-by level: `orgUnitId IN (...)`) and by a time range, and
+attribute jobs / leads / cases to the org unit snapshotted on the record (global constraint "Attribution"). A btree on
+`(tenantId, orgUnitId, <time>)` serves that directly (one range scan per unit). Reviewed tables and the outcome:
+
+| Table | Existing indexes that matter | Decision |
+|---|---|---|
+| `Job` | `(tenantId, orgUnitId, status, scheduledStartAt)`, `(tenantId, status, scheduledStartAt)`, `(tenantId, archivedAt, createdAt)` | **Add `(tenantId, orgUnitId, createdAt)`**: job volume, cancellation and revisit rates are cohorts of jobs created in the period per unit; the existing unit index has `status` before the time and a different time column. **Add `(tenantId, orgUnitId, completedAt)`**: completed jobs, job duration and jobs per employee are counted by completion time; no index has `completedAt`. |
+| `Lead` | `(tenantId, orgUnitId, status)`, `(tenantId, sourceId, createdAt)`, `(tenantId, status, createdAt)` | **Add `(tenantId, orgUnitId, createdAt)`**: lead volume, conversion and response time per unit and period; the unit index has no time, the source / status indexes no unit. Volume by source within a unit filters the source on the rows of that range. |
+| `LeadRecoveryCase` | `(tenantId, orgUnitId, status)`, `(tenantId, status, priority, outcomeAt)` | **Add `(tenantId, orgUnitId, outcomeAt)`**: recovery outcomes per unit and period, anchored on the lost visit's time (`outcomeAt`, the case cohort); the existing time index has no unit and `priority` before the time. |
+| `LedgerEntry` | `(tenantId, orgUnitId, occurredAt)`, `(tenantId, legalEntityId, occurredAt)`, `(tenantId, type, occurredAt)` | Nothing: financial KPIs are ledger-derived and the unit / legal-entity time indexes exist; the entry type is filtered on that range. |
+| `Payment` | `(tenantId, orgUnitId, createdAt)`, `(tenantId, status, receivedAt)` | Nothing: collections are ledger-derived (Task 3); payment listings already have their indexes. |
+| `JobOutcome` | `(tenantId, outcome, occurredAt)`, `(tenantId, employeeId, occurredAt)` | Nothing: it has no org-unit column; outcomes attribute through their job (`job.orgUnitId`) and are reached by job id or by outcome + time. |
+| `JobStatusHistory` | `(tenantId, toStatus, occurredAt)`, `(tenantId, jobId, occurredAt)` | Nothing: "entered status X in the period" and "history of these jobs" are both covered; the unit comes from the job. |
+| `LeadAssignment`, `JobAssignment` | `(tenantId, leadId, state)`, `(tenantId, jobId, state)`, `(tenantId, employeeId, state)` | Nothing: time to assignment / jobs per employee read the assignments of a lead / job set already chosen by the indexes above. |
+| `ArrivalVerification` | `(tenantId, jobId, arrivedAt)` | Nothing: time to arrival reads the first arrival per job of the chosen jobs. |
+| `ReconciliationException` | `(tenantId, orgUnitId, status)`, `(tenantId, runId, status)` | Nothing: "open" is a status filter per unit (covered); resolved-in-period counts are over a small table. Revisit if Task 3 measures otherwise. |
+
+The indexes are created inside the migration transaction (blocking writes while they build), like every earlier index; with production
+data, an equivalent index would be built `CONCURRENTLY` outside a transaction first. No index was added "just in case": Tasks 2-3 can
+show a plan (`EXPLAIN`) that needs another one and report NEEDS_CONTEXT with the exact index.
+
+### Contracts for Phase 6 Tasks 2-5 (no further migration expected)
+
+- **Two layers of permission** (PERMISSIONS.md 13): a dashboard endpoint requires its family's `analytics_<family>.view`; each KPI on it
+  requires the KPI's own permission and field set from the catalog, checked over the caller's scope. A family is a set of dashboards, not
+  a set of KPIs: any dashboard may show any KPI whose own requirement the caller meets.
+- **`dispatch_kpis`** (Task 2): the KPI catalog marks the dispatcher's subset (unassigned jobs, time to assignment, time to arrival, the
+  two dispatch efficiency keys) with set `dispatch_kpis`; the engine passes a KPI's sets as `ResourceRef.sets` when checking
+  `analytics_operational.view`, so the Dispatcher's `{ set: "dispatch_kpis" }` grant covers exactly those (fail closed otherwise).
+- **Period anchors** behind the new indexes (Task 2 decides and documents per KPI): job volume / cancellation by `Job.createdAt`,
+  completions and duration by `Job.completedAt`, lead KPIs by `Lead.createdAt`, recovery outcomes by `LeadRecoveryCase.outcomeAt`.
+- **Saved views** (Task 5): `reports.create` saves and edits / archives own views; `reports.manage` shares with roles (insert / delete
+  `SavedReportViewShare`, audited) and archives others' views in scope; `reports.view` lists own views plus views shared with a role the
+  caller holds. Catch `saved_report_view_owner_name_active` as a 409. Validate `datasetKey`, `columns` and `filters` against the dataset
+  catalog before saving (the CHECKs only guard the shape).
+- **Exports** (Task 5): need `reports.export` and the dataset's export permission; count first, then write one `ReportExport` row in the
+  same transaction as the audit event for every attempt: COMPLETED (`rowCount <= rowLimit`), REFUSED_TOO_LARGE (`rowCount > rowLimit`,
+  nothing produced, truthful message) or FAILED (`failureCode`, e.g. `query_timeout`). `columns` = the columns actually exported after
+  field-set gating; `filtersHash` = SHA-256 hex of the canonical JSON of `filters` (keys sorted).
+- **Reading the export log** is an audit read: `audit.view` over the scope (the Owner by default), plus own exports for the actor.
+
+### Rulings for the improvement round
+
+These are manager-level choices made to keep moving; each is one template line or one CHECK to change.
+
+1. **Spec 4.5 has no "Reports" row** (only "Financial reports", unchanged). `reports.*` defaults follow the 5.x workspaces' "Reports"
+   navigation (Executive, COO, Lead Operations, Finance, HR) plus the managers (their dashboards are their reports).
+2. **Managers get no financial dashboard family**: "local revenue per their financial grants" is read as revenue KPIs on their operational
+   dashboard, each checked against the manager's scoped `financial_reports.view`. Alternative: `analytics_financial.view` scoped.
+3. **COO**: executive + operational families and the report builder **without export** (spec 5.7 names exporting reports as Finance's
+   action). Lead conversion and recovery results reach the COO through the executive dashboard's KPIs. Alternative: give the COO
+   `reports.export` and / or `analytics_lead.view`.
+4. **Lead Operations may export** (`reports.export`) because the role already holds `leads.export`; the dataset's own export permission
+   still limits it to lead datasets. Alternative: no export for Lead Ops.
+5. **Dispatcher** holds `analytics_operational.view { set: "dispatch_kpis" }` and no report builder ("operational subset").
+6. **HR** gets the report builder (view, create; spec 5.8 "Reports") but no dashboard family and no export; Team Leader and Customer
+   Relations get nothing; the Technician gets nothing (own figures stay self-service).
+7. **Only the Owner shares views with roles** (`reports.manage`) by default. Alternative: COO / Finance as well.
+8. **One org unit per saved view** as the scope filter (FK), not a list.
+9. **Unsharing deletes** the share row (audited) instead of a revoked flag; views themselves are never deleted.
+10. **Failed and refused exports are logged too** (who tried to export what is itself audit-worthy, spec 13.5 / 22.2).

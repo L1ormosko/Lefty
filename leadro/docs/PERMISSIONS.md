@@ -74,6 +74,11 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `coaching` | view*, create, edit |
 | `data_challenges` | view*, assign (give a challenge to a reviewer), approve (uphold), reject |
 | `customer_feedback` | view, create (record manually), edit (void a mis-recorded entry) |
+| `analytics_executive` | view (executive dashboards, spec 13.1, 5.1) |
+| `analytics_operational` | view (operational dashboards, spec 13.2, 5.2-5.5) |
+| `analytics_financial` | view* (financial dashboards, spec 13.3, 5.7) |
+| `analytics_lead` | view (lead dashboards, spec 5.6) |
+| `reports` | view (run reports, own and role-shared saved views), create (save views; edit / archive own), export* (also needs the dataset's own export permission; audited), manage (share views with roles, archive others' views) |
 
 `PUBLISH` is an 11th action beyond spec 4.3's ten (Phase 5, see section 12): the approval policy for metric publication names
 `performance.publish` as its approver permission, so publishing is a different person's decision than authoring (`performance.configure`).
@@ -496,3 +501,43 @@ Rules:
 - **`lead_team`** is a record set no service resolves yet (it already qualified Lead Ops' `employees.*` and `performance.view`); until a
   service supplies it, those grants match nothing (fail closed).
 - Tests: `tests/authz/workforce-catalog.test.ts` (catalog, templates, labels), `tests/db/phase5-schema.test.ts` (schema).
+
+## 13. Phase 6: enterprise analytics (permission catalog + templates)
+
+Two layers, both required (spec 13.4, 22.2):
+
+1. **Dashboard family**: `analytics_executive.view`, `analytics_operational.view`, `analytics_financial.view` (sensitive),
+   `analytics_lead.view` open that family's dashboards (`/api/v1/analytics/*`, Phase 6 Task 4).
+2. **Per KPI**: every KPI in `src/lib/kpi-catalog.ts` names its own required permission and field set (Tasks 2-3). A dashboard shows a
+   KPI only when the caller also holds that, inside their scope. So a family grant never reveals data its holder could not read
+   otherwise; e.g. revenue on the executive or a manager's dashboard needs `financial_reports.view` (+ the financial set the KPI names).
+
+Report builder (spec 13.5): `reports.view` runs reports and the caller's own or role-shared saved views; `reports.create` saves views and
+edits / archives the caller's own; `reports.manage` shares views with roles and archives other people's; `reports.export` (sensitive)
+exports rows. Every dataset also names its own read and export permission (e.g. `jobs.view` / `jobs.export`, `financial_reports.export`),
+so an export needs `reports.export` **and** the dataset's export permission; columns are gated by field sets, and every attempt (refused
+and failed ones included) is logged in `ReportExport` plus an audit event. **A saved or shared view never widens access**: whoever runs it
+is checked with their own permissions, scope and field sets.
+
+The spec's 4.5 matrix has no "Reports" row; "Financial reports" (`financial_reports`) is unchanged. Defaults follow the 5.x workspaces
+("Reports" navigation: Executive, COO, Lead Operations, Finance, HR; widget lists for managers and the dispatcher):
+
+| Template | Dashboard families | `reports` | Scope |
+|---|---|---|---|
+| Owner / CEO | all four | view, create, export, manage | TENANT |
+| COO | executive, operational | view, create | TENANT |
+| Finance Director | financial | view, create, export | TENANT |
+| State / Regional / City Manager | operational (local revenue via their scoped `financial_reports.view` per KPI) | view, create | ORG_UNIT |
+| Lead Operations Manager | lead | view, create, export (they already hold `leads.export`) | ORG_UNIT |
+| Dispatcher | operational `{ set: "dispatch_kpis" }` | - | ORG_UNIT |
+| HR Manager | - | view, create | TENANT |
+| Team Leader, Customer Relations, Technician | - | - | - |
+
+Rules:
+- **`dispatch_kpis`** is a KPI set the catalog defines (Task 2): the dispatcher's grant covers only the KPIs placed in it (unassigned jobs,
+  time to assignment, time to arrival, dispatch efficiency). The analytics engine passes a KPI's sets as the `ResourceRef.sets` of the
+  check, so a KPI outside the set is not covered (fail closed, like every `set` qualifier).
+- **Finance gains no operational dashboards** (spec 26.3); the COO and managers get no financial dashboard family.
+- **Employee-level analytics** stay in the Phase 5 read models (`performance.*`); no dashboard family ranks individuals (spec 10.3-10.4).
+- **MFA**: a custom role holding `analytics_financial.view` or `reports.export` requires MFA (sensitive permissions).
+- Tests: `tests/authz/analytics-catalog.test.ts` (catalog, templates, labels), `tests/db/phase6-schema.test.ts` (schema).
