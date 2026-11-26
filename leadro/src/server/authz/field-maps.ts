@@ -229,6 +229,52 @@ export const JOB_FIELD_NOTE_FIELD_MAP: FieldMap = buildFieldMap(
 );
 
 /**
+ * Performance metric values (`PerformanceMetricValue`, every stored column except `tenantId`): all `base`. A value is one
+ * dimension's numbers with their sample and evidence ids; what is sensitive about performance is the coaching content around it
+ * (the `coaching` set below), not the numbers. Who may see a value at all is decided by `performance.view` and its scope.
+ */
+export const PERFORMANCE_METRIC_VALUE_FIELD_MAP: FieldMap = buildFieldMap([
+  "id",
+  "definitionId",
+  "employeeId",
+  "orgUnitId",
+  "periodStart",
+  "periodEnd",
+  "jobTypeId",
+  "jobCategory",
+  "numerator",
+  "denominator",
+  "sampleSize",
+  "enoughData",
+  "evidenceIds",
+  "computedAt",
+  "computedById",
+  "systemActor",
+], {});
+
+/**
+ * Manager context notes (`MetricContextNote`) read through `performance.*`: the note's text is the opt-in `coaching` set
+ * (`performance.coaching_fields`, spec 22.2), so a plain `performance.view` grant (a technician's own metrics, OWN scope)
+ * sees that a note exists but not what it says. The employee reads notes shared with them through self-service.
+ */
+export const METRIC_CONTEXT_NOTE_FIELD_MAP: FieldMap = buildFieldMap(
+  [
+    "id",
+    "employeeId",
+    "metricValueId",
+    "periodStart",
+    "periodEnd",
+    "authorId",
+    "sharedWithEmployee",
+    "sharedAt",
+    "archivedAt",
+    "createdAt",
+    "updatedAt",
+  ],
+  { coaching: ["body"] },
+);
+
+/**
  * Field map for records that have no sensitive field sets (users, org units, roles, ...): every
  * listed field is `base`. Unlisted fields stay hidden, so a new column must be added here on purpose.
  */
