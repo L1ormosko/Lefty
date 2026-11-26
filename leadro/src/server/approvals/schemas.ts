@@ -7,7 +7,9 @@ import { pageQuerySchema } from "@/server/core";
 const text = (max: number) => z.string().trim().min(1).max(max);
 const id = z.string().trim().min(1).max(64);
 
-export const APPROVAL_SUBJECT_TYPES = ["MATERIAL_COST_CHANGE", "ADJUSTMENT", "REFUND", "CHARGEBACK_WRITE_OFF", "HIGH_VALUE_DISCOUNT"] as const;
+export const APPROVAL_SUBJECT_TYPES = [
+  "MATERIAL_COST_CHANGE", "ADJUSTMENT", "REFUND", "CHARGEBACK_WRITE_OFF", "HIGH_VALUE_DISCOUNT", "PERFORMANCE_METRIC_DEFINITION",
+] as const;
 export const APPROVAL_REQUEST_STATUSES = ["PENDING", "APPROVED", "REJECTED", "CANCELLED", "EXPIRED"] as const;
 
 export const approvalIdParams = z.object({ id });

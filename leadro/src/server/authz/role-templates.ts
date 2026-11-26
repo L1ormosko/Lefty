@@ -120,7 +120,10 @@ const unitManagerGrants = (): TemplateGrant[] => [
   ...grantActions("jobs", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
   ...view("compensation"),
   ...view("financial_reports"),
-  ...view("performance"),
+  // Phase 5: the unit's management chain reads metric values with the coaching content around them and adds context (EDIT);
+  // MANAGE runs a computation for the unit. No export, no authoring or publishing of metric definitions.
+  ...grantActions("performance", ["VIEW", "EDIT"], { includeFields: ["coaching"] }),
+  ...grantActions("performance", ["MANAGE"]),
   ...grantActions("qualifications", ["VIEW", "CREATE", "EDIT"]),
   ...view("job_types"),
   ...own("notifications"),
@@ -143,6 +146,14 @@ const unitManagerGrants = (): TemplateGrant[] => [
   ...grantActions("finance_adjustments", ["VIEW", "CREATE"]),
   ...view("finance_reconciliation"),
   ...view("approvals"),
+  // Phase 5 (spec 5.4 "recommend training", "review performance evidence"): assign training and accept / dismiss
+  // recommendations, run development plans and coaching for the unit, route challenges to a reviewer. Recording and verifying
+  // training completions, and deciding challenges, are HR's (spec 5.8).
+  ...grantActions("training", ["VIEW", "EDIT", "ASSIGN"]),
+  ...grantActions("development_plans", ["VIEW", "CREATE", "EDIT"]),
+  ...grantActions("coaching", ["VIEW", "CREATE", "EDIT"]),
+  ...grantActions("data_challenges", ["VIEW", "ASSIGN"]),
+  ...view("customer_feedback"),
 ];
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
@@ -194,7 +205,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...own("notifications"),
       ...view("compensation"),
       ...view("financial_reports"),
+      // Spec 4.5 "Performance: View" for the executive: metric values only, without the coaching set (coaching notes, plans and
+      // challenges belong to the employee's management chain and HR). Training status and customer feedback are read-only.
       ...view("performance"),
+      ...view("training"),
+      ...view("customer_feedback"),
       ...view("permissions"),
       // "Limited": may assign roles, but only non-sensitive ones. The permissions module enforces it.
       ...grantActions("permissions", ["ASSIGN"], { set: "non_sensitive_roles" }),
@@ -265,7 +280,13 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("qualifications"),
       ...view("job_types"),
       ...own("notifications"),
-      ...view("performance"),
+      // Phase 5: the team's direct lead coaches (spec 10.4): metric values with the coaching set and context notes, coaching
+      // notes, and read access to plans, training and feedback. Assigning training, plans and challenges stay with managers / HR.
+      ...grantActions("performance", ["VIEW", "EDIT"], { includeFields: ["coaching"] }),
+      ...view("training"),
+      ...grantActions("coaching", ["VIEW", "CREATE", "EDIT"]),
+      ...view("development_plans"),
+      ...view("customer_feedback"),
       ...view("shifts"),
       ...view("job_outcomes"),
       ...view("completion_forms"),
@@ -287,7 +308,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("jobs", { set: "recovery_related" }),
       ...view("job_types"),
       ...own("notifications"),
-      ...view("performance", { set: "lead_team" }),
+      // Spec 4.5 "Performance: Lead team". Phase 5: with the coaching set, plus coaching notes and training status of the lead
+      // team (the `lead_team` record set; no service resolves it yet, so these grants match nothing until one does).
+      ...view("performance", { set: "lead_team", includeFields: ["coaching"] }),
+      ...grantActions("coaching", ["VIEW", "CREATE"], { set: "lead_team" }),
+      ...view("training", { set: "lead_team" }),
       // Phase 3: lead recovery (spec 4.4). Authors rules (manage) but cannot activate a high-impact one (approve is COO/Owner).
       // Technician presence arrives inside the case as a status; Lead Ops holds no location permission.
       ...grantActions("recovery", ["VIEW", "CREATE", "EDIT", "ASSIGN", "MANAGE"]),
@@ -334,6 +359,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...own("notifications"),
       // Phase 3: "Follow-up tasks" are part of the role (spec 4.4).
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
+      // Phase 5: Customer Relations records customer feedback (manual entry, no survey provider) and voids a mis-recorded one.
+      ...full("customer_feedback"),
     ],
   }),
   defineTemplate({
@@ -349,7 +376,16 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // Credentials and licenses are HR records (spec 10.1): HR verifies them (qualifications.approve).
       ...full("qualifications"),
       ...own("notifications"),
-      ...view("performance"),
+      // Phase 5 (spec 5.8): full training (catalog, assignments, recording and verifying completions), development plans,
+      // coaching and the review of employee-submitted corrections (data challenges). Metric values with the coaching set, and
+      // authoring metric definitions (CONFIGURE); publishing one is a second person's decision (`performance.publish`).
+      // Still no financial data: no finance_*, compensation, financial_reports or financial field sets.
+      ...grantActions("performance", ["VIEW", "EDIT"], { includeFields: ["coaching"] }),
+      ...grantActions("performance", ["CONFIGURE"]),
+      ...full("training"),
+      ...full("development_plans"),
+      ...full("coaching"),
+      ...full("data_challenges"),
     ],
   }),
   defineTemplate({
@@ -375,7 +411,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...own("notifications"),
       ...view("compensation"),
       // No financial_reports.view: own statements/summary are self-service, not the module permission.
+      // Own metric values (OWN scope), without the coaching set: shared notes, own plans and challenges are self-service (5.11).
       ...view("performance"),
+      // Phase 5: own training records and assignments (OWN scope).
+      ...view("training"),
       // Phase 3 (OWN / ASSIGNED scopes): own shift, own location events (recording only, no history, no verification),
       // outcomes of assigned jobs, the completion form to fill in, follow-ups assigned to them.
       ...grantActions("shifts", ["VIEW", "CREATE", "EDIT"]),

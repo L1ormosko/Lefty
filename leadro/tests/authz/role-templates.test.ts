@@ -61,10 +61,14 @@ describe("role template definitions", () => {
   });
 
   it("hands out sensitive field sets only to Owner/CEO and Finance Director (opt-in)", () => {
-    // Visit-outcome money (job_outcomes.financial_fields) has its own, wider audience: see the next test.
+    // Visit-outcome money (job_outcomes.financial_fields) has its own, wider audience: see the next test. So has the coaching set
+    // (performance.coaching_fields: the management chain and HR), pinned in workforce-catalog.test.ts.
     const naming = ROLE_TEMPLATES.filter((t) =>
       t.grants.some(
-        (g) => !g.permission.startsWith("job_outcomes.") && (g.conditions?.includeFields?.length || ["financial", "billing"].includes(g.conditions?.fields ?? "")),
+        (g) =>
+          !g.permission.startsWith("job_outcomes.") &&
+          !g.permission.startsWith("performance.") &&
+          (g.conditions?.includeFields?.length || ["financial", "billing"].includes(g.conditions?.fields ?? "")),
       ),
     ).map((t) => t.key);
     expect(naming.sort()).toEqual(["FINANCE_DIRECTOR", "OWNER_CEO"]);
