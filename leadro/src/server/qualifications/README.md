@@ -6,6 +6,7 @@ eligibility check that dispatch builds on. The pure rules live in `src/lib/eligi
 `src/lib/zoned-time.ts`; the status machine in `src/lib/qualification-lifecycle.ts`.
 
 Public API (`index.ts`):
+- Self-service (Task 6, no module permission, own rows): `listOwnQualifications` (certification status, full number for the holder).
 - Eligibility: `isEligible(tx, tenantId, employeeId, requirements, { at, window, timeZone })` returns
   `{ eligible, failures: [{ code, params }], checked }`; `evaluateCandidates` does many employees in one load.
   Build `requirements` with `requirementsForJobType` (type + extras, for "what if") or `requirementsFromInputs`

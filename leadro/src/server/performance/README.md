@@ -6,6 +6,10 @@ computation per employee x period x job type / category with a minimum sample, a
 formula of every kind: `docs/DECISIONS.md` "Phase 5 Task 3".
 
 Public API (`index.ts`):
+- Self-service (Task 6, `self-service` = no module permission, own rows): `listOwnCurrentValues`, `getOwnMetricValue` (published
+  versions only, evidence on the detail). Dashboard read: `listPeerCurrentValues(actor, series)` = colleagues' current values per
+  comparison group in the caller's `performance.view` scope (published only; ranks nothing). `listEmployeeCurrentValues` takes
+  `{ publishedOnly }` for read models.
 - Definitions: `createDefinition`, `createDefinitionVersion`, `updateDefinition` (DRAFT without values), `retireDefinition`, `listDefinitions`,
   `getDefinition`, `getMetricCatalog`.
 - Publication: `submitDefinition` (approval request, subject `PERFORMANCE_METRIC_DEFINITION`), `withdrawDefinition`;

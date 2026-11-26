@@ -4,6 +4,7 @@ Training catalog, assignments and completion records (§10.1 "Training", §5.4, 
 "Phase 5 Task 2"; permissions: `docs/PERMISSIONS.md` section 12; tables: `docs/ERD.md` "Phase 5".
 
 Public API (`index.ts`):
+- Self-service (Task 6, no module permission, own rows, with the course summary): `listOwnAssignments`, `listOwnRecords`.
 - Courses: `listCourses`, `getCourse`, `createCourse`, `updateCourse`, `archiveCourse`. Tenant-wide reference data: any
   `training.view` reads, `training.manage` at TENANT scope changes. A course may grant a TRAINING-type certification.
 - Assignments: `assignTraining` (`training.assign`), `updateAssignment` / `startAssignment` / `cancelAssignment`

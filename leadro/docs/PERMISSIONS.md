@@ -476,6 +476,11 @@ Rules:
   certification status, their non-DRAFT plans, the coaching and context notes marked shared, and their own challenges through
   `/api/v1/me/*` (Task 6), and raise challenges there. Those paths filter on the caller and need no module permission; the
   Technician template's `performance.view` / `training.view` (OWN) remain for the module endpoints.
+- **Development dashboard** (`GET /api/v1/employees/{id}/development`, Task 6): `performance.view` over the employee. Positions compare
+  with the colleagues in the VIEWER's `performance.view` scope only. Coaching notes, context notes, plans and review history appear only
+  when the viewer's grant over the employee names the `coaching` set and (notes / plans) they hold `coaching.view` /
+  `development_plans.view`; recommendations need `training.view`. A missing section is `null`, not an error, so the COO sees values and
+  positions but no coaching content (ruling 1).
 - **Metric definitions.** HR (and the Owner) author versions (`performance.configure`, which forces MFA like every `*.configure`).
   Publishing always goes through the approval engine (subject `PERFORMANCE_METRIC_DEFINITION`, seeded policy
   `performance_metric_publication`, approver permission `performance.publish`, held by the Owner only by default); the author can never

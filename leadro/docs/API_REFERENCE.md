@@ -3459,3 +3459,137 @@ Error detail codes (labels `PERFORMANCE.ERROR.*`): `performance.invalid_params`,
 - **Permission**: `performance.view` over the employee (`404` outside scope). **Query** (strict): `definitionId?`, `key?`, `from?` (periods
   starting on or after), `to?` (periods ending on or before), `enoughDataOnly` (`true|false`, default false). **Answers** the CURRENT value
   (newest snapshot) per definition version, period and breakdown, ordered by key and period (newest first). Each entry stands alone.
+
+## Development dashboard (`/api/v1/employees/{id}/development`) - Phase 5
+
+Code: `src/server/development-dashboard` (README there), position rules `src/lib/metric-position.ts`. Decisions: `DECISIONS.md` "Phase 5
+Task 6". Spec 10.4 (manager development dashboard), 10.3 (never feeds work), 22.2 (coaching content is sensitive).
+
+### GET /api/v1/employees/{id}/development
+
+- **Purpose**: the manager development dashboard of one employee: strengths, development opportunities, training recommendations,
+  history over periods, evidence links, coaching notes and review history. A read model composed from the performance, coaching and
+  development modules.
+- **Auth**: session. **Permission**: `performance.view` over the employee (`403` without it, `404` outside the scope).
+- **Response**: `200 { data: { employeeId, generatedAt, minPeersForPosition, metrics, strengths, developmentOpportunities, recommendations,
+  coachingNotes, contextNotes, plans, reviewHistory } }`.
+  - `metrics[]`: one entry per series = published definition version (current or retired; previews never) x job type / category:
+    `definitionId, key, version, kind, dimension, definitionStatus, minSample, numeratorKind, evidenceTable, jobTypeId, jobCategory`,
+    `current` (the latest period: `valueId, periodStart, periodEnd, numerator, denominator, sampleSize, enoughData, evidenceCount,
+    computedAt, evidenceUrl` = `/api/v1/performance/values/{valueId}`, which lists the evidence ids), `history[]` (every period, oldest
+    first, same fields), `position` and `assessment`.
+  - `position`: `{ status: POSITIONED | NOT_ENOUGH_DATA | NOT_ENOUGH_PEERS, peerCount, betterCount, sameCount, worseCount, quartile (1 = best
+    quarter .. 4, or null), lowerIsBetter }` among the colleagues in the CALLER's `performance.view` scope with a current value of the same
+    version, period and breakdown and enough data (the employee included in `peerCount`). No position below `minPeersForPosition` (4)
+    comparable people or when the employee's own value has not enough data. Rates are compared exactly; ties count half; lower is better
+    for REPEAT_VISIT_RATE. Labels `PERFORMANCE.POSITION.*`.
+  - `assessment`: `STRENGTH` (quartile 1) | `DEVELOPMENT_OPPORTUNITY` (quartile 4) | `TYPICAL` | null (no position). `strengths[]` /
+    `developmentOpportunities[]` list those series as `{ definitionId, key, dimension, jobTypeId, jobCategory, valueId }`. Labels
+    `DEVELOPMENT.ASSESSMENT.*`.
+  - `recommendations`: OPEN training recommendations (as `GET /training/recommendations`, at most 50), or `null` without `training.view`
+    over the employee.
+  - `coachingNotes` (as `GET /coaching/records`, private ones included, at most 50), `contextNotes` (as `GET /coaching/context-notes`, at
+    most 50), `plans` (plan summaries, newest first, at most 10) and `reviewHistory` (the review entries of those plans with `planId`,
+    newest first): `null` unless the caller's grant over the employee names the `coaching` field set (`performance.coaching_fields`) AND,
+    for notes / plans, the caller holds `coaching.view` / `development_plans.view` over the employee.
+  - Never a combined score: no number adds, averages or ranks across dimensions or employees.
+- **Errors**: `403`, `404`. **Audit**: none.
+
+## Self-service workforce data (`/api/v1/me/**`) - Phase 5
+
+Spec 5.11 (employee self-service), 10.4 (challenge inaccurate information), PERMISSIONS.md section 12 "Self-service". Every path needs a
+session and NO module permission: the query is filtered on the caller's employee record. A user without an employee record gets empty lists
+and `404` on details; another person's record is a `404`. Lists page with `cursor` / `limit` (except `/me/metrics`, which answers the whole
+current set like `GET /performance/employees/{id}/values`). Code: the `self-service.ts` file of the owning module (performance, coaching,
+training, qualifications, development, data-challenges). Raising and withdrawing a challenge stay `POST /api/v1/data-challenges` and
+`POST /api/v1/data-challenges/{id}/withdraw`. `GET /api/v1/users/me` (profile) and `POST /api/v1/users/me/password` are unchanged.
+
+### GET /api/v1/me/metrics
+
+- The caller's CURRENT value (newest snapshot) per definition version, period and breakdown, for versions that were PUBLISHED (current or
+  retired; `definitionStatus` tells them apart, only values of the PUBLISHED version can be challenged). Never a preview. **Query** (strict):
+  as `GET /performance/employees/{employeeId}/values`. **Response**: `200 { data: [value] }` with `evidenceCount`. **Audit**: none.
+
+### GET /api/v1/me/metrics/{id}
+
+- One of the caller's published values with `evidenceIds` (the records counted, in `evidenceTable`). `404` otherwise (preview, someone
+  else's, unknown).
+
+### GET /api/v1/me/context-notes
+
+- Managers' context notes on the caller's metrics that were SHARED with them and are not archived, newest first. **Query** (strict):
+  `cursor`, `limit`, `metricValueId?`.
+
+### GET /api/v1/me/coaching-notes
+
+- Coaching notes about the caller that were SHARED with them and are not archived (private ones never appear), newest conversation first.
+  **Query** (strict): `cursor`, `limit`, `metricValueId?`.
+
+### GET /api/v1/me/training/assignments
+
+- The caller's training assignments in every status, soonest due first, with `overdue` (tenant-local date) and `course { id, code, name,
+  category, certificationId }`. **Query** (strict): `cursor`, `limit`, `status?`, `courseId?`. Works without `training.view` (e.g. a
+  Dispatcher).
+
+### GET /api/v1/me/training/records
+
+- The caller's training completions in every status (pending, verified, rejected with `decisionReason`, revoked), newest first, with
+  `expiresAt`, evidence metadata and `course`. **Query** (strict): `cursor`, `limit`, `status?`, `courseId?`.
+
+### GET /api/v1/me/qualifications
+
+- Certification status: the caller's skills and credentials (CERTIFICATION, LICENSE, EQUIPMENT, TRAINING) in every status, soonest expiry
+  first, with the full credential number (the holder's own) and `skill { code, name }` / `certification { code, name, type }`. **Query**
+  (strict): `cursor`, `limit`, `kind?`, `status?`.
+
+### GET /api/v1/me/development-plans
+
+- The caller's plans that left DRAFT (ACTIVE, COMPLETED, CANCELLED), newest first, without `cancelReason`. **Query** (strict): `cursor`,
+  `limit`, `status?` (`ACTIVE | COMPLETED | CANCELLED`).
+
+### GET /api/v1/me/development-plans/{id}
+
+- One of those plans with `goals` and `actions`, WITHOUT the manager's private notes: `reviews[]` keep only `{ id, planStatus, reviewedAt }`
+  (no text, no reviewer), no `cancelReason`, and an action's `coachingRecordId` is `null` unless that note was shared and is not archived.
+  `404` for a draft, someone else's or an unknown plan.
+
+### GET /api/v1/me/data-challenges
+
+- The challenges the caller raised, newest first (statement, status, reviewer, resolution). **Query** (strict): `cursor`, `limit`,
+  `status?`, `targetType?`.
+
+### GET /api/v1/me/data-challenges/{id}
+
+- One of the caller's challenges (`404` otherwise).
+
+## Customer feedback (`/api/v1/customer-feedback/**`) - Phase 5
+
+Code: `src/server/customer-feedback` (README there). Recorded by hand by Customer Relations (no survey provider; channel always `MANUAL`).
+**Permissions**: `customer_feedback.view / .create / .edit` (EDIT = void), scoped by the JOB's org unit (copied onto the row when recorded).
+Templates: Customer Relations full; Owner full; COO, State / Regional / City managers, Team Leader view. **Fields**: `id, jobId, customerId,
+employeeId, rating (1-5 | null), comment, channel, orgUnitId, receivedAt, recordedById, recordedAt, voidedAt, voidedById, voidReason,
+createdAt, updatedAt`. Feedback is a metric input only through a published CUSTOMER_FEEDBACK_AVERAGE definition (non-voided, rated, about
+the employee).
+
+### GET /api/v1/customer-feedback
+
+- **Permission**: `customer_feedback.view`, filtered by scope. **Query** (strict): `cursor`, `limit`, `jobId?`, `customerId?`, `employeeId?`,
+  `includeVoided` (`true|false`; voided entries hidden by default). **Response**: `200 { data, page }` newest `receivedAt` first.
+
+### POST /api/v1/customer-feedback
+
+- **Permission**: `customer_feedback.create` over the job's org unit (`404` for an unknown job or one outside the scope).
+  **Idempotency**: `Idempotency-Key` supported. **Body** (strict): `jobId`, `employeeId?` (must have been assigned to the job, else `400`
+  on `employeeId`; omitted = about the job / company, counted for nobody), `rating?` (integer 1-5), `comment?` (1-4000), at least one of
+  rating / comment, `receivedAt?` (ISO instant, not in the future; default now). The customer is the job's. **Response**: `201 { data }`.
+- **Audit**: `customer_feedback.record` (ids, rating, `commentSha256`; never the comment text).
+
+### GET /api/v1/customer-feedback/{id}
+
+- **Permission**: `customer_feedback.view` over the entry's org unit (`404` outside).
+
+### POST /api/v1/customer-feedback/{id}/void
+
+- **Permission**: `customer_feedback.edit` over the entry's org unit (`404` outside). **Body** (strict): `{ reason }` (1-1000). Once: a
+  second void is `409`. The entry stays readable (`includeVoided=true`); what the customer said is never edited (DB trigger).
+- **Audit**: `customer_feedback.void` (`voidReasonSha256`).

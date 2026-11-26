@@ -5,6 +5,7 @@ metric value, a training record, a coaching note shared with them, or a qualific
 `/api/v1/data-challenges/**` (`docs/API_REFERENCE.md` "Data challenges"). Decisions: `docs/DECISIONS.md` "Phase 5 Task 4".
 
 Public API (`index.ts`):
+- Self-service reads (Task 6): `listOwnDataChallenges`, `getOwnDataChallenge` (own challenges only, else 404).
 - Self-service (no module permission; the record must be the caller's own): `raiseDataChallenge`, `withdrawDataChallenge`
   (the raiser only, else 404).
 - Review: `assignDataChallengeReviewer` (`data_challenges.assign`: managers and HR route), `upholdDataChallenge`

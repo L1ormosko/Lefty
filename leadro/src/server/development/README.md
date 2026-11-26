@@ -4,6 +4,8 @@ Development plans and training recommendations (§10.4, §5.4, §5.8, §28.6). D
 permissions: `docs/PERMISSIONS.md` section 12; tables: `docs/ERD.md` "Phase 5".
 
 Public API (`index.ts`):
+- Self-service (Task 6, no module permission): `listOwnPlans`, `getOwnPlan` = own ACTIVE / COMPLETED / CANCELLED plans without the
+  manager's private notes (review text and reviewer, cancel reason, links to unshared coaching notes).
 - Plans (`development_plans.view / .create / .edit` over the EMPLOYEE): `createPlan`, `updatePlan`, `activatePlan`,
   `completePlan`, `cancelPlan`, `getPlan`, `listPlans`; `addGoal`, `updateGoal`, `addAction`, `updateAction`, `addReview`.
 - Recommendations (`training.view` to read, `training.assign` to run / decide, over the employee): `generateRecommendations`

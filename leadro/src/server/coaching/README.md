@@ -5,6 +5,7 @@ Coaching records and manager context notes on metric values (spec 10.4 "coaching
 (`docs/API_REFERENCE.md` "Coaching"). Decisions: `docs/DECISIONS.md` "Phase 5 Task 4".
 
 Public API (`index.ts`):
+- Self-service (Task 6, no module permission): `listOwnSharedCoachingRecords`, `listOwnSharedContextNotes` (shared, not archived).
 - Coaching records: `createCoachingRecord`, `updateCoachingRecord` (author, private notes only), `shareCoachingRecord`,
   `archiveCoachingRecord`, `getCoachingRecord`, `listCoachingRecords`. Permissions `coaching.view` / `.create` / `.edit` over the
   record's EMPLOYEE (`view` is sensitive).

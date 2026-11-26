@@ -1547,3 +1547,75 @@ Routes `/api/v1/development-plans/**`, `/api/v1/training/recommendations/**`. No
   `actions` list for this. PERFORMANCE_METRIC_VALUE stays annotation-only.
 - **Architecture test** `tests/development/architecture.test.ts`: dispatch, qualifications, jobs, ledger, payments, approvals, employees,
   finance-adjustments, training and performance never import the development module; it imports only read functions from qualifications.
+
+## Phase 5 Task 6: read models (development dashboard, self-service) and customer feedback
+
+New modules `src/server/development-dashboard` and `src/server/customer-feedback` (README each); a `self-service.ts` in performance,
+coaching, training, qualifications, development and data-challenges; pure rules `src/lib/metric-position.ts`. Routes
+`GET /api/v1/employees/{id}/development`, `/api/v1/me/**` (11 GETs), `/api/v1/customer-feedback/**`. No migration, no dependency.
+
+### Manager development dashboard
+
+- **Composed, not re-queried**: the dashboard calls only public read functions (`listEmployeeCurrentValues`, the new
+  `listPeerCurrentValues`, `listCoachingRecords`, `listContextNotes`, `listPlans`, `getPlan`, `listRecommendations`, `can`,
+  `canViewFields`); each enforces its own permission and scope. They run in separate read transactions, so the sections are not one
+  snapshot (acceptable for a read model; a value computed between two calls may show in one section only).
+- **Only published versions** (current or retired) are on the dashboard (`listEmployeeCurrentValues(..., { publishedOnly: true })`, an
+  in-process option, not an API parameter): previews belong to the performance module's authoring endpoints.
+- **Series = definition VERSION x breakdown** (job type / category, or none for TRAINING_PROGRESS); history = its periods, oldest first.
+  Versions are not chained under one key: a new version may compute differently, so mixing them in one line would mislead.
+- **Position, not score** (spec 10.4 "no universal score"): for the latest period of each series, among the colleagues in the VIEWER's
+  `performance.view` scope with a current value of the same version, period and breakdown. Only values with `enoughData` and at least one
+  opportunity take part. Output: `peerCount` (the "team sample size", the employee included), better / same / worse counts and a quartile.
+  Rules (each one line of `metric-position.ts`): at least 4 comparable people (`MIN_PEERS_FOR_POSITION`; fewer says nothing and would make a
+  colleague identifiable), exact integer comparison of rates, ties count half (mid-rank: an all-equal group is "typical" for everyone, not
+  a strength for everyone), lower is better for REPEAT_VISIT_RATE (same list as the development thresholds). Quartile 1 = STRENGTH,
+  4 = DEVELOPMENT_OPPORTUNITY, else TYPICAL; nothing ever sums, averages or ranks across dimensions.
+- **"Team" = the viewer's scope**, not the employee's `orgUnitId` snapshot on the value: the comparison must only use values the viewer may
+  read anyway (a City manager compares within the city, HR tenant-wide), and the snapshot would include people the viewer cannot see.
+- **Coaching content gate** (Task 1 contract): coaching notes, context notes, plans and review history need the `coaching` field set over
+  the employee (`canViewFields(..., "performance.coaching_fields")`) AND the owning module's view permission (`coaching.view`,
+  `development_plans.view`; context notes are already the performance permission with the set). Missing = the section is `null`, not a
+  403, so the COO (ruling 1) still sees values and positions. Recommendations (OPEN only) need `training.view`; they are not coaching
+  content. Challenges are not on the dashboard (the brief does not list them; they have their own sensitive endpoints).
+- **Sections are bounded**: 50 coaching notes, 50 context notes, 10 plans (with their reviews), 50 recommendations; the module endpoints page
+  the rest. An employee who holds `performance.view` OWN (Technician) can open their own dashboard: published values only, no peers in an
+  OWN scope (NOT_ENOUGH_PEERS), no coaching content.
+- **Evidence drill-down** = `evidenceUrl` per period (`/api/v1/performance/values/{id}`, which returns the evidence ids and table).
+
+### Self-service (`/api/v1/me/**`)
+
+- `/api/v1/me` did not exist (only `/users/me` profile and password). Each owning module got a `self-service.ts` whose functions filter on
+  `actor.employeeId` and need no module permission (PERMISSIONS.md section 12); a user without an employee record gets empty lists and
+  404 on details. No new aggregate module: the routes call the owning modules directly.
+- **Metrics**: current values of versions that were ever published (retired ones stay as history; `definitionStatus` says which can still be
+  challenged); never a preview, whatever the caller holds. The detail returns the evidence ids.
+- **Notes**: only `sharedWithEmployee` and not archived, coaching notes and context notes alike.
+- **Training / credentials**: every status (the employee must see a rejection and its reason), each row with the course (or skill /
+  certification) summary because the catalogs need `training.view` / `qualifications.view`, which e.g. a Dispatcher lacks. The holder sees
+  their own credential number in full (the qualifications module's own masking rule).
+- **Plans "without private notes"**: DRAFT plans are hidden (manager work in progress); review entries keep only `{ id, planStatus,
+  reviewedAt }` (review text and reviewer are the manager's notes), `cancelReason` is left out, and an action's `coachingRecordId` is nulled
+  unless that note was shared and is not archived. Goals, actions and the plan text are shown (the plan is meant for the employee; the
+  `development_plan.activated` notification already sends them to self-service). Alternative: show review text too (one line).
+- **Challenges**: the employee sees their own challenge with status, reviewer and resolution (they need the outcome; `data_challenge.decided`
+  sends them here).
+
+### Customer feedback
+
+- Scope = the job's org unit copied onto the row (the follow-up pattern); one gate (`customer_feedback.*`), no second gate on the customer
+  record: Customer Relations' `jobs.view` is limited to the customer-history set, and the feedback row itself carries only ids.
+- The named employee must have had a `JobAssignment` on the job (any role or state), so feedback cannot be attributed to someone who never
+  worked it (400 on `employeeId`). Without an employee it is about the job / company and counted for nobody (ruling 10).
+- `receivedAt` defaults to now and cannot be in the future (5 minutes tolerance); feedback on a job of any status is accepted (customers
+  also comment on cancelled visits).
+- Void: `customer_feedback.edit` over the entry's unit, once (409 afterwards, also guarded by the DB trigger). Comment and void reason are
+  audited as SHA-256 digests (customer free text, same rule as coaching).
+
+### Spec 10.3 architecture test
+
+`tests/development-dashboard/architecture.test.ts`: dispatch, qualifications, jobs, ledger, payments, approvals, employees and
+finance-adjustments (compensation lives nowhere yet; the finance modules stand in for it) never import `development-dashboard` or
+`customer-feedback`; training, performance, coaching, data-challenges and development never import the dashboard; the dashboard's value
+imports from `@/server/*` are limited to the read functions listed above. The qualifications module's new `listOwnQualifications` is a
+read of the caller's own rows and imports no performance module (the existing performance / development tests still pass).
