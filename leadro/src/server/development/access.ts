@@ -33,6 +33,16 @@ export async function enforceOverEmployee(tx: TenantTx, actor: Actor, permission
   await enforceInTx(tx, actor, permission, { employeeId });
 }
 
+/**
+ * Development records about the CALLER are not read or changed through a management grant (review P5-R1/R2): a manager
+ * placed in their own unit (or HR, tenant-wide) would otherwise read the review notes about them, which self-service hides,
+ * and rewrite, cancel or decide what their own manager set up for them. They read their plans through `/api/v1/me/*`.
+ */
+export const isAboutCaller = (actor: Actor, employeeId: string): boolean => actor.employeeId !== null && actor.employeeId === employeeId;
+
+/** List fragment that leaves out records about the caller (see `isAboutCaller`). */
+export const notAboutCaller = (actor: Actor): { employeeId?: { not: string } } => (actor.employeeId ? { employeeId: { not: actor.employeeId } } : {});
+
 /** Nobody runs a development plan about themselves (it is the management chain's or HR's plan for the person). */
 export function assertNotAboutSelf(actor: Actor, employeeId: string): void {
   if (actor.employeeId === employeeId) throw new ForbiddenError({ message: "You cannot run a development plan about yourself." });

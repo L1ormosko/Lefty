@@ -3,7 +3,17 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, narrowScopeToFieldSet, resolveScope, withinScope } from "@/server/authz";
 import { InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { COACHING_FIELD_SET, assertCoachingFields, assertNotAboutSelf, loadMetricValueFacts, lockRow, textDigest, viaEmployee } from "./access";
+import {
+  COACHING_FIELD_SET,
+  assertCoachingFields,
+  assertNotAboutSelf,
+  isAboutCaller,
+  loadMetricValueFacts,
+  lockRow,
+  notAboutCaller,
+  textDigest,
+  viaEmployee,
+} from "./access";
 import type { CreateContextNoteInput, ListContextNotesQuery } from "./schemas";
 
 /**
@@ -34,7 +44,8 @@ async function loadForAction(tx: TenantTx, actor: Actor, noteId: string): Promis
   await enforceInTx(tx, actor, WRITE);
   await lockRow(tx, "MetricContextNote", noteId, actor.tenantId);
   const note = await tx.metricContextNote.findFirst({ where: { id: noteId, tenantId: actor.tenantId } });
-  if (!note) throw new NotFoundError();
+  // A note about the caller is neither readable nor changeable through a management grant (review P5-R1/R2).
+  if (!note || isAboutCaller(actor, note.employeeId)) throw new NotFoundError();
   const read = await enforceInTx(tx, actor, READ, { employeeId: note.employeeId });
   // Without the coaching set the note does not exist for the caller (a 404 like any other out-of-scope record).
   if (!read.fieldSets.includes(COACHING_FIELD_SET)) throw new NotFoundError();
@@ -139,7 +150,8 @@ export async function getContextNote(actor: Actor, noteId: string): Promise<Cont
   return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, READ);
     const note = await tx.metricContextNote.findFirst({ where: { id: noteId, tenantId: actor.tenantId } });
-    if (!note) throw new NotFoundError();
+    // Context on the caller's own metrics is read through self-service only (shared notes), never here (P5-R1).
+    if (!note || isAboutCaller(actor, note.employeeId)) throw new NotFoundError();
     const decision = await enforceInTx(tx, actor, READ, { employeeId: note.employeeId });
     if (!decision.fieldSets.includes(COACHING_FIELD_SET)) throw new NotFoundError();
     return toContextNoteView(note);
@@ -160,6 +172,8 @@ export async function listContextNotes(actor: Actor, query: ListContextNotesQuer
       ...(query.employeeId ? { employeeId: query.employeeId } : {}),
       ...(query.metricValueId ? { metricValueId: query.metricValueId } : {}),
       ...(query.includeArchived ? {} : { archivedAt: null }),
+      // Never notes about the caller (P5-R1): they read the shared ones through `/api/v1/me/context-notes`.
+      AND: [notAboutCaller(actor)],
     };
     const rows = await tx.metricContextNote.findMany({
       where: withinScope(buildScopeWhere(scope, noteScopeColumns, now), callerWhere),

@@ -3,6 +3,7 @@ import { auditContextFields, recordAudit, type AuditContextFields } from "@/serv
 import { buildScopeWhere, employeeScopeColumns, enforceInTx, narrowScopeToFieldSet, resolveScope, withinScope } from "@/server/authz";
 import {
   conflictOnUniqueViolation,
+  ForbiddenError,
   InvalidStateTransitionError,
   NotFoundError,
   ValidationError,
@@ -16,7 +17,7 @@ import { prisma, withTenant, type TenantTx } from "@/server/db";
 import { logger } from "@/server/logging";
 import { deliverAfterCommit } from "@/server/notifications";
 import { createTrainingAssignmentInTx, TRAINING_ASSIGNMENT_ALREADY_OPEN } from "@/server/training";
-import { enforceOverEmployee, lockRow, recommendationScopeColumns, tenantCalendar, textDigest } from "./access";
+import { enforceOverEmployee, isAboutCaller, lockRow, recommendationScopeColumns, tenantCalendar, textDigest } from "./access";
 import { addActionInTx } from "./plan-items";
 import { assertChangeable, loadPlanForChange } from "./plans";
 import { evaluateRecommendationRules, pairKey, reasonIdentity, type RecommendationReason } from "./rules";
@@ -198,6 +199,8 @@ async function loadOpenForDecision(tx: TenantTx, actor: Actor, recommendationId:
   const row = await tx.trainingRecommendation.findFirstOrThrow({ where: { id: recommendationId, tenantId: actor.tenantId } });
   await enforceOverEmployee(tx, actor, "training.view", row.employeeId);
   await enforceOverEmployee(tx, actor, "training.assign", row.employeeId);
+  // P5-R2: a recommendation about the caller is decided by their management chain, not by them.
+  if (isAboutCaller(actor, row.employeeId)) throw new ForbiddenError({ message: "You cannot decide a training recommendation about yourself." });
   if (row.status !== "OPEN") throw new InvalidStateTransitionError({ message: `This recommendation is already ${row.status.toLowerCase()}.` });
   return row;
 }

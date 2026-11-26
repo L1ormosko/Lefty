@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { changedFields } from "@/lib/changed-fields";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, narrowScopeToFieldSet, resolveScope, withinScope } from "@/server/authz";
-import { conflictOnUniqueViolation, ConflictError, InvalidStateTransitionError, NotFoundError, pageArgs, toPage, ValidationError, type Actor, type Page, type RequestContext } from "@/server/core";
+import { conflictOnUniqueViolation, ConflictError, ForbiddenError, InvalidStateTransitionError, NotFoundError, pageArgs, toPage, ValidationError, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { deliverAfterCommit } from "@/server/notifications";
 import { enforceOverEmployee, loadActiveEmployee, lockRow, tenantCalendar } from "./access";
@@ -111,6 +111,11 @@ async function loadForChange(tx: TenantTx, actor: Actor, assignmentId: string) {
   await lockRow(tx, "TrainingAssignment", actor.tenantId, assignmentId);
   const row = await tx.trainingAssignment.findFirstOrThrow({ where: { id: assignmentId, tenantId: actor.tenantId } });
   await enforceOverEmployee(tx, actor, "training.edit", row.employeeId);
+  // Review P5-R2: what someone's manager assigned them is not theirs to reschedule or cancel (same principle as
+  // `assertNotOwnRecord` for verifications).
+  if (actor.employeeId !== null && row.employeeId === actor.employeeId) {
+    throw new ForbiddenError({ message: "You cannot change a training assignment of your own." });
+  }
   if (row.status !== "ASSIGNED" && row.status !== "IN_PROGRESS") {
     throw new InvalidStateTransitionError({ message: `A ${row.status.toLowerCase()} assignment cannot change.` });
   }

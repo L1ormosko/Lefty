@@ -37,6 +37,17 @@ export function assertNotAboutSelf(actor: Actor, employeeId: string): void {
 }
 
 /**
+ * Coaching content about the CALLER is never read (or changed) through a management grant (review P5-R1): a manager placed
+ * in their own unit, or HR with a tenant-wide grant, would otherwise read the private notes their own manager wrote about
+ * them. They read what was shared with them through self-service (`/api/v1/me/*`). Mirrors the performance module's
+ * "own values stay published-only".
+ */
+export const isAboutCaller = (actor: Actor, employeeId: string): boolean => actor.employeeId !== null && actor.employeeId === employeeId;
+
+/** List fragment that leaves out records about the caller (see `isAboutCaller`). */
+export const notAboutCaller = (actor: Actor): { employeeId?: { not: string } } => (actor.employeeId ? { employeeId: { not: actor.employeeId } } : {});
+
+/**
  * Free text is never audited (spec 22.2: audit readers do not necessarily hold the coaching set). An audit event that
  * records a text change carries this SHA-256 digest instead, so a reader can tell THAT and WHEN the text changed and match
  * it to a version, without reading it.

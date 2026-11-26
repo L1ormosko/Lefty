@@ -64,7 +64,7 @@ describe("P5-R1: coaching content about oneself is never read through a manageme
     expect((await getCoachingRecord(w.stateManager.actor, note.id)).id).toBe(note.id);
     expect((await getCoachingRecord(w.hr.actor, note.id)).id).toBe(note.id);
     // The subject does not (they read shared notes through /me/coaching-notes).
-    await expect(getCoachingRecord(w.cityManagerA.actor, note.id)).rejects.toMatchObject({ status: 404 });
+    await expect(getCoachingRecord(w.cityManagerA.actor, note.id)).rejects.toMatchObject({ httpStatus: 404 });
     const listed = await listCoachingRecords(w.cityManagerA.actor, listCoachingRecordsQuerySchema.parse({}));
     expect(listed.data.map((row) => row.id)).not.toContain(note.id);
     const filtered = await listCoachingRecords(w.cityManagerA.actor, listCoachingRecordsQuerySchema.parse({ employeeId: manager }));
@@ -78,7 +78,7 @@ describe("P5-R1: coaching content about oneself is never read through a manageme
       createContextNoteSchema.parse({ employeeId: manager, periodStart: "2026-03-01", periodEnd: "2026-04-01", body: noteBody }),
     );
     expect((await getContextNote(w.hr.actor, note.id)).id).toBe(note.id);
-    await expect(getContextNote(w.cityManagerA.actor, note.id)).rejects.toMatchObject({ status: 404 });
+    await expect(getContextNote(w.cityManagerA.actor, note.id)).rejects.toMatchObject({ httpStatus: 404 });
     const listed = await listContextNotes(w.cityManagerA.actor, listContextNotesQuerySchema.parse({ employeeId: manager }));
     expect(listed.data).toEqual([]);
   });
@@ -91,7 +91,7 @@ describe("P5-R1: coaching content about oneself is never read through a manageme
     );
     await addReview(w.stateManager.actor, ctx(w.stateManager.actor), plan.id, createReviewSchema.parse({ body: noteBody }));
     expect((await getPlan(w.hr.actor, plan.id)).reviews).toHaveLength(1);
-    await expect(getPlan(w.cityManagerA.actor, plan.id)).rejects.toMatchObject({ status: 404 });
+    await expect(getPlan(w.cityManagerA.actor, plan.id)).rejects.toMatchObject({ httpStatus: 404 });
     const listed = await listPlans(w.cityManagerA.actor, listPlansQuerySchema.parse({ employeeId: manager }));
     expect(listed.data).toEqual([]);
   });
@@ -120,7 +120,8 @@ describe("P5-R2: managers do not act on their own development records", () => {
       () => activatePlan(me, ctx(me), plan.id),
       () => cancelPlan(me, ctx(me), plan.id, cancelPlanSchema.parse({ reason: "Not needed" })),
     ]) {
-      await expect(attempt()).rejects.toMatchObject({ status: 403 });
+      // 404 like the read: a plan about the caller does not exist for them outside self-service.
+      await expect(attempt()).rejects.toMatchObject({ httpStatus: 404 });
     }
     const after = await getPlan(w.hr.actor, plan.id);
     expect(after).toMatchObject({ title: "Own plan", status: "DRAFT" });
@@ -136,16 +137,16 @@ describe("P5-R2: managers do not act on their own development records", () => {
       return { courseId: course.id, recommendationId: recommendation.id };
     });
     const me = w.cityManagerA.actor;
-    await expect(dismissRecommendation(me, ctx(me), recommendationId, dismissRecommendationSchema.parse({ reason: "I know this" }))).rejects.toMatchObject({ status: 403 });
-    await expect(acceptRecommendation(me, ctx(me), recommendationId, acceptRecommendationSchema.parse({}))).rejects.toMatchObject({ status: 403 });
+    await expect(dismissRecommendation(me, ctx(me), recommendationId, dismissRecommendationSchema.parse({ reason: "I know this" }))).rejects.toMatchObject({ httpStatus: 403 });
+    await expect(acceptRecommendation(me, ctx(me), recommendationId, acceptRecommendationSchema.parse({}))).rejects.toMatchObject({ httpStatus: 403 });
     const row = await withTenant(w.tenantId, (tx) => tx.trainingRecommendation.findUniqueOrThrow({ where: { id: recommendationId } }));
     expect(row.status).toBe("OPEN");
     // The State manager decides it.
     await acceptRecommendation(w.stateManager.actor, ctx(w.stateManager.actor), recommendationId, acceptRecommendationSchema.parse({}));
     const assignment = await withTenant(w.tenantId, (tx) => tx.trainingAssignment.findFirstOrThrow({ where: { employeeId: manager, courseId, status: "ASSIGNED" } }));
     // ...and the subject can neither push back the due date nor cancel what was assigned to them.
-    await expect(updateAssignment(me, ctx(me), assignment.id, { dueDate: null })).rejects.toMatchObject({ status: 403 });
-    await expect(cancelAssignment(me, ctx(me), assignment.id, { reason: "Busy" })).rejects.toMatchObject({ status: 403 });
+    await expect(updateAssignment(me, ctx(me), assignment.id, { dueDate: null })).rejects.toMatchObject({ httpStatus: 403 });
+    await expect(cancelAssignment(me, ctx(me), assignment.id, { reason: "Busy" })).rejects.toMatchObject({ httpStatus: 403 });
     expect((await withTenant(w.tenantId, (tx) => tx.trainingAssignment.findUniqueOrThrow({ where: { id: assignment.id } }))).status).toBe("ASSIGNED");
   });
 
@@ -164,7 +165,7 @@ describe("P5-R3: whoever edited a metric definition version never approves its p
     await updateDefinition(w.ceo.actor, ctx(w.ceo.actor), draft.id, updateDefinitionSchema.parse({ minSample: 7 }));
     const submitted = await submitDefinition(w.hr.actor, ctx(w.hr.actor), draft.id, submitDefinitionSchema.parse({}));
     const requestId = submitted.approvalRequestId as string;
-    await expect(decideApprovalRequest(w.ceo.actor, ctx(w.ceo.actor), requestId, decideApprovalSchema.parse({ decision: "APPROVE" }))).rejects.toMatchObject({ status: 403 });
+    await expect(decideApprovalRequest(w.ceo.actor, ctx(w.ceo.actor), requestId, decideApprovalSchema.parse({ decision: "APPROVE" }))).rejects.toMatchObject({ httpStatus: 403 });
     const definition = await withTenant(w.tenantId, (tx) => tx.performanceMetricDefinition.findUniqueOrThrow({ where: { id: draft.id } }));
     expect(definition.status).toBe("PENDING_APPROVAL");
   });
@@ -196,12 +197,12 @@ describe("P5-R5: nobody records or voids customer feedback about themselves", ()
     ]);
     await grantTemplate(w.tenantId, w.cityManagerA, role, [{ type: "TENANT" }]);
     const me = w.cityManagerA.actor;
-    await expect(recordCustomerFeedback(me, ctx(me), recordFeedbackSchema.parse({ jobId, employeeId: manager, rating: 5 }))).rejects.toMatchObject({ status: 403 });
+    await expect(recordCustomerFeedback(me, ctx(me), recordFeedbackSchema.parse({ jobId, employeeId: manager, rating: 5 }))).rejects.toMatchObject({ httpStatus: 403 });
 
     const agent = await createPerson(w.tenantId, "cr-agent", { withEmployee: false });
     await grantTemplate(w.tenantId, agent, w.roles.CUSTOMER_RELATIONS, [{ type: "TENANT" }]);
     const recorded = await recordCustomerFeedback(agent.actor, ctx(agent.actor), recordFeedbackSchema.parse({ jobId, employeeId: manager, rating: 1 }));
-    await expect(voidCustomerFeedback(me, ctx(me), recorded.id, voidFeedbackSchema.parse({ reason: "Unfair" }))).rejects.toMatchObject({ status: 403 });
+    await expect(voidCustomerFeedback(me, ctx(me), recorded.id, voidFeedbackSchema.parse({ reason: "Unfair" }))).rejects.toMatchObject({ httpStatus: 403 });
     // Feedback about the job only (nobody named) stays open to them.
     const aboutJob = await recordCustomerFeedback(me, ctx(me), recordFeedbackSchema.parse({ jobId, rating: 4 }));
     expect(aboutJob.employeeId).toBeNull();
