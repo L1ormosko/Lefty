@@ -3000,3 +3000,126 @@ unit conversion), `material.no_effective_cost`, `material.cost_out_of_range`, `m
 - **Permission**: `jobs.view` over the usage's job + `cost` set. **Body** (strict): `{ materialId? }` links an unlinked line first (`404` for a
   material of another tenant, `409 material.usage_linked_elsewhere` when linked to another one). **Answers** the costed line; `409` with the
   skip code when it cannot be costed.
+
+## Training (`/api/v1/training`) - Phase 5
+
+Code: `src/server/training` (README there), routes `src/app/api/v1/training/**`. Design decisions: `DECISIONS.md` "Phase 5 Task 2".
+Spec 10.1 "Training", 5.4, 5.8. Recommendations (`/api/v1/training/recommendations/*`) are Task 5.
+
+**Access** (`PERMISSIONS.md` section 12): courses are tenant-wide reference data: any `training.view` grant reads the catalog, changes need
+`training.manage` at TENANT scope (`403`). Assignments and records are scoped by the EMPLOYEE's data scope (`404` outside it): `training.assign`
+assigns, `training.edit` changes / starts / cancels an assignment, `training.create` records a completion, `training.approve` verifies, rejects
+or revokes one (never one's own record: `403`), `training.view` reads. Status labels: `TRAINING.ASSIGNMENT_STATUS.*`,
+`TRAINING.ASSIGNMENT_SOURCE.*`, `TRAINING.RECORD_STATUS.*`.
+
+**Course fields**: `id, code, name, category, description, certificationId (a TRAINING-type certification a verified completion grants, or
+null), validityDays (null = does not expire), active, archivedAt, createdAt, updatedAt`.
+
+**Assignment fields**: `id, employeeId, courseId, dueDate (YYYY-MM-DD, tenant-local, or null), status (ASSIGNED | IN_PROGRESS | COMPLETED |
+CANCELLED), overdue (derived: open and due before today in the tenant's time zone), source (MANUAL | RECOMMENDATION), recommendationId,
+assignedById, assignedAt, note, trainingRecordId, completedAt, cancelledAt, cancelledById, cancelReason, createdAt, updatedAt`. One open
+(ASSIGNED / IN_PROGRESS) assignment per employee and course: `409` (detail `training.already_open`). COMPLETED is set by verifying a record.
+
+**Record fields**: `id, employeeId, courseId, completedAt, expiresAt (YYYY-MM-DD = tenant-local completion date + the course's validity when
+recorded, or null), status (PENDING_VERIFICATION | VERIFIED | REJECTED | REVOKED), evidence { reference, fileName, contentType, sizeBytes,
+checksumSha256, stored (always false: no StorageProvider, metadata only) }, notes, recordedById, recordedAt, verifiedById, verifiedAt
+(the HR decision, also for a rejection), decisionReason, qualificationId (the TRAINING qualification it created / renewed), createdAt,
+updatedAt`. The completion and its evidence never change.
+
+**Notifications** (sweep `sweepTraining` / `sweepAllTraining`, no scheduler yet): `training.assigned` (employee), `training.overdue` (employee
+and the assigner), `training.expiring` (within the tenant's `qualificationWarningDays`) and `training.expired` (employee, up to 7 days after
+the date). Idempotent per record and date. Recipients need `training.view` over the employee.
+
+### GET /api/v1/training/courses
+
+- **Permission**: `training.view`. **Purpose**: the catalog by code. Query: `includeArchived` (default false), `category?`, `certificationId?`,
+  `q?` (code or name), `cursor`, `limit`.
+
+### POST /api/v1/training/courses
+
+- **Permission**: `training.manage` (TENANT). **Body** (strict): `code` (`[a-z0-9][a-z0-9_.-]*`, unique per tenant, `409`), `name`,
+  `category?`, `description?`, `certificationId?` (must be an active TRAINING-type certification, `400`), `validityDays?` (1-36500).
+  `Idempotency-Key` supported. Audit `training_course.create`.
+
+### GET /api/v1/training/courses/{id}
+
+- **Permission**: `training.view`. **Purpose**: one course (`404` when missing).
+
+### PATCH /api/v1/training/courses/{id}
+
+- **Permission**: `training.manage` (TENANT). **Body** (strict, at least one): `name`, `category`, `description`, `certificationId`,
+  `validityDays` (null clears). The code is fixed. A new validity applies to completions recorded afterwards. Archived: `409`. Audit
+  `training_course.update`.
+
+### POST /api/v1/training/courses/{id}/archive
+
+- **Permission**: `training.manage` (TENANT). **Body**: `{ reason? }`. **Purpose**: no new assignments; open assignments, records and granted
+  qualifications are untouched. `409` when already archived. Audit `training_course.archive`.
+
+### GET /api/v1/training/assignments
+
+- **Permission**: `training.view` (scoped). **Purpose**: assignments, soonest due first (no due date last). Query: `employeeId?`, `courseId?`,
+  `status?`, `source?`, `overdue?` (`true` = open and past due), `cursor`, `limit`.
+
+### POST /api/v1/training/assignments
+
+- **Permission**: `training.assign` over the employee. **Body** (strict): `employeeId`, `courseId` (active, `400`), `dueDate?` (YYYY-MM-DD,
+  not before today, `400`), `note?`. Source MANUAL. Terminated employee: `409`. Open duplicate: `409`. Notifies the employee
+  (`training.assigned`). `Idempotency-Key` supported. Audit `training_assignment.create`.
+
+### GET /api/v1/training/assignments/{id}
+
+- **Permission**: `training.view` over the employee. `404` outside scope.
+
+### PATCH /api/v1/training/assignments/{id}
+
+- **Permission**: `training.edit` over the employee. **Body** (strict, at least one): `dueDate` (null clears, not in the past), `note` (null
+  clears). Only open assignments (`409`). Audit `training_assignment.update`.
+
+### POST /api/v1/training/assignments/{id}/start
+
+- **Permission**: `training.edit`. **Body**: `{}`. ASSIGNED -> IN_PROGRESS (`409` otherwise). Audit `training_assignment.start`.
+
+### POST /api/v1/training/assignments/{id}/cancel
+
+- **Permission**: `training.edit`. **Body**: `{ reason }`. An open assignment -> CANCELLED (`409` otherwise). Audit `training_assignment.cancel`.
+
+### GET /api/v1/training/records
+
+- **Permission**: `training.view` (scoped). **Purpose**: completion records, newest completion first. Query: `employeeId?`, `courseId?`,
+  `status?` (`PENDING_VERIFICATION` = HR's queue), `cursor`, `limit`.
+
+### POST /api/v1/training/records
+
+- **Permission**: `training.create` over the employee (HR by default). **Body** (strict): `employeeId`, `courseId` (archived courses accepted:
+  the training may predate the archive), `completedAt` (ISO datetime with offset, not in the future), `evidence?` { `reference?`, `fileName?`,
+  `contentType?`, `sizeBytes?` (a file is described with all three or none), `checksumSha256?` (needs a file) }, `notes?`. Starts
+  PENDING_VERIFICATION; `expiresAt` computed. `Idempotency-Key` supported. Audit `training_record.create`.
+
+### GET /api/v1/training/records/expiring
+
+- **Permission**: `training.view` (scoped). **Purpose**: VERIFIED records expiring within `withinDays?` (default the tenant's
+  `qualificationWarningDays`), soonest first, each with `daysRemaining` (0 = today, still valid). Records superseded by a longer-lasting verified
+  record of the same course, and terminated employees, are left out. Query: `includeExpired` (default false), `employeeId?`, `courseId?`,
+  `cursor`, `limit`.
+
+### GET /api/v1/training/records/{id}
+
+- **Permission**: `training.view` over the employee. `404` outside scope.
+
+### POST /api/v1/training/records/{id}/verify
+
+- **Permission**: `training.approve` over the employee, not one's own (`403`). **Body**: `{}`. PENDING_VERIFICATION -> VERIFIED (`409`
+  otherwise). Completes the employee's open assignment of the course. When the course grants a certification and the completion has not
+  expired, creates or renews (never shortens) the employee's VERIFIED TRAINING qualification through the qualifications module and sets
+  `qualificationId`. Audits `training_record.verify`, `training_assignment.complete`, `qualification.training_grant` / `.training_renew`.
+
+### POST /api/v1/training/records/{id}/reject
+
+- **Permission**: `training.approve`, not one's own. **Body**: `{ reason }`. PENDING_VERIFICATION -> REJECTED. Audit `training_record.reject`.
+
+### POST /api/v1/training/records/{id}/revoke
+
+- **Permission**: `training.approve`, not one's own. **Body**: `{ reason }`. VERIFIED -> REVOKED. The linked qualification follows the remaining
+  verified records linked to it: none -> REVOKED (`qualification.revoke`); otherwise its dates follow the longest-lasting one
+  (`qualification.training_restate`). Audit `training_record.revoke`.

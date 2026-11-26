@@ -6,6 +6,7 @@ import { registerJobNotificationTarget } from "@/server/jobs";
 import { registerLeadNotifications } from "@/server/leads";
 import { registerMaterialCostApprovalSubject } from "@/server/materials";
 import { registerRecoveryEngine, registerRecoveryFollowUpTarget, registerRecoveryNotificationTarget } from "@/server/recovery";
+import { registerTrainingNotificationTargets } from "@/server/training";
 
 /**
  * The ONE place that teaches the notifications engine how to authorize the records its notifications link to
@@ -29,6 +30,8 @@ export function registerNotificationTargets(): void {
   // Refunds, adjustments, chargeback write-offs (approval subjects), provider chargebacks (intake) and the finance review
   // reactions to a reopened job or a corrected outcome.
   registerFinanceAdjustments();
+  // Training assignments and records (assigned / overdue / expiring / expired notifications).
+  registerTrainingNotificationTargets();
 }
 
 registerNotificationTargets();
