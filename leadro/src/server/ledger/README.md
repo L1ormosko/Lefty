@@ -14,6 +14,9 @@ Public API (`index.ts`):
   snapshot), key `reversal:<entryId>`; a reversal is never reversed; a second reversal is `409 ledger.already_reversed`.
 - `reverseCharge` (`finance_payments.edit` over the job): the API correction of a posted CHARGE. Other entry types are
   corrected by their own records' flows (void a payment; Task 5 refunds / chargebacks / adjustments).
+- **`onLedgerCorrection(name, handler)` / `publishLedgerCorrection(tx, event)`**: the in-transaction domain event of a single-person
+  correction that takes money out of the books (CHARGE reversed, RECEIVED payment voided; payments publishes through it). No
+  approval stands behind those, so finance-adjustments subscribes and raises a finance review flag (Phase 4 review P4-R2).
 - Reads (`finance_ledger.view`): `listLedgerEntries`, `getLedgerEntry`, `getJobBalance`, `getCustomerBalance`,
   `getLegalEntityBalance`, `listJobBalances`; `jobBalanceInTx` / `ledgerAmountsInTx` for other finance modules.
 - `loadFinanceJob`, `financeJobRef` (job's unit only: OWN / ASSIGNED scopes never reach finance), scope columns.

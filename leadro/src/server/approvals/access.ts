@@ -55,6 +55,23 @@ export interface RequestAccess {
   isRequester: boolean;
   isApprover: boolean;
   isOverseer: boolean;
+  /** False when the subject's money is a sensitive field set the viewer lacks (a cost change without the `cost` set). */
+  seesSubjectMoney: boolean;
+}
+
+/**
+ * Subjects whose amounts are a field set of their own module: a MATERIAL_COST_CHANGE request's details are unit costs, the
+ * `cost` set of `materials.view` (spec 11.4, 22.2). An approver without that set decides without seeing them (review P4-R5).
+ */
+const SUBJECT_MONEY_FIELD_SET: Partial<Record<ApprovalRequestRow["subjectType"], { permission: string; fieldSet: string }>> = {
+  MATERIAL_COST_CHANGE: { permission: "materials.view", fieldSet: "cost" },
+};
+
+async function seesMoneyOfSubject(tx: TenantTx, actor: AccessSubject, row: ApprovalRequestRow): Promise<boolean> {
+  const rule = SUBJECT_MONEY_FIELD_SET[row.subjectType];
+  if (!rule) return true;
+  const decision = await canInTx(tx, actor, rule.permission);
+  return decision.allowed && decision.fieldSets.includes(rule.fieldSet);
 }
 
 /** The three ways of reaching a request, evaluated for `actor`. */
@@ -62,7 +79,7 @@ export async function evaluateRequestAccess(tx: TenantTx, actor: AccessSubject, 
   const isRequester = row.requestedById === actor.userId;
   const isApprover = await holdsApproverPermission(tx, actor, row);
   const isOverseer = (await canInTx(tx, actor, "approvals.manage", requestResource(row))).allowed;
-  return { row, isRequester, isApprover, isOverseer };
+  return { row, isRequester, isApprover, isOverseer, seesSubjectMoney: await seesMoneyOfSubject(tx, actor, row) };
 }
 
 /**
@@ -91,5 +108,8 @@ export function viewerFacts(access: RequestAccess, userId: string, now: Date): A
   };
 }
 
-/** Amount, currency and details are shown to the requester and to holders of the approver permission (fields.ts). */
-export const moneyVisibleTo = (access: RequestAccess): boolean => access.isRequester || access.isApprover;
+/**
+ * Amount, currency and details are shown to the requester and to holders of the approver permission (fields.ts), and only
+ * when the viewer may see that subject's money at all (`seesSubjectMoney`).
+ */
+export const moneyVisibleTo = (access: RequestAccess): boolean => (access.isRequester || access.isApprover) && access.seesSubjectMoney;

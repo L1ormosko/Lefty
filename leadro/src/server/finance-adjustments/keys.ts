@@ -39,4 +39,6 @@ export const reviewFlagKeys = {
   refundPosted: (refundId: string): string => `refund_posted:${refundId}`,
   chargebackOpened: (chargebackId: string): string => `chargeback_opened:${chargebackId}`,
   materialCostCurrency: (usageId: string): string => `material_cost_currency:${usageId}`,
+  /** One flag per single-person correction: the REVERSAL entry it posted names it. */
+  ledgerCorrection: (reversalEntryId: string): string => `ledger_correction:${reversalEntryId}`,
 } as const;

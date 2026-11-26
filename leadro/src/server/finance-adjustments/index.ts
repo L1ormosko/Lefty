@@ -32,7 +32,7 @@ export {
 } from "./review-flags";
 export type { FlagRefs, FlagView, RaiseFlagInTxInput } from "./review-flags";
 
-// Wiring (approval subjects, provider chargebacks, job-reopened / outcome-corrected reactions)
+// Wiring (approval subjects, provider chargebacks, job-reopened / outcome-corrected / ledger-correction reactions)
 export { registerFinanceAdjustments } from "./wiring";
 export { FINANCE_REVIEW_SYSTEM_ACTOR } from "./common";
 export { reviewFlagKeys } from "./keys";

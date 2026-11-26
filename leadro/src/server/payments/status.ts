@@ -3,7 +3,7 @@ import { auditContextFields, recordAudit } from "@/server/audit";
 import { enforceInTx } from "@/server/authz";
 import { InvalidStateTransitionError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { financeJobRef, ledgerKeys, reverseLedgerEntryInTx, type FinanceJob } from "@/server/ledger";
+import { financeJobRef, ledgerKeys, publishLedgerCorrection, reverseLedgerEntryInTx, type FinanceJob } from "@/server/ledger";
 import type { MarkReceivedInput, ReasonInput } from "./schemas";
 import { loadPaymentWithJob, postPaymentReceivedInTx, toPaymentView, type PaymentView } from "./store";
 
@@ -84,9 +84,14 @@ export async function markPaymentFailed(actor: Actor, ctx: RequestContext, payme
  */
 export async function voidPayment(actor: Actor, ctx: RequestContext, paymentId: string, input: ReasonInput): Promise<Change> {
   return withTenant(actor.tenantId, async (tx) => {
-    const { payment } = await loadForChange(tx, actor, paymentId);
+    const { job } = await loadForChange(tx, actor, paymentId);
+    // The same row lock refunds and chargebacks take (finance-adjustments `lockPayment`): a payout or a chargeback against
+    // this payment and its void are serialized, so the check below sees every one of them.
+    await tx.$queryRaw`SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} AND "tenantId" = ${actor.tenantId} FOR UPDATE`;
+    const payment = await tx.payment.findFirstOrThrow({ where: { id: paymentId, tenantId: actor.tenantId } });
     if (payment.status === "VOIDED") return { replayed: true, payment: toPaymentView(payment) };
     if (payment.status !== "PENDING" && payment.status !== "RECEIVED") throw invalid(payment, "VOIDED");
+    if (payment.status === "RECEIVED") await assertNoMoneyReturned(tx, payment);
     const updated = await transition(tx, payment, [payment.status], { status: "VOIDED", voidedAt: new Date(), voidReason: input.reason });
     if (!updated) return settleRace(tx, payment, "VOIDED");
     if (payment.status === "RECEIVED") {
@@ -96,17 +101,47 @@ export async function voidPayment(actor: Actor, ctx: RequestContext, paymentId: 
       });
       // Every RECEIVED payment was posted in the transaction that received it; a missing entry would be a broken invariant.
       if (!posted) throw new Error(`payment ${payment.id} is RECEIVED without its ledger entry`);
-      await reverseLedgerEntryInTx(tx, {
+      const { entry: reversal } = await reverseLedgerEntryInTx(tx, {
         tenantId: actor.tenantId,
         entryId: posted.id,
         actor: { userId: actor.userId },
         reason: input.reason,
         idempotencyKey: ledgerKeys.paymentVoided(payment.id),
       });
+      // No approval stands behind a void: subscribers (finance review flags) make a second person see it (review P4-R2).
+      await publishLedgerCorrection(tx, {
+        tenantId: actor.tenantId,
+        kind: "PAYMENT_VOIDED",
+        jobId: job.id,
+        customerId: job.customerId,
+        orgUnitId: job.orgUnitId,
+        originalEntryId: posted.id,
+        reversalEntryId: reversal.id,
+        paymentId: payment.id,
+        outcomeId: payment.outcomeId,
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        actorUserId: actor.userId,
+      });
     }
     await audit(tx, ctx, "payment.void", payment, updated, input.reason);
     return { replayed: false, payment: toPaymentView(updated) };
   });
+}
+
+/**
+ * Refuses to void a RECEIVED payment part of whose money already left again: a POSTED refund (paid back) or a chargeback
+ * that was not WON (debited by the processor). Voiding would reverse the whole PAYMENT entry while the REFUND / CHARGEBACK
+ * entries stay, so the money would count as gone twice (net collected below zero). Refunds not paid out yet do not block:
+ * their payout is refused once the payment is voided (`refund.payment_not_received`). Review P4-R1.
+ */
+async function assertNoMoneyReturned(tx: TenantTx, payment: Payment): Promise<void> {
+  const where = { tenantId: payment.tenantId, paymentId: payment.id };
+  const posted = await tx.refund.count({ where: { ...where, status: "POSTED" } });
+  const charged = await tx.chargeback.count({ where: { ...where, status: { not: "WON" } } });
+  if (posted + charged === 0) return;
+  const message = "Part of this payment was already refunded or charged back; it cannot be voided. Correct it with an adjustment instead.";
+  throw new InvalidStateTransitionError({ message, details: [{ field: "paymentId", code: "payment.money_returned", message }] });
 }
 
 /** The conditional update lost a race: a replay if the other request reached the same status, else the transition is invalid. */

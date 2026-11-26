@@ -41,11 +41,11 @@ async function approverWhere(tx: TenantTx, actor: Actor, now: Date): Promise<Pri
 
 /** Builds the per-row view; the caller's access per row is evaluated with the same rules as a single read. */
 async function viewRows(tx: TenantTx, actor: Actor, rows: ApprovalRequestRow[], now: Date): Promise<Record<string, unknown>[]> {
-  // Many rows share a permission and unit; evaluate each combination once.
+  // Many rows share a subject type, permission and unit; evaluate each combination once.
   const cache = new Map<string, Promise<RequestAccess>>();
   const views: Record<string, unknown>[] = [];
   for (const row of rows) {
-    const key = `${row.approverPermission}|${row.orgUnitId ?? ""}|${row.requestedById === actor.userId}`;
+    const key = `${row.subjectType}|${row.approverPermission}|${row.orgUnitId ?? ""}|${row.requestedById === actor.userId}`;
     let shared = cache.get(key);
     if (!shared) {
       shared = evaluateRequestAccess(tx, actor, row);

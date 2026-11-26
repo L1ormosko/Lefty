@@ -1,6 +1,8 @@
 export { postLedgerEntryInTx, reverseLedgerEntryInTx } from "./post";
 export type { LedgerActor, LedgerRefs, PostLedgerEntryInput, PostResult, PostableEntryType, PostableSource, ReverseLedgerEntryInput } from "./post";
 export { ledgerKeys, paymentKeys } from "./keys";
+export { onLedgerCorrection, publishLedgerCorrection, resetLedgerCorrectionHandlers } from "./correction-events";
+export type { LedgerCorrectionEvent, LedgerCorrectionHandler } from "./correction-events";
 export { financeJobRef, financeJobScopeColumns, ledgerEntryScopeColumns, loadFinanceJob } from "./job-ref";
 export type { FinanceJob } from "./job-ref";
 export { getCustomerBalance, getJobBalance, getLegalEntityBalance, jobBalanceInTx, ledgerAmountsInTx, listJobBalances } from "./balances";

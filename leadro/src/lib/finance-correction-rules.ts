@@ -84,6 +84,10 @@ export const REVIEW_FLAG_REASONS = {
   chargebackOpened: "chargeback.opened",
   /** A costed material line could not be posted to the ledger (cost currency differs from the job's). */
   materialCostCurrencyMismatch: "material_cost.currency_mismatch",
+  /** A CHARGE was reversed by one person (no approval stands behind it): a second person reviews it (review P4-R2). */
+  chargeReversed: "ledger.charge_reversed",
+  /** A RECEIVED payment was voided by one person (its money left the books): a second person reviews it (review P4-R2). */
+  paymentVoided: "payment.voided_after_receipt",
   /** Raised by a person. */
   manual: "manual.review_requested",
 } as const;

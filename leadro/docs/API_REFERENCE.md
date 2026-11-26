@@ -2462,7 +2462,8 @@ endpoint that creates a request: a request is always a side effect of the change
 the policy's `approverPermission`, e.g. `finance_refunds.approve`, over the request's org unit), and to an *overseer* (`approvals.manage` over the
 unit). Anything else is `404`. The unit is snapshotted from the subject at creation (`orgUnitId`; null = tenant-level, TENANT scope only).
 `amountMinor`, `currency` and `details` are shown only to the requester and to eligible approvers; an overseer gets `moneyRedacted: true` and no
-amount fields.
+amount fields. A MATERIAL_COST_CHANGE request's amounts are unit costs, so they are also redacted for an approver without the `cost` field set
+of `materials.view` (the approver can still decide).
 
 **Request fields** (`ApprovalRequest`): `id, subjectType (MATERIAL_COST_CHANGE | ADJUSTMENT | REFUND | CHARGEBACK_WRITE_OFF | HIGH_VALUE_DISCOUNT),
 subjectId, status (PENDING | APPROVED | REJECTED | CANCELLED | EXPIRED), policyId, policyCode, policyVersion, requiredApprovals (1 | 2),
@@ -2565,6 +2566,8 @@ Conventions for every finance endpoint:
 - **Response**: `201 { data: { reversal: entry, replayed: false } }`; reversing the same charge again is `200` with `replayed: true`.
 - **Errors**: `409 INVALID_STATE_TRANSITION` `ledger.reverse_not_supported` (not a CHARGE: void the payment / use Task 5 flows),
   `ledger.reversal_not_reversible`, `ledger.already_reversed`. **Audit**: `ledger.reverse` (with reason).
+- **Review**: no approval stands behind a reversal, so the first (non-replayed) reversal raises a `ledger.charge_reversed` finance review flag
+  (`system:finance-review`, one per reversal) for a second finance person (Phase 4 review P4-R2).
 
 ### GET /api/v1/finance/jobs/{id}/balance
 - **Purpose**: derived balances and payment status of one job. **Permission**: `finance_ledger.view` over the job.
@@ -2615,9 +2618,13 @@ The three status changes share one description:
 - **Purpose**: status changes (DB machine: PENDING > RECEIVED | FAILED | VOIDED, RECEIVED > VOIDED). **Permission**: `finance_payments.edit` over
   the payment's job.
 - **Body**: `receive` `{ receivedAt? }`; `fail` and `void` `{ reason }` (required). `receive` posts the PAYMENT entry; `void` of a RECEIVED
-  payment posts the REVERSAL of that entry (`payment:<id>:void`); `fail` posts nothing.
+  payment posts the REVERSAL of that entry (`payment:<id>:void`) and raises a `payment.voided_after_receipt` finance review flag (one per
+  void; Phase 4 review P4-R2); `fail` posts nothing. A RECEIVED payment with a POSTED refund or a chargeback that was not WON cannot be voided
+  (its money already went back out): `409 payment.money_returned`; refunds not yet paid out do not block the void (their payout is then
+  refused). The void takes the payment row lock that refunds and chargebacks take.
 - **Response**: `200 { data: { payment, replayed } }`; asking for the status the payment already has is a replay (also under concurrency:
-  one change, one posting). **Errors**: `409 INVALID_STATE_TRANSITION` `payment.invalid_transition`. **Audit**: `payment.receive | fail | void`
+  one change, one posting). **Errors**: `409 INVALID_STATE_TRANSITION` `payment.invalid_transition`, `payment.money_returned` (void only).
+  **Audit**: `payment.receive | fail | void`
   (previous and new status, reason).
 
 ### GET /api/v1/finance/charges-to-confirm
@@ -2654,7 +2661,9 @@ The three status changes share one description:
   status (ACCEPTED | REJECTED | DUPLICATE | UNMATCHED), rejectionCode, paymentId, duplicate } }` (labels `FINANCE.INTAKE.STATUS.*`,
   `FINANCE.INTAKE.REJECTION.*`: `malformed_event`, `invalid_event_fields`, `unsupported_event_type`, `unknown_job`, `currency_mismatch`,
   `duplicate_provider_ref`). A repeated delivery (same provider + event id, sequential or concurrent) returns the event on record with
-  `duplicate: true` and never posts twice; the same id with different content is `409 payment_intake.payload_mismatch`. ACCEPTED creates
+  `duplicate: true` and never posts twice; the same id with different content is `409 payment_intake.payload_mismatch`. Events with
+  DIFFERENT ids about the same provider payment are DUPLICATE `duplicate_provider_ref` (with `duplicateOfId`) after the first one, also when
+  they arrive at the same time. ACCEPTED creates
   a PROVIDER payment (RECEIVED) and its PAYMENT entry by `system:provider-intake`. **Audit**: `payment_intake.process` (system actor).
 - **`chargeback.opened`** (Phase 4 Task 5, handled by `src/server/finance-adjustments`): the provider's dispute of one of its payments
   (normalized fields `paymentProviderRef, chargebackRef, amountMinor, currency, reasonCode?`). Validated before any write: unknown payment of
@@ -2785,7 +2794,8 @@ Shared rules:
   customerId, outcomeId, paymentId, refundId, chargebackId, adjustmentId, ledgerEntryId, orgUnitId, raisedById, systemActor, raisedAt,
   assignedToId, assignedAt, resolvedAt, resolvedById, resolutionReason, createdAt, updatedAt`. Reason codes (labels
   `FINANCE.REVIEW_FLAG.REASON.<CODE UPPERCASED>`): `job.reopened_after_posting`, `outcome.corrected_after_posting`, `refund.posted`,
-  `chargeback.opened`, `material_cost.currency_mismatch` (all raised by `system:finance-review`, once per triggering event) and
+  `chargeback.opened`, `material_cost.currency_mismatch`, `ledger.charge_reversed`, `payment.voided_after_receipt` (all raised by
+  `system:finance-review`, once per triggering event) and
   `manual.review_requested`.
 
 ### GET /api/v1/finance/refunds

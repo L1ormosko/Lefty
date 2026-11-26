@@ -33,6 +33,7 @@ const expectedKeys = [
     "payment.idempotency_key_reused",
     "payment.currency_mismatch",
     "payment.invalid_transition",
+    "payment.money_returned",
     "revenue.outcome_changed",
     "revenue.nothing_to_charge",
     "revenue.nothing_to_collect",

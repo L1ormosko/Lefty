@@ -11,7 +11,7 @@ import { POST as decideRoute } from "@/app/api/v1/approvals/[id]/decide/route";
 import { GET as approvalRoute } from "@/app/api/v1/approvals/[id]/route";
 import { createPolicy, createPolicySchema } from "@/server/approvals";
 import { withTenant } from "@/server/db";
-import { createPerson, disconnect, grantTemplate } from "../authz/fixtures";
+import { createPerson, disconnect, grantTemplate, makeRole } from "../authz/fixtures";
 import { buildJobsWorld, createJobViaApi, type JobsWorld } from "../jobs/fixtures";
 import { auditEvents, call, contextFor, sessionCookie } from "../org/org-helpers";
 
@@ -283,5 +283,24 @@ describe("cost versions through the approval engine (MATERIAL_COST_CHANGE policy
     expect(request.json.data.status).toBe("CANCELLED");
     const history = await call(costsRoute, "GET", "/x", { cookie: w.cookie.ceo, params: { id: material.id } });
     expect(history.json.data[0].status).toBe("CANCELLED");
+  });
+
+  it("P4-R5: an approver without the cost set decides but never sees the unit costs in the request", async () => {
+    const person = await createPerson(w.tenantId, "cost-blind-approver", { withEmployee: false });
+    const role = await makeRole(w.tenantId, "Cost-blind approver", [{ permission: "materials.view" }, { permission: "materials.approve" }, { permission: "approvals.view" }]);
+    await grantTemplate(w.tenantId, person, role, [{ type: "TENANT" }]);
+    const cookie = await sessionCookie(person, w.tenantId);
+    const material = await createMaterial();
+    const proposed = await propose(material.id, { unitCostMinor: 915, effectiveFrom: iso(0) });
+    const requestId = proposed.json.data.approvalRequestId as string;
+
+    const seen = await call(approvalRoute, "GET", "/x", { cookie, params: { id: requestId } });
+    expect(seen.status).toBe(200);
+    expect(seen.json.data).toMatchObject({ moneyRedacted: true, viewer: { canDecide: true } });
+    expect(seen.json.data).not.toHaveProperty("details");
+    // Finance holds the cost set and still sees them.
+    const finance = await call(approvalRoute, "GET", "/x", { cookie: w.cookie.finance, params: { id: requestId } });
+    expect(finance.json.data).toMatchObject({ moneyRedacted: false, details: { unitCostMinor: "915" } });
+    expect((await decide(cookie, requestId, "APPROVE")).json.data).toMatchObject({ status: "APPROVED", moneyRedacted: true });
   });
 });

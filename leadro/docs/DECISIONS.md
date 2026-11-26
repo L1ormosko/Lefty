@@ -1161,7 +1161,8 @@ Module `src/server/finance-adjustments` (one module: the three record types shar
   the payment on the manual paths (`refund.exceeds_payment`, `chargeback.exceeds_payment`), checked under `SELECT ... FOR UPDATE` on the payment
   row (concurrent requests queue). A PROVIDER chargeback is never refused for its amount (the money is already gone): it is accepted and its
   review flag carries `exceedsRemaining`. Known gap (Task 6 / payments): voiding a payment that already has a POSTED refund is not blocked by
-  the payments module; reconciliation's REFUND_WITHOUT_PAYMENT exception is where it surfaces.
+  the payments module; reconciliation's REFUND_WITHOUT_PAYMENT exception is where it surfaces. *(Superseded by the Phase 4 review:
+  the void is now refused, `409 payment.money_returned`; see "Phase 4 review fixes".)*
 - **Adjustment policy bands compare the ABSOLUTE amount** (a 600.00 credit is as sensitive as a 600.00 debit); the request `details` carry
   the signed amount and `direction`. Adjustments always name a job (the ledger posts against jobs; customer-only adjustments are not built).
   A POSTED adjustment is never cancelled or reversed through this API: a mistake is corrected by a counter-adjustment (its own reason and
@@ -1209,3 +1210,24 @@ Module `src/server/finance-adjustments` (one module: the three record types shar
   adjustment need an approver, so by default nobody moves money alone. A tenant that leaves a gap below its bands chooses otherwise.
 - **Not built**: notifications for flags, refunds via a provider (no provider exists; the payout `reference` is stored in `Refund.providerRef`),
   customer-only adjustments, exports, UI.
+
+## Phase 4 review fixes (whole-phase review, `docs/reviews/phase4-review.md`)
+
+- **No void after money went back out (P4-R1).** `voidPayment` takes the payment row lock (the one refunds and chargebacks take) and refuses a
+  RECEIVED payment with a POSTED refund or a chargeback that was not WON (`409 payment.money_returned`): reversing the whole PAYMENT entry while
+  those entries stay would count the money as gone twice. Refunds not yet paid out do not block (their payout is refused afterwards, as
+  before). The correction of such a payment is an adjustment. Cost if the owner wants voids anyway: a void that also reverses the refunds,
+  i.e. a cascade the owner must define.
+- **Single-person corrections are flagged, not approved (P4-R2).** Reversing a CHARGE and voiding a RECEIVED payment remain
+  `finance_payments.edit` actions with no approval (the manager's finance-confirmed revenue design needs "reverse, then confirm again"), but
+  each publishes an in-transaction ledger correction event (`onLedgerCorrection`, ledger module; payments publishes through it, so there is
+  no import cycle) and finance-adjustments raises one review flag per correction (`ledger.charge_reversed`, `payment.voided_after_receipt`,
+  key `ledger_correction:<reversalEntryId>`). Voiding a PENDING payment moved no money and raises nothing. **For the owner**: whether these
+  corrections should go through the approval engine (a new approval subject type = a schema change). No migration was added.
+- **Intake: concurrent events about one provider payment (P4-R3).** When the provider-keyed payment insert replays (another event with a
+  different id created it a moment earlier), the event is DUPLICATE `duplicate_provider_ref` with `duplicateOfId`, the same verdict as the
+  sequential case. The ledger was already safe (one payment, one entry); the log and reconciliation's duplicate detection were not.
+- **Cost-change amounts follow the cost set (P4-R5).** The approvals access check redacts amount and details of a MATERIAL_COST_CHANGE request
+  for a viewer without the `materials.view` `cost` set (`SUBJECT_MONEY_FIELD_SET` in `approvals/access.ts`); such an approver still decides.
+- **Deferred to the owner / later**: policy configuration is not itself approved (P4-R4); the charges-to-confirm queue filters the outcome
+  `financial` set after paging (P4-R6, short pages, nothing leaked); unit managers may record the payout of an approved refund (P4-R7).

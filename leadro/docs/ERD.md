@@ -1,4 +1,4 @@
-# Entity-Relationship Diagram (Phase 1 foundation + Phase 2 operational core)
+# Entity-Relationship Diagram (Phase 1 foundation, Phase 2 operational core, Phase 3 field operations, Phase 4 financial core)
 
 Source of truth: `prisma/schema.prisma`. Every box except `Tenant` and `Permission` carries a
 `tenantId` (FK to `Tenant`, FORCE-RLS protected, not drawn on each edge for readability). All
