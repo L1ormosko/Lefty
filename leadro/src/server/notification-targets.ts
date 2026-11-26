@@ -5,6 +5,7 @@ import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
 import { registerJobNotificationTarget } from "@/server/jobs";
 import { registerLeadNotifications } from "@/server/leads";
 import { registerMaterialCostApprovalSubject } from "@/server/materials";
+import { registerMetricDefinitionApprovalSubject } from "@/server/performance";
 import { registerRecoveryEngine, registerRecoveryFollowUpTarget, registerRecoveryNotificationTarget } from "@/server/recovery";
 
 /**
@@ -29,6 +30,8 @@ export function registerNotificationTargets(): void {
   // Refunds, adjustments, chargeback write-offs (approval subjects), provider chargebacks (intake) and the finance review
   // reactions to a reopened job or a corrected outcome.
   registerFinanceAdjustments();
+  // Phase 5: publishing a performance metric definition version (always through an approval request).
+  registerMetricDefinitionApprovalSubject();
 }
 
 registerNotificationTargets();
