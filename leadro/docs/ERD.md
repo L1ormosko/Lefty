@@ -747,7 +747,8 @@ erDiagram
 - `ApprovalRequest.details`, `ReconciliationException.details`, `FinanceReviewFlag.details`, `PaymentIntakeEvent.parsed`: ids, codes and numbers only; any amount is
   a decimal string (docs/API_CONVENTIONS.md "Money"); no free text, no raw provider payload.
 - `ApprovalRequest.subjectType` + `subjectId` is polymorphic: MATERIAL_COST_CHANGE -> `MaterialCostVersion.id`, ADJUSTMENT ->
-  `Adjustment.id`, REFUND -> `Refund.id`, CHARGEBACK_WRITE_OFF -> `Chargeback.id`, HIGH_VALUE_DISCOUNT -> `Job.id`. The typed FK on the
+  `Adjustment.id`, REFUND -> `Refund.id`, CHARGEBACK_WRITE_OFF -> `Chargeback.id`, HIGH_VALUE_DISCOUNT -> `Job.id`, PERFORMANCE_METRIC_DEFINITION (Phase 5) ->
+  `PerformanceMetricDefinition.id`. The typed FK on the
   subject (`approvalRequestId`) is the enforced link; `subjectId` is validated by the approval subject registry (Task 3).
 
 ## Documented rules not expressible in the database
@@ -756,3 +757,115 @@ erDiagram
 - Balances (receivable, collected, cash) are derived from entries; there is no stored balance anywhere.
 - Policy tiers of one subject type do not overlap; the policy service checks it on create.
 - The approver of a request holds `approverPermission` within the request's scope; checked by the approval service.
+
+# Phase 5: workforce intelligence
+
+Migration `20261126100000_phase5_workforce` (schema only; services arrive in Phase 5 Tasks 2-6, none of which add a migration).
+14 new tenant-owned tables (92 in total) with `tenantId`, `(id, tenantId)` unique keys, composite `(ref, tenantId)` FKs and FORCE RLS
+(the DO-block runs again over the whole schema). Existing tables gain only back-relations, one unique key
+(`EmployeeQualification (id, employeeId, tenantId)`), the enum value `PermissionAction.PUBLISH` and the approval subject
+`ApprovalSubjectType.PERFORMANCE_METRIC_DEFINITION`. Names are asserted in `tests/db/phase5-schema.test.ts`.
+
+**Performance data never feeds work** (spec 10.3): no Phase 1-4 table references a Phase 5 table, and nothing in dispatch,
+eligibility, assignment, compensation or employment reads one. **No universal score** (spec 10.4): there is no column or table that
+combines dimensions; a value is one definition (one dimension) x employee x period x job type or job category.
+
+**Employee-safe keys.** Wherever a Phase 5 row links two records about a person, the composite FK carries `employeeId` too, so the
+database refuses, for example, a coaching note about employee X that links employee Y's metric value, a challenge of someone else's
+record, a plan action linking another employee's training assignment, or an assignment fulfilled by another course's record.
+
+```mermaid
+erDiagram
+  Certification |o--o{ TrainingCourse : "grants (TRAINING type only)"
+  TrainingCourse ||--o{ TrainingAssignment : assigned
+  TrainingCourse ||--o{ TrainingRecord : completed
+  TrainingCourse ||--o{ TrainingRecommendation : suggested
+  Employee ||--o{ TrainingAssignment : ""
+  Employee ||--o{ TrainingRecord : ""
+  TrainingRecommendation |o--o| TrainingAssignment : "accepted as (same employee, course)"
+  TrainingRecord |o--o{ TrainingAssignment : "fulfils (same employee, course)"
+  TrainingRecord }o--o| EmployeeQualification : "created / renewed (same employee)"
+  PerformanceMetricDefinition |o--o| ApprovalRequest : "published via"
+  PerformanceMetricDefinition ||--o{ PerformanceMetricValue : "append-only snapshots"
+  Employee ||--o{ PerformanceMetricValue : ""
+  JobType |o--o{ PerformanceMetricValue : "per job type"
+  OrgUnit |o--o{ PerformanceMetricValue : "unit snapshot"
+  PerformanceMetricValue |o--o{ MetricContextNote : "context (same employee)"
+  PerformanceMetricValue |o--o{ CoachingRecord : "about (same employee)"
+  Employee ||--o{ CoachingRecord : ""
+  Employee ||--o{ DevelopmentPlan : ""
+  DevelopmentPlan ||--o{ DevelopmentGoal : ""
+  DevelopmentPlan ||--o{ DevelopmentAction : "(plan, employee)"
+  DevelopmentGoal |o--o{ DevelopmentAction : "(goal, plan)"
+  TrainingAssignment |o--o{ DevelopmentAction : "TRAINING (same employee)"
+  CoachingRecord |o--o{ DevelopmentAction : "COACHING (same employee)"
+  DevelopmentPlan ||--o{ DevelopmentPlanReview : "append-only"
+  PerformanceMetricDefinition |o--o{ DevelopmentGoal : "about"
+  Employee ||--o{ DataChallenge : raises
+  PerformanceMetricValue |o--o{ DataChallenge : challenged
+  TrainingRecord |o--o{ DataChallenge : challenged
+  CoachingRecord |o--o{ DataChallenge : challenged
+  EmployeeQualification |o--o{ DataChallenge : challenged
+  Job ||--o{ CustomerFeedback : "(job, customer)"
+  Employee |o--o{ CustomerFeedback : about
+```
+
+## Model guide
+
+| Table | Purpose |
+|---|---|
+| `TrainingCourse` | Course catalog (code unique per tenant, category, validity in days). Optionally grants a TRAINING-type `Certification`: the composite FK `(certificationId, certificationKind) -> Certification(id, type)` with `certificationKind = 'TRAINING'` (CHECK) refuses any other type. Code frozen; archived, never deleted. |
+| `TrainingAssignment` | A course assigned to an employee (`dueDate` tenant-local, optional). ASSIGNED -> IN_PROGRESS -> COMPLETED (needs `trainingRecordId`), or -> CANCELLED (with reason). `source` RECOMMENDATION exactly when `recommendationId` is set (one assignment per recommendation). One open assignment per employee and course. Overdue = derived. |
+| `TrainingRecord` | A completion: PENDING_VERIFICATION -> VERIFIED / REJECTED (reason), VERIFIED -> REVOKED (reason). `verifiedById/At` = the HR decision. Evidence is metadata (reference, file name/type/size/SHA-256; `evidenceStorageKey` null while no StorageProvider exists), frozen after insert. `qualificationId` = the `EmployeeQualification` the verification created or renewed (only on VERIFIED / REVOKED). |
+| `PerformanceMetricDefinition` | Versioned definition: `key` + `version` unique; `kind` from the fixed catalog, `dimension` fixed by the kind (CHECK), `params` object, `minSample >= 1`. DRAFT -> PENDING_APPROVAL (-> DRAFT on rejection / cancellation) -> PUBLISHED -> RETIRED; DRAFT -> RETIRED discards. Content frozen once it leaves DRAFT; PENDING_APPROVAL / PUBLISHED need `approvalRequestId`; one PUBLISHED version per key. |
+| `PerformanceMetricValue` | Append-only snapshot: numerator, denominator (opportunities), sample, `enoughData`, `evidenceIds`, period `[periodStart, periodEnd)` (tenant-local dates), job type XOR job category (neither only for TRAINING_PROGRESS), `orgUnitId` snapshot, actor user XOR `system:<name>`. A recomputation is a new row; the newest `computedAt` per (definition, employee, period, breakdown) is current. |
+| `MetricContextNote` | Manager context on a value (same employee) or on a period. Text and subject frozen; sharing (`sharedWithEmployee` + `sharedAt`) and archiving change. Text is the `coaching` field set. |
+| `CoachingRecord` | Coaching note (sensitive): employee and author frozen, optional linked value (same employee), shared explicitly, archived not deleted. |
+| `DevelopmentPlan` / `DevelopmentGoal` / `DevelopmentAction` | Plan per employee and period (DRAFT -> ACTIVE -> COMPLETED, or CANCELLED with reason), goals (OPEN <-> ACHIEVED / DROPPED, optionally about a metric definition), actions (TRAINING needs a training assignment; only COACHING may link a coaching record; PLANNED -> DONE / CANCELLED). The action carries the plan's `employeeId` so its links stay on that employee. |
+| `DevelopmentPlanReview` | Append-only review history of a plan (spec 10.4 "review history"), with the plan's status at the time. |
+| `TrainingRecommendation` | Rule-based suggestion with `reasons` (non-empty JSON array of codes + ids). OPEN -> ACCEPTED (a person; the assignment links back) or DISMISSED (reason; a person, or the system when the reason no longer holds). One OPEN per employee and course. Never auto-assigned. |
+| `DataChallenge` | An employee's challenge: exactly one typed target (metric value, training record, coaching note, qualification) of the same employee, matching `targetType`. OPEN -> UNDER_REVIEW (reviewer) -> UPHELD (ANNOTATED / CORRECTED + text) / REJECTED (text), or WITHDRAWN. The raiser never reviews or resolves it (CHECK). One open challenge per target. Statement and target frozen. |
+| `CustomerFeedback` | Manually entered feedback on a job (customer = the job's customer via the `(jobId, customerId)` FK), optional employee it is about, rating 1-5 and / or comment, `orgUnitId` snapshot. Content frozen; voided once with a reason; never deleted. |
+
+## Database-level rules (Phase 5)
+
+- **Append-only**: `PerformanceMetricValue`, `DevelopmentPlanReview` (UPDATE, DELETE, TRUNCATE rejected by `leadro_append_only`).
+- **Never deleted** (`leadro_no_delete`): every other Phase 5 table.
+- **Status machines** (`leadro_status_transitions`): training assignment, training record, metric definition, development plan / goal /
+  action, recommendation, data challenge.
+- **Frozen columns** (`leadro_immutable_columns`): identities and subjects everywhere; a record's completion and evidence; a context
+  note's text; a recommendation's reasons; a challenge's statement and target; customer feedback's content.
+- **Metric definition content guard** (`leadro_metric_definition_content_guard`): kind, dimension, name, description, params and
+  minSample change only while DRAFT.
+- **Metric value guard** (`leadro_metric_value_guard`, BEFORE INSERT): the breakdown the kind needs, `numerator <= denominator`
+  (CUSTOMER_FEEDBACK_AVERAGE: `denominator <= numerator <= 5 x denominator`, a sum of 1-5 ratings) and `enoughData = sampleSize >= minSample`.
+- **Partial unique indexes**: `training_assignment_one_open`, `performance_metric_definition_one_published`,
+  `training_recommendation_one_open`, `data_challenge_one_open_per_target`.
+
+## Contracts for JSON, arrays and the metric kinds (Phase 5)
+
+- `TrainingRecommendation.reasons`: non-empty array of `{ code, ...ids / numbers }` (e.g. `{ code: "certification_expiring",
+  qualificationId, expiresAt }`); no free text. `DataChallenge.resolutionDetails`: object of ids / codes (e.g. the correction's audit
+  event id). `PerformanceMetricDefinition.params`: object, kind-specific keys documented by Task 3 (e.g. `windowDays`), never weights or
+  thresholds that trigger anything.
+- `PerformanceMetricValue.evidenceIds`: ids of the records counted in the denominator (the numerator's records are among them), at most
+  10,000. Their table is fixed by the kind. Proposed mapping (Task 3 owns the exact formulas and records them in DECISIONS):
+
+| Kind | Dimension | Denominator (opportunities) | Numerator | Evidence table |
+|---|---|---|---|---|
+| REPEAT_VISIT_RATE | REPEAT_VISITS | completed visits of the employee | of those, followed by a job for the same customer and job type within `windowDays` | `Job` |
+| ON_TIME_ARRIVAL | TIMELINESS | verified arrivals at jobs with an appointment window | arrivals inside the window | `ArrivalVerification` |
+| DOCUMENTATION_COMPLETENESS | DOCUMENTATION | completed visits whose job type requires a completion form | visits with a submitted completion | `Job` |
+| OUTCOME_CONVERSION | SALES | visit outcomes reported by the employee | successful outcomes | `JobOutcome` |
+| RECOVERY_CONVERSION | SALES | closed recovery cases assigned to the employee | recovered cases | `LeadRecoveryCase` |
+| CUSTOMER_FEEDBACK_AVERAGE | CUSTOMER_FEEDBACK | rated, non-voided feedback about the employee | sum of ratings | `CustomerFeedback` |
+| TRAINING_PROGRESS | TRAINING_PROGRESS | non-cancelled assignments due in the period | completed ones | `TrainingAssignment` |
+
+## Documented rules not expressible in the database
+
+- A challenge of a coaching note targets a note shared with the employee; a challenge's employee is the caller (self-service).
+- The employee sees values of PUBLISHED definitions only, plans once they leave DRAFT, coaching / context notes only when shared.
+- A verified record of a course that grants a certification creates or renews the `EmployeeQualification` through the qualifications
+  module (Task 2), which also sets `TrainingRecord.qualificationId`.
+- `PerformanceMetricValue.orgUnitId` is the employee's primary unit at computation time; the computation sets it.
+- Recommendations are produced only by the documented deterministic rules (Task 5) and never create an assignment by themselves.
