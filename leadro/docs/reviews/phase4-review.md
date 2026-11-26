@@ -17,7 +17,7 @@ regression tests are `tests/finance-adjustments/phase4-hardening.test.ts` and th
 | P4-R2 | Important | `src/server/ledger/entries.ts:80` (`reverseCharge`), `src/server/payments/status.ts:85` (`voidPayment`) | Fixed (review flag; approval is an owner decision) |
 | P4-R3 | Minor | `src/server/payments/intake.ts:233` (`processEvent`) | Fixed |
 | P4-R4 | Minor | `src/server/approvals/policies.ts:59,125` | Deferred (owner decision) |
-| P4-R5 | Minor | `src/server/approvals/access.ts:95` (`moneyVisibleTo`) | Deferred |
+| P4-R5 | Minor | `src/server/approvals/access.ts:95` (`moneyVisibleTo`) | Fixed |
 | P4-R6 | Minor | `src/server/payments/outcome-revenue.ts:123` | Deferred |
 | P4-R7 | Minor | `src/server/finance-adjustments/refunds.ts:169` (`completeRefund`) | Deferred (owner decision) |
 
@@ -75,15 +75,22 @@ DUPLICATE_EXTERNAL_EVENT finding missed them. Reproduced with 6 concurrent event
 provider key, the event is DUPLICATE `duplicate_provider_ref` with `duplicateOfId` = the accepting event, exactly like the
 sequential case. Regression: `tests/finance/intake.test.ts` "P4-R3".
 
+## P4-R5 (Minor): cost-change approval details showed unit costs to any approver
+
+**Scenario.** A MATERIAL_COST_CHANGE request's `details` carry the old and new unit costs. An approver holding `materials.approve`
+without the `cost` field set of `materials.view` saw them in `GET /approvals/{id}` and the queue, although every materials
+endpoint hides costs from that person (spec 11.4, 22.2). No template has that combination (Finance has both); a custom role does.
+
+**Fix.** The approvals access check knows which subjects carry another module's field set (`SUBJECT_MONEY_FIELD_SET`, today only
+MATERIAL_COST_CHANGE -> `materials.view` `cost`); without it the amount and details are redacted (`moneyRedacted: true`), and the
+approver can still decide. Regression: `tests/materials/materials.test.ts` "P4-R5".
+
 ## Deferred (Minor)
 
 - **P4-R4: policy configuration is not itself approved.** A holder of `approvals.configure` (the Finance Director template) can
   deactivate the policy that covers a refund or adjustment, then request and complete it alone. Policy changes are versioned and
   audited (`approval_policy.*`), but spec 21.3 also lists configuration changes as possible approval subjects. Owner decision:
   approval for policy changes, or keeping `approvals.configure` away from people who request money movements.
-- **P4-R5: cost-change approval details show unit costs to any approver.** A MATERIAL_COST_CHANGE request's `details` carry old and
-  new unit costs; an approver holding `materials.approve` without the `cost` field set would see them. No template has that
-  combination (Finance has both), so this needs a custom role. Fix later: hide `details` for that subject without the cost set.
 - **P4-R6: the charges-to-confirm queue filters the outcome `financial` set after paging.** A page can come back short (even empty)
   while more rows exist; the cursor still advances correctly, so nothing is hidden or leaked. Fix later: filter in SQL.
 - **P4-R7: who records a refund payout.** `completeRefund` (posts the REFUND entry) needs `finance_refunds.create`, which the unit
