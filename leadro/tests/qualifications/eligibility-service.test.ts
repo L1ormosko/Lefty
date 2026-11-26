@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GET as listExpiring } from "@/app/api/v1/qualifications/expiring/route";
 import { POST as checkEligibility } from "@/app/api/v1/qualifications/eligibility/route";
 import { createTranslator } from "@/lib/i18n";
+import { addDays, localIsoDate } from "@/lib/zoned-time";
 import { withTenant } from "@/server/db";
 import {
   evaluateCandidates,
@@ -31,7 +32,9 @@ const ids = {
 /** Window on a fixed future Wednesday, 09:00-11:00 New York (the company default zone). */
 const WINDOW = { startsAt: new Date("2026-12-09T14:00:00Z"), endsAt: new Date("2026-12-09T16:00:00Z") };
 const query = (extra: Record<string, unknown> = {}) => ({ at: new Date("2026-11-22T12:00:00Z"), window: WINDOW, timeZone: "America/New_York", ...extra });
-const daysFromNow = (days: number) => new Date(`${new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)}T00:00:00Z`);
+// Days are counted from the tenant-local date (New York), as the service does; a UTC date would be a day ahead
+// between midnight UTC and midnight New York and make the expiry assertions fail at those hours.
+const daysFromNow = (days: number) => new Date(`${addDays(localIsoDate(Date.now(), "America/New_York"), days)}T00:00:00Z`);
 
 async function qualify(employeeId: string, data: { skillId?: string; certificationId?: string; kind: "SKILL" | "LICENSE"; level?: number; expiresAt?: Date | null; status?: "VERIFIED" | "PENDING_VERIFICATION" }) {
   const status = data.status ?? "VERIFIED";
