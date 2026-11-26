@@ -81,11 +81,11 @@ approval amounts are redacted for approvers without the `cost` set.
 
 | Check | Result |
 |---|---|
-| `npm test` (Vitest) | **TEST_RESULT** |
-| `npm run typecheck` | TYPECHECK_RESULT |
-| `npm run lint` | LINT_RESULT |
-| `npm run i18n:check` | I18N_RESULT |
-| `npm run build` | BUILD_RESULT |
+| `npm test` (Vitest) | **159 files, 2124 tests: 2124 passed, 0 failed, 0 skipped** (457 s; 2116 before the review fixes) |
+| `npm run typecheck` | passed, 0 errors |
+| `npm run lint` | passed, 0 problems |
+| `npm run i18n:check` | passed |
+| `npm run build` | passed (Next.js production build, after `rm -rf .next`) |
 | `npm run test:e2e` | not run for this milestone (no Phase 4 screen exists; the 9 Phase 1 specs are unchanged) |
 
 Error log lines printed by negative tests (trigger refusals, a provider that throws, a failing subject handler) are expected. Phase 4 adds
