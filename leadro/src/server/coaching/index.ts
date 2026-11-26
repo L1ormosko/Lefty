@@ -31,3 +31,7 @@ export type {
   CreateContextNoteInput,
   ListContextNotesQuery,
 } from "./schemas";
+
+// Self-service (`/api/v1/me/*`): the caller's own notes that were shared with them (no module permission).
+export { listOwnSharedCoachingRecords, listOwnSharedContextNotes, ownCoachingRecordsQuerySchema, ownContextNotesQuerySchema } from "./self-service";
+export type { OwnCoachingRecordsQuery, OwnContextNotesQuery } from "./self-service";

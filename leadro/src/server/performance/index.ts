@@ -16,6 +16,9 @@ export { submitDefinition, withdrawDefinition, registerMetricDefinitionApprovalS
 export { computeMetricValues, computeMetricValuesAsSystem } from "./compute";
 export type { ComputedValuesSummary } from "./compute";
 export { listMetricValues, getMetricValue, listEmployeeCurrentValues } from "./values";
+// Self-service (`/api/v1/me/metrics/*`, own published values) and the peer read for the development dashboard
+export { listOwnCurrentValues, getOwnMetricValue, listPeerCurrentValues } from "./values";
+export type { PeerSeries, PeerValue } from "./values";
 
 export {
   definitionIdParams,

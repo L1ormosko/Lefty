@@ -4,6 +4,9 @@ export { listSkills, createSkill, updateSkill, listCertifications, createCertifi
 // Employee skills and credentials, and HR's verification
 export { createQualification, updateQualification, getQualification, listQualifications } from "./employee-qualifications";
 export { verifyQualification, rejectQualification, revokeQualification } from "./verification";
+// Self-service certification status (`GET /api/v1/me/qualifications`; no module permission, own rows only)
+export { listOwnQualifications, ownQualificationsQuerySchema } from "./self-service";
+export type { OwnQualificationsQuery, OwnQualificationView } from "./self-service";
 
 // TRAINING qualifications from verified training records (the training module calls these in its transaction)
 export { grantTrainingQualificationInTx, restateTrainingQualificationInTx } from "./training-grants";

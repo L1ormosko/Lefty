@@ -25,6 +25,10 @@ export { sweepTraining, sweepAllTraining } from "./sweep";
 export type { TrainingSweepResult } from "./sweep";
 export { registerTrainingNotificationTargets } from "./notify";
 
+// Self-service (`/api/v1/me/training/*`): the caller's own assignments and records (no module permission).
+export { listOwnAssignments, listOwnRecords, ownAssignmentsQuerySchema, ownRecordsQuerySchema } from "./self-service";
+export type { OwnAssignmentsQuery, OwnRecordsQuery, OwnAssignmentView, OwnRecordView } from "./self-service";
+
 export type { AssignmentView, CourseView, RecordView } from "./views";
 export {
   idParams as trainingIdParams,

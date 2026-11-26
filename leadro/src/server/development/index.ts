@@ -1,6 +1,9 @@
 // Development plans (spec 10.4, 5.4, 5.8): plans, goals, actions, append-only reviews.
 export { createPlan, updatePlan, activatePlan, completePlan, cancelPlan, getPlan, listPlans } from "./plans";
 export { addGoal, updateGoal, addAction, updateAction, addReview } from "./plan-items";
+// Self-service (`/api/v1/me/development-plans/*`): the caller's own non-draft plans without the manager's private notes.
+export { listOwnPlans, getOwnPlan, ownPlansQuerySchema } from "./self-service";
+export type { OwnPlansQuery, OwnPlanSummaryView, OwnPlanView } from "./self-service";
 
 // Training recommendations (spec 5.4, 28.6): deterministic rules, explicit runs, human decisions.
 export {
