@@ -53,8 +53,9 @@ in `src/`); tests may import internals when they need to.
 | Finance corrections (Phase 4) | `finance-adjustments` | refunds against received payments, chargebacks (manual and provider intake, dispute, write-off), adjustments of what a customer owes, all with approval per policy and ledger postings / reversals; finance review flags (raised once per triggering event: reopened job, corrected outcome, refund paid out, chargeback opened, single-person correction: charge reversed or received payment voided) and their assign / resolve workflow |
 | Coaching (Phase 5) | `coaching` | coaching notes (private by default, shared one way, archived never deleted) and manager context notes on metric values or periods (`performance.edit` / `.view` with the `coaching` field set); the coaching-note correction API used by data challenges |
 | Data challenges (Phase 5) | `data-challenges` | employees challenge their own metric values, training records, shared coaching notes and qualifications; routing to a reviewer, HR decision (annotation, or a correction proven by the owning module's audit event), withdrawal, notifications |
+| Performance (Phase 5) | `performance` | versioned metric definitions from a fixed kind catalog, publication through the approval engine (always an approval request), computation per employee x period x job type / category with a minimum sample, append-only values with evidence, scoped read models; reads jobs, arrivals, completions, outcomes, recovery cases, feedback and training assignments, and nothing that decides work imports it (spec 10.3) |
 
-Not built (spec 2.2 modules for later phases): performance, compensation / commission / employee statements (blocked on an
+Not built (spec 2.2 modules for later phases): compensation / commission / employee statements (blocked on an
 approved compensation spec, 28.4; the Phase 4 financial core is built without any formula), automation, reporting, integrations,
 a payment provider, a scheduler / worker, and every UI for the Phase 2, 3 and 4 modules (the backend is complete behind `/api/v1`;
 screens are deferred). There is no
