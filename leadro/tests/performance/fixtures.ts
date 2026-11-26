@@ -17,6 +17,7 @@ export interface PerformanceWorld extends World {
   otherJobTypeId: string;
   customerId: string;
   addressId: string;
+  lostReasonId: string;
 }
 
 export const at = (iso: string) => new Date(iso);
@@ -36,6 +37,7 @@ export async function buildPerformanceWorld(label: string, options: { withPolicy
   const types = await withTenant(w.tenantId, async (tx) => ({
     jobTypeId: (await tx.jobType.create({ data: { tenantId: w.tenantId, code: "install", name: "Install", category: "installation", defaultDurationMinutes: 60 } })).id,
     otherJobTypeId: (await tx.jobType.create({ data: { tenantId: w.tenantId, code: "repair", name: "Repair", category: "repair", defaultDurationMinutes: 60 } })).id,
+    lostReasonId: (await tx.lostReason.create({ data: { tenantId: w.tenantId, code: "price", name: "Price" } })).id,
   }));
   const customer = await makeCustomer(w.tenantId);
   const addressId = await makeAddress(w.tenantId, customer.id, { orgUnitId: w.units.cityA });

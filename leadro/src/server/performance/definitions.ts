@@ -46,7 +46,9 @@ export function validatedParams(kind: MetricKind, raw: Record<string, unknown>):
   });
 }
 
-const asJson = (params: MetricParams): Prisma.InputJsonObject => ({ ...params }) as Prisma.InputJsonObject;
+/** Stored without absent keys (no `breakdown: null` on TRAINING_PROGRESS), so the stored object re-validates as is. */
+const asJson = (params: MetricParams): Prisma.InputJsonObject =>
+  Object.fromEntries(Object.entries(params).filter(([, value]) => value !== null && value !== undefined)) as Prisma.InputJsonObject;
 
 /** A definition version by id (404 when missing). */
 export async function loadDefinition(tx: TenantTx, tenantId: string, definitionId: string): Promise<DefinitionRow> {
