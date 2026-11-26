@@ -9,7 +9,9 @@ Public API (`index.ts`):
   CHECK, CARD, BANK_TRANSFER; the client's REQUIRED `Idempotency-Key` becomes `Payment.idempotencyKey` (per user), so a duplicate submit is
   one payment. RECEIVED posts the PAYMENT entry at once; PENDING waits for `markPaymentReceived`.
 - `markPaymentReceived`, `markPaymentFailed`, `voidPayment` (`finance_payments.edit`): conditional status updates (the DB trigger owns the
-  machine), replay when the status is already the target; voiding a RECEIVED payment REVERSES its entry.
+  machine), replay when the status is already the target; voiding a RECEIVED payment REVERSES its entry and publishes a ledger
+  correction (a finance review flag follows). A RECEIVED payment with a POSTED refund or a not-WON chargeback is never voided
+  (`409 payment.money_returned`: its money already went back out); the void takes the payment row lock refunds and chargebacks take.
 - `listPayments`, `getPayment`, `paymentResourceRef` (`finance_payments.view`; a payment's scope follows its job's current unit).
 - **Revenue from outcomes** (`outcome-revenue.ts`): finance-confirmed, never automatic. `listChargesToConfirm` (queue), `confirmOutcomeCharge`
   (CHARGE, key `outcome:<id>:charge:<n>`), `confirmOutcomeCollection` (MANUAL payment linked to the outcome, key
@@ -19,7 +21,8 @@ Public API (`index.ts`):
   `registerPaymentProvider` / `getPaymentProvider` on `globalThis`, EMPTY by default ("not configured"), `hmacSha256Matches` helper.
 - **Intake** (`intake.ts`): `receiveProviderEvent`: not configured / unknown tenant = 409 before any write; bad signature = 401 + REJECTED row
   under `unverified:<hash>`; verified event stored first (unique per tenant / provider / externalId), then processed under a row lock:
-  validate (event type, job, currency, provider reference) before creating a PROVIDER payment + PAYMENT entry (`system:provider-intake`).
+  validate (event type, job, currency, provider reference) before creating a PROVIDER payment + PAYMENT entry (`system:provider-intake`);
+  a concurrent event with another id about the same provider payment ends DUPLICATE, never a second ACCEPTED.
   `listIntakeEvents` (TENANT scope), `listPaymentProviders`. Other event types are applied by the module that registered them with
   `registerIntakeEventHandler` (`chargeback.opened`: finance-adjustments), under the same store-first / row-lock / validate-first rules;
   unregistered types are REJECTED `unsupported_event_type`.

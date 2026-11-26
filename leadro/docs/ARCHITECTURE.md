@@ -1,7 +1,7 @@
-# LEADRO Architecture (Phases 0 - 3 backend, as built)
+# LEADRO Architecture (Phases 0 - 4 backend, as built)
 
 Authority: `SPEC.md` (sections 2, 3, 4, 19-22). This document describes the code as it exists at
-the end of the Phase 3 backend (Milestone 2+3, `MILESTONE-2-3.md`); where the code and an earlier plan differ, this file follows the code. Revise via
+the end of the Phase 4 backend (Milestone 4, `MILESTONE-4.md`; Phase 2+3 in `MILESTONE-2-3.md`); where the code and an earlier plan differ, this file follows the code. Revise via
 `DECISIONS.md`.
 
 ## 1. Style
@@ -50,11 +50,12 @@ in `src/`); tests may import internals when they need to.
 | Payments (Phase 4) | `payments` | payment records (manual, status changes), finance-confirmed revenue from outcomes, the `PaymentProvider` port (not configured) and the authenticated provider intake |
 | Reconciliation (Phase 4) | `reconciliation` | runs per period / legal entity / currency (expected vs recorded per job, stored totals), exception detection with idempotent re-runs, the exception workflow (assign, resolve with reason), summaries; reads the ledger, payments, outcomes, refunds and intake tables, never moves money |
 | Materials | `materials` | Phase 4: the material catalog, versioned costs (proposed through the approval engine as `MATERIAL_COST_CHANGE`, effective on their date, never overlapping) and the costing of job material usage (frozen snapshot of the version in effect at usage time, half-even extended cost), direct material cost per job |
-| Finance corrections (Phase 4) | `finance-adjustments` | refunds against received payments, chargebacks (manual and provider intake, dispute, write-off), adjustments of what a customer owes, all with approval per policy and ledger postings / reversals; finance review flags (raised once per triggering event: reopened job, corrected outcome, refund paid out, chargeback opened) and their assign / resolve workflow |
+| Finance corrections (Phase 4) | `finance-adjustments` | refunds against received payments, chargebacks (manual and provider intake, dispute, write-off), adjustments of what a customer owes, all with approval per policy and ledger postings / reversals; finance review flags (raised once per triggering event: reopened job, corrected outcome, refund paid out, chargeback opened, single-person correction: charge reversed or received payment voided) and their assign / resolve workflow |
 
-Not built (spec 2.2 modules for later phases): performance, finance and compensation (blocked on an
-approved compensation spec, 28.4), automation, reporting, integrations, and every UI for the Phase 2
-and 3 modules (the backend is complete behind `/api/v1`; screens are deferred). There is no
+Not built (spec 2.2 modules for later phases): performance, compensation / commission / employee statements (blocked on an
+approved compensation spec, 28.4; the Phase 4 financial core is built without any formula), automation, reporting, integrations,
+a payment provider, a scheduler / worker, and every UI for the Phase 2, 3 and 4 modules (the backend is complete behind `/api/v1`;
+screens are deferred). There is no
 tenant-provisioning module: tenants come from the seed.
 
 **Ports (provider seams) without a provider.** No fake integrations exist (spec 28.3): the storage
@@ -68,7 +69,7 @@ separately, so a module-level Map would be filled in one bundle and empty in the
 registries therefore live on `globalThis` (same pattern as the Prisma client): the notification
 target resolvers (`notifications/target-access.ts`), the outcome-recorded handlers
 (`job-outcomes/events.ts`) and the follow-up target access (`follow-ups/targets.ts`; the unregistered
-recovery-case default fails closed). The approval subject handlers (`approvals/registry.ts`), the job status-change handlers (`jobs/status-events.ts`), the outcome-corrected handlers (`job-outcomes/events.ts`) and the provider intake event handlers (`payments/intake-handlers.ts`) follow the same pattern. `src/server/notification-targets.ts` is the one place that
+recovery-case default fails closed). The approval subject handlers (`approvals/registry.ts`), the job status-change handlers (`jobs/status-events.ts`), the outcome-corrected handlers (`job-outcomes/events.ts`) the provider intake event handlers (`payments/intake-handlers.ts`), the payment providers (`payments/provider.ts`) and the ledger correction handlers (`ledger/correction-events.ts`) follow the same pattern. `src/server/notification-targets.ts` is the one place that
 registers them at start-up (called from `src/instrumentation.ts` and the notifications route).
 
 **Shared offline gate.** Every technician write that can arrive late from a device (shifts, location

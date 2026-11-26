@@ -429,3 +429,9 @@ Rules:
   record chargebacks. Review flags: read `finance_reconciliation.view` over the flag's unit, raise by hand `finance_reconciliation.create`,
   assign / unassign `finance_reconciliation.assign` (only to someone who can see the flag), resolve `finance_reconciliation.edit`. None of
   these touches employees' pay: there is no wage deduction or commission effect anywhere (spec 11.7).
+- **Phase 4 review (hardening)**: reversing a CHARGE and voiding a RECEIVED payment stay single-person corrections under
+  `finance_payments.edit` (no approval policy), but each raises a finance review flag (`ledger.charge_reversed`,
+  `payment.voided_after_receipt`) so a second finance person sees it; whether they should need an approval is an owner decision
+  (`MILESTONE-4.md`). An approver of a MATERIAL_COST_CHANGE request who lacks the `materials.view` `cost` set decides without seeing the
+  unit costs (`moneyRedacted`). Known open points for the owner: an `approvals.configure` holder can deactivate the policy covering their
+  own request (policy changes are audited, not approved), and unit managers may record the payout of an approved refund.

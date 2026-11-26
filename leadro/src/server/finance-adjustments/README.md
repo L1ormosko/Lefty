@@ -16,8 +16,9 @@ Public API (`index.ts`):
 - Review flags (`review-flags.ts`): `raiseFinanceReviewFlagInTx` (for other modules, inside their transaction), `raiseManualFlag`,
   `assignReviewFlag`, `unassignReviewFlag`, `resolveReviewFlag`, reads.
 - Wiring (`wiring.ts`): `registerFinanceAdjustments()` (module load and `src/server/notification-targets.ts`): the three approval subjects,
-  the intake handler, and the reactions `onJobStatusChanged` (job reopened after posting) and `onJobOutcomeCorrected` (outcome money
-  corrected after posting).
+  the intake handler, and the reactions `onJobStatusChanged` (job reopened after posting), `onJobOutcomeCorrected` (outcome money
+  corrected after posting) and `onLedgerCorrection` (a CHARGE reversed or a RECEIVED payment voided by one person, with no approval
+  behind it: flags `ledger.charge_reversed` / `payment.voided_after_receipt`, Phase 4 review P4-R2).
 
 Invariants:
 1. **Explicit events, never edits** (11.7, 11.8). Records are never deleted; amount, currency, job, payment, reason and requester are frozen
@@ -31,7 +32,7 @@ Invariants:
    job or a corrected outcome never touches posted entries: it raises a review flag and finance records an adjustment.
 5. **No wage deductions, no commission effects** (11.7, 28.4). Nothing here references employees' pay; refunds paid out and chargebacks
    opened raise review flags so a person decides.
-6. **Flags are idempotent per triggering event** (key per status-history row, job event, refund, chargeback, usage line, or the client's
+6. **Flags are idempotent per triggering event** (key per status-history row, job event, refund, chargeback, usage line, reversal entry, or the client's
    `Idempotency-Key`); what was flagged is frozen, only assignment and resolution move (OPEN <-> ASSIGNED -> RESOLVED with a reason).
 7. **Access**: finance permissions over the job's current unit (never OWN / ASSIGNED); flags by their own unit with the
    `finance_reconciliation.*` keys. Responses carry ids, money, codes and the people's own reason / note text, never operational data.
