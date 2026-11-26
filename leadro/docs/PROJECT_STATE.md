@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: end of the Phase 3 backend (Milestone 2+3). Reports: `MILESTONE-1.md`, `MILESTONE-2-3.md`.
+Last updated: end of the Phase 4 backend (Milestone 4). Reports: `MILESTONE-1.md`, `MILESTONE-2-3.md`, `MILESTONE-4.md`.
 
 ## Done
 
@@ -23,12 +23,20 @@ Last updated: end of the Phase 3 backend (Milestone 2+3). Reports: `MILESTONE-1.
 - Tests: 132 files, 1788 passing; typecheck, lint, i18n check, build and 9 e2e specs pass (`MILESTONE-2-3.md`).
 - **Deferred**: every Phase 2/3 screen and the field app; providers (storage, geocoding, notification channels); a scheduler/worker; unauthenticated lead intake; a single end-to-end chain test.
 
+## Phase 4 backend: financial core (done, no UI, formula-free)
+
+- 6 more server modules (approvals, ledger, payments, materials, finance-adjustments, reconciliation), 80 models, 11 migrations,
+  222 route files; Int money columns are BigInt. Whole-phase review in `reviews/phase4-review.md` (no Critical; Important fixed).
+- **Compensation / commission formulas are BLOCKED** pending an approved compensation specification (spec 28.4).
+- **Deferred**: payment provider (none configured), scheduler / worker, finance / materials / approvals UI, exports.
+
 ## Not done / next
 
 - **No notifier/email provider**: invitations and password resets cannot reach a real user.
 - **No tenant provisioning** (seed only; `GET/PATCH /tenants/current`) and **no audit-log API/UI**.
 - UI for Phase 2/3 and the React Native field app (the `/api/v1` and field-sync contracts are ready).
-- **Phase 4 (finance, compensation) is blocked** on an approved compensation spec (spec 28.4).
+- **Compensation, commission and employee statements are blocked** on an approved compensation spec (spec 28.4); the rest of
+  Phase 4 is built (`MILESTONE-4.md`), and its owner decisions are listed there (section 9).
 - Managed identity provider to replace local credentials; legal review items (spec 22.3).
 - Phase 8 hardening: REVOKE on `Tenant`/`Permission`, DDL owner vs runtime role, shared rate-limit
   store, denial-audit throttling.
