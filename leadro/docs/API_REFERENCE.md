@@ -3123,6 +3123,139 @@ the date). Idempotent per record and date. Recipients need `training.view` over 
 - **Permission**: `training.approve`, not one's own. **Body**: `{ reason }`. VERIFIED -> REVOKED. The linked qualification follows the remaining
   verified records linked to it: none -> REVOKED (`qualification.revoke`); otherwise its dates follow the longest-lasting one
   (`qualification.training_restate`). Audit `training_record.revoke`.
+
+## Training recommendations (`/api/v1/training/recommendations/**`) - Phase 5
+
+Deterministic, explainable, human-decided training suggestions (spec 5.4, 28.6). Module: `src/server/development` (README).
+Decisions: `docs/DECISIONS.md` "Phase 5 Task 5". Scoped by the EMPLOYEE (like assignments). Development use only (spec 10.3).
+
+Shape: `{ id, employeeId, courseId, reasons[], status (OPEN | ACCEPTED | DISMISSED), generatedById (null = system run), generatedAt,
+decidedById, decidedAt, dismissReason, dismissedBySystem, trainingAssignmentId }`. Each reason is `{ code, ...ids / numbers }`
+(label `TRAINING.RECOMMENDATION_REASON.<code>`):
+- `CERTIFICATION_EXPIRED { certificationId, expiresOn }`, `CERTIFICATION_EXPIRING { certificationId, expiresOn, daysRemaining }`: a
+  VERIFIED TRAINING certification past or within the tenant's `qualificationWarningDays`, no renewal pending verification;
+- `JOB_TYPE_TRAINING_MISSING { jobTypeId, certificationId }`: an active job type requires the certification and it is the only
+  eligibility requirement the employee misses (job permission held, other credentials held);
+- `METRIC_BELOW_THRESHOLD { metricKey, definitionId, metricValueId, periodStart, periodEnd, jobTypeId, jobCategory, numerator,
+  denominator, sampleSize, belowMilli }`: the current value (latest period, newest computation) of a PUBLISHED definition with
+  enough data, `numerator x 1000 < belowMilli x denominator`. Off until a threshold is configured.
+The course of a certification is the active course granting it (smallest code first). System dismissal reasons: `NO_LONGER_APPLIES`,
+`ALREADY_ASSIGNED` (label `TRAINING.RECOMMENDATION_DISMISS.<code>`).
+
+### GET /api/v1/training/recommendations
+
+- **Permission**: `training.view` (scoped). **Purpose**: newest first. Query: `employeeId?`, `courseId?`, `status?`, `cursor`, `limit`.
+
+### POST /api/v1/training/recommendations/generate
+
+- **Permission**: `training.assign` (over the employee). **Body** (strict): `{ employeeId? }`; omitted = every ACTIVE employee in the
+  caller's scope. Runs the rules now (there is no scheduler; a worker may call `generateAllTrainingRecommendations`). Creates an OPEN
+  recommendation per employee + course with reasons, except when one is already OPEN, the course is already assigned (open
+  assignment), or a recommendation of the pair decided by a person already covered every current reason. Dismisses, as the system,
+  OPEN ones that no longer apply. **Response**: `{ evaluatedEmployees, created[], dismissed[] }`. Audit `training_recommendation.create`
+  / `.dismiss`.
+
+### GET /api/v1/training/recommendations/thresholds
+
+- **Permission**: `training.view`. **Response**: `{ enabled, thresholds: [{ metricKey, belowMilli, courseId }] }` (empty = rule disabled,
+  the default).
+
+### PUT /api/v1/training/recommendations/thresholds
+
+- **Permission**: `training.manage` (TENANT). **Body** (strict): `{ thresholds: [{ metricKey, belowMilli (1-5000, thousandths of the
+  ratio; 3500 = an average rating of 3.5), courseId (active) }] }`, at most 50, one per key; `[]` disables the rule. A key whose
+  definitions are REPEAT_VISIT_RATE (lower is better) is a `400`. Stored on `OperationsSettings.developmentThresholds`. Audit
+  `training_recommendation.thresholds_update`.
+
+### GET /api/v1/training/recommendations/{id}
+
+- **Permission**: `training.view` over the employee. `404` outside scope.
+
+### POST /api/v1/training/recommendations/{id}/accept
+
+- **Permission**: `training.assign` over the employee. **Body** (strict): `{ dueDate? (not in the past), note?, planId?, goalId? }`.
+  OPEN > ACCEPTED (`409` otherwise) and, in the same transaction, a training assignment with `source = RECOMMENDATION` (the employee
+  is notified, `training.assigned`). An open assignment of the course already existing: `409`, nothing changes. With `planId`
+  (`development_plans.edit`, same employee, DRAFT / ACTIVE, else `400` / `409`) also a TRAINING action for the new assignment.
+  Audit `training_recommendation.accept`, `training_assignment.create` (+ `development_action.create`).
+
+### POST /api/v1/training/recommendations/{id}/dismiss
+
+- **Permission**: `training.assign` over the employee. **Body**: `{ reason (<= 500) }`. OPEN > DISMISSED. The reason is stored on the
+  record; the audit event carries its digest only. Audit `training_recommendation.dismiss`.
+
+## Development plans (`/api/v1/development-plans/**`) - Phase 5
+
+Plans for one employee with goals, actions and an append-only review history (spec 10.4, 5.4, 5.8). Module:
+`src/server/development` (README). Scoped by the EMPLOYEE; `development_plans.view` is sensitive. Development use only (spec 10.3).
+No free text in audit events (titles, summaries, descriptions, review bodies and reasons are audited as SHA-256 digests). Every
+mutation returns the whole plan.
+
+Plan shape: `{ id, employeeId, ownerId, title, summary, status (DRAFT | ACTIVE | COMPLETED | CANCELLED), periodStart, periodEnd,
+createdById, activatedAt, completedAt, cancelledAt, cancelReason, createdAt, updatedAt, goals[], actions[], reviews[] }` (lists omit
+the three arrays). Goal: `{ id, title, description, status (OPEN | ACHIEVED | DROPPED), targetDate, metricDefinitionId, position,
+achievedAt, ... }`. Action: `{ id, goalId, kind (TRAINING | COACHING | OTHER), description, status (PLANNED | DONE | CANCELLED), dueDate,
+trainingAssignmentId, coachingRecordId, completedAt, ... }`. Review: `{ id, reviewerId, planStatus, body, reviewedAt }` (oldest first).
+
+### GET /api/v1/development-plans
+
+- **Permission**: `development_plans.view` (scoped). Newest first. Query: `employeeId?`, `ownerId?`, `status?`, `cursor`, `limit`.
+
+### POST /api/v1/development-plans
+
+- **Permission**: `development_plans.create` over the employee. **Body** (strict): `employeeId`, `title`, `summary?`, `periodStart`,
+  `periodEnd` (YYYY-MM-DD, end exclusive, after start), `ownerId?` (default the caller; must be active, hold `development_plans.edit`
+  over the employee and not be the employee, else `400`). About oneself: `403`. Terminated employee: `409`. Starts DRAFT.
+  `Idempotency-Key` supported. Audit `development_plan.create`.
+
+### GET /api/v1/development-plans/{id}
+
+- **Permission**: `development_plans.view` over the employee. `404` outside scope.
+
+### PATCH /api/v1/development-plans/{id}
+
+- **Permission**: `development_plans.edit`. **Body** (strict, at least one): `title`, `summary` (null clears), `periodStart`, `periodEnd`,
+  `ownerId`. DRAFT / ACTIVE only (`409`). Audit `development_plan.update`.
+
+### POST /api/v1/development-plans/{id}/activate
+
+- **Permission**: `development_plans.edit`. **Body**: `{}`. DRAFT > ACTIVE. Notifies the employee (`development_plan.activated`, no
+  link: they read it through self-service). Audit `development_plan.activate`.
+
+### POST /api/v1/development-plans/{id}/complete
+
+- **Permission**: `development_plans.edit`. **Body**: `{}`. ACTIVE > COMPLETED. Audit `development_plan.complete`.
+
+### POST /api/v1/development-plans/{id}/cancel
+
+- **Permission**: `development_plans.edit`. **Body**: `{ reason }`. DRAFT / ACTIVE > CANCELLED. Audit `development_plan.cancel`.
+
+### POST /api/v1/development-plans/{id}/goals
+
+- **Permission**: `development_plans.edit`. **Body** (strict): `title`, `description?`, `targetDate?`, `metricDefinitionId?` (a
+  PUBLISHED definition, else `400`), `position?`. Plan DRAFT / ACTIVE. `201`. Audit `development_goal.create`.
+
+### PATCH /api/v1/development-plans/{id}/goals/{goalId}
+
+- **Permission**: `development_plans.edit`. **Body** (strict, at least one): `title`, `description`, `targetDate`, `metricDefinitionId`,
+  `position`, `status` (OPEN <> ACHIEVED / DROPPED; ACHIEVED > DROPPED directly is `409`). Audit `development_goal.update`.
+
+### POST /api/v1/development-plans/{id}/actions
+
+- **Permission**: `development_plans.edit`. **Body** (strict): `kind`, `description`, `goalId?` (of this plan), `dueDate?`,
+  `trainingAssignmentId` (exactly for TRAINING), `coachingRecordId?` (COACHING only). The linked record must be the plan employee's and
+  visible to the caller (`training.view` / `coaching.view`), else `400`. `201`. Audit `development_action.create`.
+
+### PATCH /api/v1/development-plans/{id}/actions/{actionId}
+
+- **Permission**: `development_plans.edit`. **Body** (strict, at least one): `description`, `goalId`, `dueDate`, `status` (DONE |
+  CANCELLED). PLANNED actions only (`409`). Audit `development_action.update`.
+
+### POST /api/v1/development-plans/{id}/reviews
+
+- **Permission**: `development_plans.edit`. **Body**: `{ body (<= 8000) }`. Appends a review (reviewer = caller, snapshot of the plan
+  status); not on a CANCELLED plan (`409`). `201`. Audit `development_plan.review` (digest only).
+
 ## Coaching (`/api/v1/coaching/**`) - Phase 5
 
 Coaching notes and manager context notes on metric values (spec 10.4, 22.2). Both are about ONE employee and scoped by that

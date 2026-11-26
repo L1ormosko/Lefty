@@ -1488,3 +1488,62 @@ Choices behind the table (each is one line of `src/lib/performance-formulas.ts` 
   (`performance.publish`) cannot be re-versioned through `POST /approvals/policies`; a tenant without the seeded policy cannot create one
   through the API. Fix belongs to the approvals module (allow `performance.publish`), not done here (approvals core is out of this task's scope).
 - No notification is sent to the author when a version is published or rejected beyond the engine's own `approval_request` decision notice.
+
+## Phase 5 Task 5: development plans and training recommendations (`src/server/development`)
+
+Routes `/api/v1/development-plans/**`, `/api/v1/training/recommendations/**`. No new dependency.
+
+- **One small migration** (`20261126150000_phase5_development_thresholds`, the only deviation from "no migration after Task 1"): the
+  brief's third rule needs a tenant-configured development threshold, and no existing column could hold it. Tenant settings live as
+  typed columns on `OperationsSettings` (`qualificationWarningDays` is one); there is no generic JSON settings column there or on
+  `Tenant`, and the other JSON columns belong to other concepts (`duplicateMatchers`, metric definition `params`, which Task 1 / ERD
+  say must never carry thresholds and whose content is frozen once submitted). So the migration adds one nullable column,
+  `OperationsSettings.developmentThresholds JSONB` (+ CHECK: array or NULL). No new table: the row is covered by the existing
+  `OperationsSettings` RLS policy and `tests/db/rls.test.ts` needs no change. NULL (or `[]` via the API) = rule disabled, the default.
+  Developed against a private `leadro_p5t5_test` database so parallel agents on `leadro_test` were not migrated under their feet.
+- **Threshold shape**: `[{ metricKey, belowMilli, courseId }]`, one per key. Integers only (`belowMilli` = thousandths of
+  numerator / denominator, so CUSTOMER_FEEDBACK_AVERAGE 3.5 = 3500); the comparison is `numerator x 1000 < belowMilli x denominator`
+  (no float). A key is per metric KEY, so it follows the published version. REPEAT_VISIT_RATE is refused (lower is better, "below" is
+  not a need) at configuration and skipped at evaluation. Read `training.view`, write `training.manage` TENANT (training reference
+  data like the catalog). Entries that no longer parse are ignored, not trusted.
+- **Rules** (`rules.ts`; reason codes are UPPER_SNAKE because the i18n check requires `DOMAIN.UPPER_SNAKE` keys, so the ERD example
+  `certification_expiring` became `CERTIFICATION_EXPIRING`):
+  - expired / expiring: the qualifications module's own verdict (`evaluateCandidates` with all TRAINING certifications that an active
+    course grants, judged at the end of today + `qualificationWarningDays`); only QUALIFICATION_EXPIRED counts, so a pending renewal
+    (RENEWAL_PENDING) or a never-held certification does not;
+  - job types: "the employee was ineligible because of a missing training requirement" is read strictly: `requirementsForJobType` +
+    `evaluateCandidates` (no territory, no window) and EVERY failure is a missing / expired TRAINING certification some course grants.
+    Otherwise every technician would be told to train for every trade they do not practise (job permission missing, other credentials
+    missing). Only the active job type ids are read from `JobTypeCertification` (as the qualifications module itself does);
+  - metric: the current value per series (employee x definition x job type / category) = latest `periodStart`, newest `computedAt`;
+    PUBLISHED definitions only, `enoughData` only (not enough data never counts against anyone), denominator > 0. The tables are read
+    directly (the performance module was built in parallel; it is not imported).
+  - one course per certification: the active course granting it with the smallest code (stable). All reasons of an employee + course
+    are merged into one recommendation.
+- **Runs are explicit** (`POST /training/recommendations/generate` for one employee or everyone ACTIVE in the caller's `training.assign`
+  scope; `generateTrainingRecommendationsForTenant` / `generateAllTrainingRecommendations` for a worker, no scheduler). A run:
+  skips pairs with an OPEN recommendation or an open assignment; does NOT re-raise a finding a PERSON already decided (every current
+  reason's identity, e.g. certification + expiry date, job type + certification, metric key + period + breakdown, was in a decided
+  recommendation of the pair), so a dismissal sticks until something new happens; dismisses, as the system (`decidedById` null, the
+  Task 1 contract), OPEN recommendations whose reasons are gone (`NO_LONGER_APPLIES`) or whose course was assigned another way
+  (`ALREADY_ASSIGNED`). The stored `reasons` are frozen (DB trigger): an OPEN recommendation keeps its original reasons as long as any
+  reason for the pair still holds. Inserts use `ON CONFLICT DO NOTHING` against `training_recommendation_one_open` (concurrent runs).
+- **Accept** locks the recommendation, sets ACCEPTED and calls `createTrainingAssignmentInTx(source RECOMMENDATION, recommendationId)` in
+  the same transaction, wrapped in `conflictOnUniqueViolation(TRAINING_ASSIGNMENT_ALREADY_OPEN)`, then `deliverAfterCommit`. An existing
+  open assignment is the training module's 409 and rolls everything back (the next run dismisses it as ALREADY_ASSIGNED). Optional
+  `planId` adds a TRAINING action for the new assignment to a DRAFT / ACTIVE plan of the same employee (`development_plans.edit`).
+- **Plans**: nobody runs a plan about themselves (403, like coaching notes); the owner must hold `development_plans.edit` over the
+  employee, be active and not be the employee (400 on `ownerId`). Only DRAFT / ACTIVE plans change; COMPLETED takes reviews, CANCELLED
+  nothing. Goals may name a PUBLISHED definition (context only, never a threshold). Linked assignments / coaching records must be the
+  employee's AND visible to the caller (`training.view` / `coaching.view`), else 400 "unknown" (no existence leak). Records are never
+  deleted (Task 1 ruling 11).
+- **No free text in audit events** (spec 22.2, as Task 4): plan titles / summaries, goal and action texts, review bodies, cancel and
+  dismiss reasons are audited as SHA-256 digests. Recommendation reasons are codes and ids, so they are audited as they are.
+- **Notification**: `development_plan.activated` to the employee, without link or params (they hold no `development_plans.view`; Task 6
+  self-service shows the plan). No notification for new recommendations: the person who runs them sees the result; a worker run's
+  recommendations appear in the managers' list. Revisit with Task 6's dashboard.
+- **Data-challenge hand-off (Task 4)**: `CORRECTION_PATH.TRAINING_RECORD` is now `audit_reference` (`TrainingRecord`, actions limited to
+  `training_record.reject` / `training_record.revoke`; a verification is not a correction). `audit_reference` gained an optional
+  `actions` list for this. PERFORMANCE_METRIC_VALUE stays annotation-only.
+- **Architecture test** `tests/development/architecture.test.ts`: dispatch, qualifications, jobs, ledger, payments, approvals, employees,
+  finance-adjustments, training and performance never import the development module; it imports only read functions from qualifications.

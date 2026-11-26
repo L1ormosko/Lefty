@@ -427,7 +427,7 @@ erDiagram
 | Model | Purpose | Main consumers |
 |---|---|---|
 | `NumberSequence` | per-tenant counters for human numbers; names `customer`, `lead`, `job` | customers, leads, jobs |
-| `OperationsSettings` | one row per tenant: dispatch mode, disabled (narrowed) lifecycle transitions, duplicate matchers, channels, contact-attempt window, expiry warning days; absent row = defaults | leads, jobs, dispatch, notifications, customers |
+| `OperationsSettings` | one row per tenant: dispatch mode, disabled (narrowed) lifecycle transitions, duplicate matchers, channels, contact-attempt window, expiry warning days, development thresholds of the training-recommendation metric rule (`developmentThresholds` JSON array, null = rule disabled; Phase 5 Task 5); absent row = defaults | leads, jobs, dispatch, notifications, customers |
 | `Customer` / `CustomerAddress` / `CustomerNote` | spec 6.1. Phone stored as typed + E.164; email lower-case; billing columns are the opt-in `billing` field set; archive via `archivedAt` | customers |
 | `LeadSource` | tenant-configured sources (`code` unique), typed per spec 6.2 | leads |
 | `Lead` | intake record; contact fields as received (a lead may precede its customer); address as received or linked; `externalId`+`sourceId` unique (webhook idempotency, spec 25.1) | leads |
