@@ -3000,3 +3000,103 @@ unit conversion), `material.no_effective_cost`, `material.cost_out_of_range`, `m
 - **Permission**: `jobs.view` over the usage's job + `cost` set. **Body** (strict): `{ materialId? }` links an unlinked line first (`404` for a
   material of another tenant, `409 material.usage_linked_elsewhere` when linked to another one). **Answers** the costed line; `409` with the
   skip code when it cannot be costed.
+
+## Coaching (`/api/v1/coaching/**`) - Phase 5
+
+Coaching notes and manager context notes on metric values (spec 10.4, 22.2). Both are about ONE employee and scoped by that
+employee (org placements, legal employer, OWN). Private by default; sharing with the employee is one way (`sharedAt` set);
+nothing is deleted (archive). Free text is never written to audit events: text changes are audited as `bodySha256` digests.
+Module: `src/server/coaching` (README). Decisions: `docs/DECISIONS.md` "Phase 5 Task 4".
+
+Record shape: `{ id, employeeId, authorId, occurredAt, body, metricValueId, sharedWithEmployee, sharedAt, archivedAt, createdAt, updatedAt }`.
+Context note shape: `{ id, employeeId, metricValueId, periodStart, periodEnd, body, authorId, sharedWithEmployee, sharedAt, archivedAt, createdAt, updatedAt }`.
+
+### GET /api/v1/coaching/records
+- Coaching notes in the caller's `coaching.view` scope, newest conversation first (`occurredAt desc, id desc`). **Query**: `cursor, limit,
+  employeeId, authorId, metricValueId, shared (true|false), includeArchived (true|false, default false)`.
+
+### POST /api/v1/coaching/records
+- **Permission**: `coaching.create` over the employee (managers of the unit, Team Leader, HR, Owner). **Headers**: `Idempotency-Key` accepted.
+  **Body** (strict): `employeeId, body (<= 8000)`, optional `occurredAt` (ISO instant, not in the future; default now), `metricValueId` (must be
+  the same employee's, else `400`), `shareWithEmployee` (default false). Nobody writes notes about themselves (`403`). `201 { data: record }`.
+  **Audit**: `coaching_record.create`.
+
+### GET /api/v1/coaching/records/{id}
+- One note (`coaching.view` over its employee; `404` outside the scope).
+
+### PATCH /api/v1/coaching/records/{id}
+- The AUTHOR edits a private, non-archived note. **Permission**: `coaching.edit`. **Body** (strict): `body?, occurredAt?` (at least one).
+  **Errors**: `403` not the author, `409` shared or archived (a shared note changes only through an upheld data challenge). **Audit**:
+  `coaching_record.update` (digests of the old and new text).
+
+### POST /api/v1/coaching/records/{id}/share
+- Shares the note with its employee (one way; already shared is a no-op; archived `409`). **Permission**: `coaching.edit`. **Audit**: `coaching_record.share`.
+
+### POST /api/v1/coaching/records/{id}/archive
+- Archives the note (idempotent; it stays readable with `includeArchived=true`). **Permission**: `coaching.edit`. **Audit**: `coaching_record.archive`.
+
+### GET /api/v1/coaching/context-notes
+- Context notes the caller may read: `performance.view` grants that name the `coaching` field set only (a plain grant, e.g. the COO's or an
+  employee's own, yields an empty page). Newest first (`createdAt desc, id desc`). **Query**: `cursor, limit, employeeId, metricValueId,
+  includeArchived`.
+
+### POST /api/v1/coaching/context-notes
+- **Permission**: `performance.edit` with the `coaching` set over the employee (`403` without the set). **Headers**: `Idempotency-Key` accepted.
+  **Body** (strict): `body (<= 8000)`, `shareWithEmployee?`, and EITHER `metricValueId` (the employee comes from the value; an `employeeId`
+  that differs is `400`) OR `employeeId + periodStart + periodEnd` (`YYYY-MM-DD`, end exclusive, end after start). Not about yourself (`403`).
+  Text and subject are frozen afterwards. `201 { data: note }`. **Audit**: `metric_context_note.create`.
+
+### GET /api/v1/coaching/context-notes/{id}
+- One note (`performance.view` with the coaching set over its employee; otherwise `404`).
+
+### POST /api/v1/coaching/context-notes/{id}/share
+- One-way share (no-op when shared, `409` when archived). **Permission**: `performance.edit` + coaching set. **Audit**: `metric_context_note.share`.
+
+### POST /api/v1/coaching/context-notes/{id}/archive
+- Archive (idempotent). **Permission**: `performance.edit` + coaching set. **Audit**: `metric_context_note.archive`.
+
+## Data challenges (`/api/v1/data-challenges/**`) - Phase 5
+
+An employee challenges inaccurate information about themselves (spec 10.4, 5.8, 5.11): a metric value (of a PUBLISHED definition), a
+training record, a coaching note shared with them, or a qualification record. OPEN > UNDER_REVIEW (reviewer) > UPHELD | REJECTED; OPEN /
+UNDER_REVIEW > WITHDRAWN. Managers route (`data_challenges.assign`), HR and the Owner decide (`data_challenges.approve` / `.reject`); the person
+who raised it never reviews it. A challenge never edits data silently: see uphold. Module: `src/server/data-challenges` (README).
+
+Challenge shape: `{ id, employeeId, targetType, targetId, metricValueId, trainingRecordId, coachingRecordId, qualificationId, statement, status,
+raisedById, raisedAt, reviewerId, assignedAt, resolutionKind, resolution, resolutionDetails, resolvedById, resolvedAt, withdrawnAt, createdAt,
+updatedAt }`. Notifications: `data_challenge.raised` (routers over the employee's units), `data_challenge.assigned` (the reviewer), both linking
+to the challenge; `data_challenge.decided` (the employee, no link).
+
+### GET /api/v1/data-challenges
+- Challenges in the caller's `data_challenges.view` scope (sensitive; the employee's scope), newest first (`raisedAt desc, id desc`).
+  **Query**: `cursor, limit, status, employeeId, reviewerId, targetType`.
+
+### POST /api/v1/data-challenges
+- **Self-service**: no module permission; the caller must have an employee record (`403` otherwise) and the target must be theirs and
+  visible to them (else `404`). **Headers**: `Idempotency-Key` accepted. **Body** (strict): `targetType (PERFORMANCE_METRIC_VALUE |
+  TRAINING_RECORD | COACHING_RECORD | EMPLOYEE_QUALIFICATION), targetId, statement (<= 4000)`. `409` when the record already has an open
+  challenge. `201 { data: challenge }`. **Audit**: `data_challenge.raise` (ids only).
+
+### GET /api/v1/data-challenges/{id}
+- One challenge (`data_challenges.view` over the employee; `404` outside the scope).
+
+### POST /api/v1/data-challenges/{id}/assign
+- OPEN | UNDER_REVIEW > UNDER_REVIEW. **Permission**: `data_challenges.assign` over the employee. **Body**: `{ reviewerUserId }`: an active user
+  holding `data_challenges.approve` AND `.reject` over the employee, not the raiser and not the employee (else `400` on `reviewerUserId`).
+  Same reviewer again is a no-op. **Audit**: `data_challenge.assign`.
+
+### POST /api/v1/data-challenges/{id}/uphold
+- UNDER_REVIEW > UPHELD, by the ASSIGNED reviewer only (`403` otherwise). **Permission**: `data_challenges.approve`. **Body** (strict):
+  `{ resolutionKind: "ANNOTATED", resolution }` (the annotation shown next to the data) or `{ resolutionKind: "CORRECTED", resolution,
+  correctedBody?, correctionAuditEventId? }`: COACHING_RECORD needs `correctedBody` (the note is archived and a corrected copy created through
+  the coaching module, `resolutionDetails = { auditEventId, correctedCoachingRecordId }`); EMPLOYEE_QUALIFICATION needs
+  `correctionAuditEventId` of the correction made first through `/api/v1/qualifications/*` (about this record, successful, newer than the
+  challenge; `resolutionDetails = { auditEventId, action }`); PERFORMANCE_METRIC_VALUE and TRAINING_RECORD cannot be CORRECTED yet (`400` on
+  `resolutionKind`). **Audit**: `data_challenge.uphold` (+ `coaching_record.correct`).
+
+### POST /api/v1/data-challenges/{id}/reject
+- UNDER_REVIEW > REJECTED, by the assigned reviewer. **Permission**: `data_challenges.reject`. **Body**: `{ reason (<= 4000) }`, stored as
+  `resolution` and shown to the employee. **Audit**: `data_challenge.reject`.
+
+### POST /api/v1/data-challenges/{id}/withdraw
+- **Self-service**: the person who raised it (anyone else `404`). OPEN | UNDER_REVIEW > WITHDRAWN (`409` otherwise). **Audit**: `data_challenge.withdraw`.

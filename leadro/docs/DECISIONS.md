@@ -1324,3 +1324,53 @@ These are manager-level choices made to keep moving; each is one template line o
     A legal erasure request would need a dedicated, audited purge path (not built).
 12. **Dimensions WORK_QUALITY and PRODUCTIVITY** exist in the enum (spec 10.2 lists them) but no kind measures them yet: no defined data
     source, and no invented formula.
+
+## Phase 5 Task 4: coaching records, metric context notes, data challenges
+
+Modules `src/server/coaching` and `src/server/data-challenges` (README each); routes `/api/v1/coaching/**`, `/api/v1/data-challenges/**`.
+No migration, no new dependency.
+
+- **Context notes live in the coaching module but use the performance permissions**: write / share / archive = `performance.edit`, read =
+  `performance.view`, and in both cases the matching grant must name the `coaching` field set (`performance.coaching_fields`), as the Task 1
+  catalog says ("EDIT adds manager context"). Without the set a note is a 404 and lists are empty (the COO, a Technician's OWN grant).
+  Routes are under `/api/v1/coaching/context-notes` (the brief's `/api/v1/coaching/*`), not under `/performance`, which Task 3 owns.
+- **Coaching records**: `coaching.view / .create / .edit` over the employee. Only the AUTHOR edits the text / time, and only while the note is
+  private and not archived; share and archive are open to any `coaching.edit` holder over the employee (HR may share or archive a manager's
+  note). Sharing is one way for both note kinds (what the employee was shown stays shown; an open challenge would otherwise point at a note
+  the employee can no longer see). Archived notes are hidden from lists unless `includeArchived=true` and cannot be shared or edited.
+- **Nobody writes coaching or context notes about themselves** (`403`), like "nobody verifies their own qualification".
+- **No free text in audit events** (notes, statements, annotations, rejection reasons; spec 22.2: `audit.view` holders do not necessarily
+  hold the coaching set). A text change is audited as SHA-256 digests (`bodySha256`), which prove that and when it changed without revealing
+  it. The text itself lives only on the record.
+- **Correcting a shared coaching note = supersede, not overwrite**: `supersedeCoachingRecordInTx` archives the challenged note and creates a
+  corrected copy (same employee, time, linked value and sharing; the reviewer is its author), auditing `coaching_record.correct` on the
+  original with the new id and the challenge id. Nothing the employee challenged is lost ("nothing deleted"). There is no
+  `supersededBy` column (no migration); the link is the audit event and the challenge's `resolutionDetails.correctedCoachingRecordId`.
+- **Challenge raising is self-service at `POST /api/v1/data-challenges`** (no module permission; PERMISSIONS 12 "raised through
+  self-service"). The caller must have an employee record; the target row is read from its own table in the transaction and must have
+  `employeeId = caller` (else 404). Visible-to-the-employee rules: metric values of PUBLISHED definitions only (a value of a RETIRED
+  definition cannot be challenged; revisit if Task 6 shows retired values), coaching notes shared and not archived, training records and
+  qualifications in any status. Withdraw is also self-service (raiser only, else 404). Listing one's own challenges is Task 6 (`/api/v1/me/*`).
+- **Review**: `assign` routes OPEN or UNDER_REVIEW to a reviewer (re-routing keeps UNDER_REVIEW; same reviewer = no-op). The reviewer must
+  hold `data_challenges.approve` AND `.reject` over the employee right now, and is neither the raiser nor the employee (400 on
+  `reviewerUserId`). Only the ASSIGNED reviewer upholds or rejects (403 for other HR users): one accountable decider. To decide yourself,
+  assign yourself first (HR holds `assign`). An OPEN challenge must be routed before it is decided (409).
+- **CORRECTED needs proof from the owning module** (`CORRECTION_PATH` in `data-challenges/targets.ts`):
+  - COACHING_RECORD: in the same transaction through `supersedeCoachingRecordInTx`; `resolutionDetails = { auditEventId, correctedCoachingRecordId }`.
+  - EMPLOYEE_QUALIFICATION: the qualifications module's correction API is its existing actor endpoints (each in its own transaction), so the
+    reviewer corrects first through `/api/v1/qualifications/*` and names that audit event (`correctionAuditEventId`); it must be about this
+    qualification (`targetType EmployeeQualification`, `action qualification.*`), SUCCESS, and not older than the challenge.
+    `resolutionDetails = { auditEventId, action }`.
+  - PERFORMANCE_METRIC_VALUE, TRAINING_RECORD: **hand-off**. The performance and training modules (Tasks 3 and 2, built in parallel) had no
+    correction API when this was written, so these targets can only be UPHELD as ANNOTATED (CORRECTED is a 400 on `resolutionKind`). To
+    enable it, set their `CORRECTION_PATH` entry: `audit_reference` with the audit `targetType` / action prefix their correcting action writes
+    (e.g. a training record revocation `TrainingRecord` / `training_record.`), or `in_transaction` with a call into their exported in-tx
+    correction function. A metric value is append-only, so its correction is a recomputation (a new value row); the audit event of that
+    recomputation should name the challenged value for `audit_reference` to apply.
+- **Notifications** (3 new events, keys in the 3 catalogs): `data_challenge.raised` to `data_challenges.assign` holders over the employee's
+  current units (minus the raiser), `data_challenge.assigned` to the reviewer (unless self-assigned), both linking to the challenge
+  (`registerDataChallengeNotificationTarget`, `data_challenges.view` over the employee, re-checked at read time);
+  `data_challenge.decided` to the employee on uphold or reject, WITHOUT a link (the employee holds no `data_challenges.view`; they read the
+  result through self-service) and without params. Withdrawal notifies nobody.
+- Challenge statement and resolution are returned to every `data_challenges.view` holder (managers who route need the statement); the
+  endpoints are gated by the module's own sensitive permission, so no extra field set is applied (Task 1 decision).
