@@ -1324,3 +1324,42 @@ These are manager-level choices made to keep moving; each is one template line o
     A legal erasure request would need a dedicated, audited purge path (not built).
 12. **Dimensions WORK_QUALITY and PRODUCTIVITY** exist in the enum (spec 10.2 lists them) but no kind measures them yet: no defined data
     source, and no invented formula.
+
+## Phase 5 Task 2: training catalog, assignments, records (`src/server/training`, `/api/v1/training/*`)
+
+- **Permissions** (catalog comment in `permission-catalog.ts`): courses are tenant-wide reference data like materials: any `training.view`
+  grant reads the catalog, `training.manage` at TENANT scope changes it. Assignments and records use the EMPLOYEE's data scope (the
+  qualification pattern, `employee` relation wrapping `employeeScopeColumns`) and require the `base` field set. Lead Ops'
+  `training.view {set:"lead_team"}` matches nothing (no service resolves the set; fail closed, as ruled in Task 1).
+- **Completion of an assignment happens on verification**, not on recording: only a VERIFIED record counts. Verifying completes the
+  employee's open assignment of that course (any source). A rejected record leaves the assignment open; a revoked record leaves a
+  COMPLETED assignment completed (history; assign again if needed).
+- **Expiry** is computed once, at recording: tenant-local completion date + the course's `validityDays` at that moment. A later validity
+  change does not move existing records (documented on the PATCH). The certification's own `validityMonths` is not used: the course decides.
+- **Qualification link** (new public functions in `qualifications`, `training-grants.ts`): `grantTrainingQualificationInTx` renews the
+  employee's VERIFIED TRAINING qualification of the certification only when the new expiry reaches further (verifying an older completion
+  never shortens a newer one; the older record still links to it), verifies a PENDING hand-recorded one instead of duplicating it, and
+  otherwise creates a new VERIFIED row (REJECTED / REVOKED history is never revived). `restateTrainingQualificationInTx` runs on a record's
+  revocation: the qualification follows the best remaining VERIFIED record linked to it (latest expiry, "never" beats any date), or is
+  REVOKED when none is left. A qualification HR already changed by hand (no longer VERIFIED) is left alone. Neither checks permissions; both
+  audit (`qualification.training_grant` / `_renew` / `_restate`, `qualification.revoke`). The certification's `requiresNumber` is not
+  enforced for these rows (a course completion has no licence number).
+- **An already-expired completion** is verified as history without creating or renewing a qualification (audit `qualificationOutcome:
+  "EXPIRED"`), matching the qualifications module's refusal to verify an expired credential.
+- **Archived courses** refuse new assignments but still accept completions (the training may predate the archive). A retired TRAINING
+  certification cannot be newly attached to a course; verifying a course that already names one still grants it.
+- **Due dates** cannot be set in the past (create / PATCH); overdue is derived from the tenant-local date (`overdue` flag, `overdue=true`
+  filter), never stored.
+- **"Expiring"** = VERIFIED, not superseded by a longer-lasting VERIFIED record of the same employee and course, employee not terminated,
+  `expiresAt` within the window (default: `OperationsSettings.qualificationWarningDays`, the same horizon as credentials).
+- **Notifications** (4 events in `notifications/events.ts`, targets `training_assignment` / `training_record` registered in
+  `notification-targets.ts`, recipients need `training.view` over the employee): `training.assigned` (employee, not the assigner themself),
+  `training.overdue` (employee + assigner), `training.expiring`, `training.expired` (employee). The sweep has no claim columns (none in the
+  schema, no migration allowed): it relies on the engine's idempotency key `<id>:<occurrence>:<date>` and pages through all candidates;
+  "expired" looks back 7 days so a first run does not flood people about long-gone completions. An employee without `training.view`
+  (e.g. a Dispatcher) gets no training notification; self-service (Task 6) shows them their training.
+- **Task 5 hook**: `createTrainingAssignmentInTx(tx, ctx, { ..., source: "RECOMMENDATION", recommendationId })` does no permission check and
+  returns `{ assignment, notificationIds }`; the caller wraps its `withTenant` in `conflictOnUniqueViolation(TRAINING_ASSIGNMENT_ALREADY_OPEN,
+  ...)` (a lost race hits `training_assignment_one_open`, which aborts the transaction) and calls `deliverAfterCommit`.
+- **No self-service here**: an employee does not start or record their own training through these endpoints (Technician holds only
+  `training.view` OWN); `/api/v1/me/*` is Task 6.
