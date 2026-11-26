@@ -26,3 +26,5 @@ Invariants:
 5. No free text in audit events: text changes are recorded as `bodySha256` digests.
 6. This module reads `PerformanceMetricValue` rows (owner and period) but never writes performance data; nothing in dispatch,
    eligibility or compensation imports it (spec 10.3).
+7. Records about the CALLER are not read or changed through a management grant (review P5-R1): lists leave them out,
+   single reads, share and archive are a 404. The caller reads the shared ones through `self-service.ts`.

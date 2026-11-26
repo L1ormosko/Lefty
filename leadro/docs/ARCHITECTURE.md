@@ -1,7 +1,7 @@
-# LEADRO Architecture (Phases 0 - 4 backend, as built)
+# LEADRO Architecture (Phases 0 - 5 backend, as built)
 
-Authority: `SPEC.md` (sections 2, 3, 4, 19-22). This document describes the code as it exists at
-the end of the Phase 4 backend (Milestone 4, `MILESTONE-4.md`; Phase 2+3 in `MILESTONE-2-3.md`); where the code and an earlier plan differ, this file follows the code. Revise via
+Authority: `SPEC.md` (sections 2, 3, 4, 10, 19-22). This document describes the code as it exists at
+the end of the Phase 5 backend (Milestone 5, `MILESTONE-5.md`; Phase 4 in `MILESTONE-4.md`, Phase 2+3 in `MILESTONE-2-3.md`); where the code and an earlier plan differ, this file follows the code. Revise via
 `DECISIONS.md`.
 
 ## 1. Style
@@ -62,9 +62,18 @@ Self-service (spec 5.11, `/api/v1/me/**`): each Phase 5 module owns a `self-serv
 values with evidence, shared coaching / context notes, training assignments and records, qualifications, non-draft plans without private
 notes, own data challenges). These read functions filter on the caller's employee record and need no module permission.
 
+**Spec 10.3 boundary (Phase 5).** Performance data is development data only. Three architecture tests (`tests/performance`,
+`tests/development`, `tests/development-dashboard` `architecture.test.ts`) assert that the modules that decide work, eligibility, money or
+employment (dispatch, qualifications, jobs, ledger, payments, approvals, employees, finance-adjustments) import none of performance,
+development, development-dashboard or customer-feedback and (review P5-R7) never name their tables; that performance imports only
+platform modules; and that the dashboard composes only read functions. The one Phase 5 write into eligibility is the legal TRAINING
+certification path: a VERIFIED training record grants / renews / restates a TRAINING qualification through
+`qualifications/training-grants.ts` (an HR decision on a training record, never a metric). Training recommendations are rule-based and
+accepted by a person. Records about the caller are out of reach of their own management grants (review P5-R1/R2; PERMISSIONS.md 12).
+
 Not built (spec 2.2 modules for later phases): compensation / commission / employee statements (blocked on an
 approved compensation spec, 28.4; the Phase 4 financial core is built without any formula), automation, reporting, integrations,
-a payment provider, a scheduler / worker, and every UI for the Phase 2, 3 and 4 modules (the backend is complete behind `/api/v1`;
+a payment provider, a scheduler / worker, and every UI for the Phase 2, 3, 4 and 5 modules (the backend is complete behind `/api/v1`;
 screens are deferred). There is no
 tenant-provisioning module: tenants come from the seed.
 

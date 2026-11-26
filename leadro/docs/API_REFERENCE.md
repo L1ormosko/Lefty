@@ -3009,7 +3009,8 @@ Spec 10.1 "Training", 5.4, 5.8. Recommendations (`/api/v1/training/recommendatio
 **Access** (`PERMISSIONS.md` section 12): courses are tenant-wide reference data: any `training.view` grant reads the catalog, changes need
 `training.manage` at TENANT scope (`403`). Assignments and records are scoped by the EMPLOYEE's data scope (`404` outside it): `training.assign`
 assigns, `training.edit` changes / starts / cancels an assignment, `training.create` records a completion, `training.approve` verifies, rejects
-or revokes one (never one's own record: `403`), `training.view` reads. Status labels: `TRAINING.ASSIGNMENT_STATUS.*`,
+or revokes one (never one's own record: `403`), `training.view` reads. Changing, starting or cancelling one's OWN assignment is `403`
+(review P5-R2: what a manager assigned is not the assignee's to reschedule or cancel). Status labels: `TRAINING.ASSIGNMENT_STATUS.*`,
 `TRAINING.ASSIGNMENT_SOURCE.*`, `TRAINING.RECORD_STATUS.*`.
 
 **Course fields**: `id, code, name, category, description, certificationId (a TRAINING-type certification a verified completion grants, or
@@ -3128,6 +3129,7 @@ the date). Idempotent per record and date. Recipients need `training.view` over 
 
 Deterministic, explainable, human-decided training suggestions (spec 5.4, 28.6). Module: `src/server/development` (README).
 Decisions: `docs/DECISIONS.md` "Phase 5 Task 5". Scoped by the EMPLOYEE (like assignments). Development use only (spec 10.3).
+Accepting or dismissing a recommendation about oneself is `403` (review P5-R2).
 
 Shape: `{ id, employeeId, courseId, reasons[], status (OPEN | ACCEPTED | DISMISSED), generatedById (null = system run), generatedAt,
 decidedById, decidedAt, dismissReason, dismissedBySystem, trainingAssignmentId }`. Each reason is `{ code, ...ids / numbers }`
@@ -3189,7 +3191,8 @@ The course of a certification is the active course granting it (smallest code fi
 Plans for one employee with goals, actions and an append-only review history (spec 10.4, 5.4, 5.8). Module:
 `src/server/development` (README). Scoped by the EMPLOYEE; `development_plans.view` is sensitive. Development use only (spec 10.3).
 No free text in audit events (titles, summaries, descriptions, review bodies and reasons are audited as SHA-256 digests). Every
-mutation returns the whole plan.
+mutation returns the whole plan. Plans about the CALLER are left out of lists and are `404` on every read and change here (review
+P5-R1/R2); the caller reads them through `GET /api/v1/me/development-plans` (non-draft, without review text).
 
 Plan shape: `{ id, employeeId, ownerId, title, summary, status (DRAFT | ACTIVE | COMPLETED | CANCELLED), periodStart, periodEnd,
 createdById, activatedAt, completedAt, cancelledAt, cancelReason, createdAt, updatedAt, goals[], actions[], reviews[] }` (lists omit
@@ -3261,7 +3264,9 @@ trainingAssignmentId, coachingRecordId, completedAt, ... }`. Review: `{ id, revi
 Coaching notes and manager context notes on metric values (spec 10.4, 22.2). Both are about ONE employee and scoped by that
 employee (org placements, legal employer, OWN). Private by default; sharing with the employee is one way (`sharedAt` set);
 nothing is deleted (archive). Free text is never written to audit events: text changes are audited as `bodySha256` digests.
-Module: `src/server/coaching` (README). Decisions: `docs/DECISIONS.md` "Phase 5 Task 4".
+Module: `src/server/coaching` (README). Decisions: `docs/DECISIONS.md` "Phase 5 Task 4". Notes about the CALLER are left out of
+lists and are `404` on single reads, share and archive (review P5-R1): the caller reads the shared ones through `/api/v1/me/coaching-notes`
+and `/api/v1/me/context-notes`.
 
 Record shape: `{ id, employeeId, authorId, occurredAt, body, metricValueId, sharedWithEmployee, sharedAt, archivedAt, createdAt, updatedAt }`.
 Context note shape: `{ id, employeeId, metricValueId, periodStart, periodEnd, body, authorId, sharedWithEmployee, sharedAt, archivedAt, createdAt, updatedAt }`.
@@ -3315,7 +3320,8 @@ Context note shape: `{ id, employeeId, metricValueId, periodStart, periodEnd, bo
 An employee challenges inaccurate information about themselves (spec 10.4, 5.8, 5.11): a metric value (of a PUBLISHED definition), a
 training record, a coaching note shared with them, or a qualification record. OPEN > UNDER_REVIEW (reviewer) > UPHELD | REJECTED; OPEN /
 UNDER_REVIEW > WITHDRAWN. Managers route (`data_challenges.assign`), HR and the Owner decide (`data_challenges.approve` / `.reject`); the person
-who raised it never reviews it. A challenge never edits data silently: see uphold. Module: `src/server/data-challenges` (README).
+who raised it never reviews it, nor does the challenged employee or the author of a challenged coaching note (`400` on `reviewerUserId`,
+review P5-R6). A challenge never edits data silently: see uphold. Module: `src/server/data-challenges` (README).
 
 Challenge shape: `{ id, employeeId, targetType, targetId, metricValueId, trainingRecordId, coachingRecordId, qualificationId, statement, status,
 raisedById, raisedAt, reviewerId, assignedAt, resolutionKind, resolution, resolutionDetails, resolvedById, resolvedAt, withdrawnAt, createdAt,
@@ -3420,7 +3426,7 @@ Error detail codes (labels `PERFORMANCE.ERROR.*`): `performance.invalid_params`,
 
 - **Permission**: `performance.configure` (TENANT). **Idempotency**: yes. **Body** (strict): `{ reason? }` (shown to approvers). DRAFT ->
   PENDING_APPROVAL with an approval request (subject `PERFORMANCE_METRIC_DEFINITION`, tenant-level; approver permission from the policy,
-  `performance.publish` by default; the requester and the version's author can never decide). **Publication always needs approval**: without an
+  `performance.publish` by default; the requester, the version's author and everyone who edited the draft can never decide, review P5-R3). **Publication always needs approval**: without an
   active policy the answer is `409 performance.publication_policy_missing` and nothing changes. On approval the PUBLISHED version of the key is
   retired (`by: superseded`) and this one published; on rejection, cancellation or expiry it returns to DRAFT. **Audit**
   `performance_metric_definition.submit`, then `.publish` / `.retire` / `.return_to_draft`.
@@ -3443,7 +3449,7 @@ Error detail codes (labels `PERFORMANCE.ERROR.*`): `performance.invalid_params`,
   `409`. Appends one value per employee x breakdown with at least one opportunity (TRAINING_PROGRESS: one per employee, sample 0 included).
   **Answers** `201 { definitionId, key, version, periodStart, periodEnd, employeeCount, values: [{ id, employeeId, orgUnitId, jobTypeId,
   jobCategory, numerator, denominator, sampleSize, enoughData, evidenceCount, computedAt }] }`. `400` when one value would count more than 10,000
-  records. **Audit** `performance_metric_value.compute` (value ids).
+  records. For a never-published version the answer leaves out the caller's own value (it is stored and counted; review P5-R4). **Audit** `performance_metric_value.compute` (value ids).
 
 ### GET /api/v1/performance/values
 
@@ -3491,7 +3497,8 @@ Task 6". Spec 10.4 (manager development dashboard), 10.3 (never feeds work), 22.
   - `coachingNotes` (as `GET /coaching/records`, private ones included, at most 50), `contextNotes` (as `GET /coaching/context-notes`, at
     most 50), `plans` (plan summaries, newest first, at most 10) and `reviewHistory` (the review entries of those plans with `planId`,
     newest first): `null` unless the caller's grant over the employee names the `coaching` field set (`performance.coaching_fields`) AND,
-    for notes / plans, the caller holds `coaching.view` / `development_plans.view` over the employee.
+    for notes / plans, the caller holds `coaching.view` / `development_plans.view` over the employee. On one's OWN dashboard these
+    sections are empty (the module reads leave out records about the caller, review P5-R1; self-service shows the shared ones).
   - Never a combined score: no number adds, averages or ranks across dimensions or employees.
 - **Errors**: `403`, `404`. **Audit**: none.
 
@@ -3581,7 +3588,7 @@ the employee).
 - **Permission**: `customer_feedback.create` over the job's org unit (`404` for an unknown job or one outside the scope).
   **Idempotency**: `Idempotency-Key` supported. **Body** (strict): `jobId`, `employeeId?` (must have been assigned to the job, else `400`
   on `employeeId`; omitted = about the job / company, counted for nobody), `rating?` (integer 1-5), `comment?` (1-4000), at least one of
-  rating / comment, `receivedAt?` (ISO instant, not in the future; default now). The customer is the job's. **Response**: `201 { data }`.
+  rating / comment, `receivedAt?` (ISO instant, not in the future; default now). The customer is the job's. Naming oneself as `employeeId` is `403` (review P5-R5). **Response**: `201 { data }`.
 - **Audit**: `customer_feedback.record` (ids, rating, `commentSha256`; never the comment text).
 
 ### GET /api/v1/customer-feedback/{id}
@@ -3591,5 +3598,5 @@ the employee).
 ### POST /api/v1/customer-feedback/{id}/void
 
 - **Permission**: `customer_feedback.edit` over the entry's org unit (`404` outside). **Body** (strict): `{ reason }` (1-1000). Once: a
-  second void is `409`. The entry stays readable (`includeVoided=true`); what the customer said is never edited (DB trigger).
+  second void is `409`; voiding feedback about oneself is `403` (review P5-R5). The entry stays readable (`includeVoided=true`); what the customer said is never edited (DB trigger).
 - **Audit**: `customer_feedback.void` (`voidReasonSha256`).

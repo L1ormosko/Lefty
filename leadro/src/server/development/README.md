@@ -31,3 +31,5 @@ Invariants:
 - Development use only (§10.3): this module reads qualifications (read functions only) and published metric values; nothing
   that decides work, pay or employment imports it (`tests/development/architecture.test.ts`). "Not enough data" never counts.
 - Employees read their own non-DRAFT plans through self-service (Task 6); they are told when a plan becomes active (no link).
+- Records about the CALLER are out of reach of their own management grants (review P5-R1/R2): their plans are left out of
+  lists and are a 404 on every read and change; deciding a recommendation about oneself is a 403.

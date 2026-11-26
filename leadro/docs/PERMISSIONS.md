@@ -467,7 +467,8 @@ unit, Team Leader the team unit, Technician `OWN`, Owner / COO / HR tenant-wide.
 Rules:
 - **Spec 10.3 is structural.** No template that dispatches (Dispatcher) holds any performance or development permission, and no
   Phase 5 permission grants anything on dispatch, jobs, employees, compensation or qualification eligibility. An architecture test
-  (Task 3) asserts that dispatch / qualifications / jobs / ledger / approvals / employees never import the performance modules.
+  (Task 3) asserts that dispatch / qualifications / jobs / ledger / approvals / employees never import the performance modules,
+  and (review P5-R7) never name a performance, coaching, development, challenge or feedback table either.
 - **Coaching content** (`performance.coaching_fields`, tag `coaching`, spec 22.2) is named only by the employee's management chain
   (State / Regional / City managers, Team Leader, Lead Operations for the lead team), HR and the Owner. The COO sees metric values
   ("Performance: View", spec 4.5) without it. Coaching notes, plans and challenges are also their own modules whose `view` is
@@ -493,6 +494,21 @@ Rules:
   (`data_challenges.assign`). They do not record or verify completions, decide challenges, export, author or publish metrics.
 - **Customer Relations** records customer feedback manually (no survey provider) and voids a mis-recorded entry; feedback becomes a
   metric input only through a published CUSTOMER_FEEDBACK_AVERAGE definition.
+- **Nobody acts on their own records through a management grant** (Phase 5 review, `docs/reviews/phase5-review.md`). A manager placed in
+  their own unit, or HR with a tenant-wide grant, has their own employee record inside their scope; the module endpoints still treat
+  it as out of reach:
+  - coaching notes, context notes and development plans about the caller are left out of lists and are a 404 on single reads and on
+    changes (P5-R1/R2); the caller reads what was shared with them through `/api/v1/me/*` (shared notes, non-draft plans without the
+    review text). The development dashboard of oneself therefore shows no coaching content;
+  - writing coaching / context notes or creating a plan about oneself is a 403 (Task 4 / 5);
+  - accepting or dismissing a training recommendation about oneself, and changing, starting or cancelling one's own training
+    assignment, are a 403 (P5-R2); assigning oneself a course and recording one's own completion stay allowed (verification is
+    another person's, `assertNotOwnRecord`);
+  - recording or voiding customer feedback that names oneself is a 403 (P5-R5);
+  - a computation's answer leaves out the caller's own preview values (P5-R4); reads already did.
+- **Separation of duties in reviews and publication.** The author AND every editor of a metric definition version are excluded from
+  approving its publication (P5-R3); a challenge's reviewer is never its raiser, the challenged employee, or the author of a challenged
+  coaching note (P5-R6).
 - **`lead_team`** is a record set no service resolves yet (it already qualified Lead Ops' `employees.*` and `performance.view`); until a
   service supplies it, those grants match nothing (fail closed).
 - Tests: `tests/authz/workforce-catalog.test.ts` (catalog, templates, labels), `tests/db/phase5-schema.test.ts` (schema).

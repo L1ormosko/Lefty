@@ -31,3 +31,4 @@ Invariants:
    link to the challenge, re-authorized at read time), the employee on a decision (no link, no text). No free text in
    notifications or audit events.
 5. Nothing is deleted (DB trigger). This module imports nothing from dispatch, jobs, compensation or eligibility (spec 10.3).
+6. A reviewer is never the raiser, the challenged employee or the author of a challenged coaching note (review P5-R6).
