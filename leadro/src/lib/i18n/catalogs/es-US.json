@@ -1193,6 +1193,7 @@
     "FINANCE.ERROR.PAYMENT.IDEMPOTENCY_KEY_REUSED": "Esta solicitud ya se usó para otro pago.",
     "FINANCE.ERROR.PAYMENT.CURRENCY_MISMATCH": "Un pago debe estar en la moneda del trabajo.",
     "FINANCE.ERROR.PAYMENT.INVALID_TRANSITION": "Este pago no puede cambiar a ese estado.",
+    "FINANCE.ERROR.PAYMENT.MONEY_RETURNED": "Parte de este pago ya se reembolsó o tuvo un contracargo, por lo que no se puede anular. Use un ajuste.",
     "FINANCE.ERROR.REVENUE.OUTCOME_CHANGED": "El importe del resultado cambió desde que se mostró. Recargue y confirme de nuevo.",
     "FINANCE.ERROR.REVENUE.NOTHING_TO_CHARGE": "Este resultado no tiene un cargo por confirmar.",
     "FINANCE.ERROR.REVENUE.NOTHING_TO_COLLECT": "Este resultado no tiene un cobro por confirmar.",

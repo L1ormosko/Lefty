@@ -1193,6 +1193,7 @@
     "FINANCE.ERROR.PAYMENT.IDEMPOTENCY_KEY_REUSED": "This request was already used for a different payment.",
     "FINANCE.ERROR.PAYMENT.CURRENCY_MISMATCH": "A payment must be in the job's currency.",
     "FINANCE.ERROR.PAYMENT.INVALID_TRANSITION": "This payment cannot change to that status.",
+    "FINANCE.ERROR.PAYMENT.MONEY_RETURNED": "Part of this payment was already refunded or charged back, so it cannot be voided. Use an adjustment instead.",
     "FINANCE.ERROR.REVENUE.OUTCOME_CHANGED": "The outcome's amount changed since it was shown. Reload and confirm again.",
     "FINANCE.ERROR.REVENUE.NOTHING_TO_CHARGE": "This outcome has no charge to confirm.",
     "FINANCE.ERROR.REVENUE.NOTHING_TO_COLLECT": "This outcome has no collection to confirm.",
