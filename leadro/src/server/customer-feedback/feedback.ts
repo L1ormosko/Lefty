@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { CustomerFeedback, Prisma } from "@prisma/client";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { buildScopeWhere, enforceInTx, resolveScope, withinScope, type ResourceRef, type ScopeColumns } from "@/server/authz";
-import { InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
+import { ForbiddenError, InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import type { ListFeedbackQuery, RecordFeedbackInput, VoidFeedbackInput } from "./schemas";
 
@@ -62,6 +62,10 @@ export async function recordCustomerFeedback(actor: Actor, ctx: RequestContext, 
     const job = await tx.job.findFirst({ where: { id: input.jobId, tenantId: actor.tenantId }, select: { id: true, customerId: true, orgUnitId: true } });
     if (!job) throw new NotFoundError();
     await enforceInTx(tx, actor, "customer_feedback.create", resourceOf(job.orgUnitId));
+    // Review P5-R5: feedback about the recorder would feed their own CUSTOMER_FEEDBACK_AVERAGE; someone else records it.
+    if (input.employeeId && input.employeeId === actor.employeeId) {
+      throw new ForbiddenError({ message: "You cannot record customer feedback about yourself." });
+    }
     if (input.employeeId) await assertEmployeeOnJob(tx, actor.tenantId, job.id, input.employeeId);
     const row = await tx.customerFeedback.create({
       data: {
@@ -110,6 +114,10 @@ export async function voidCustomerFeedback(actor: Actor, ctx: RequestContext, fe
     if (!before) throw new NotFoundError();
     await enforceInTx(tx, actor, VIEW, resourceOf(before.orgUnitId));
     await enforceInTx(tx, actor, "customer_feedback.edit", resourceOf(before.orgUnitId));
+    // Review P5-R5: voiding feedback about yourself would remove it from your own metric.
+    if (before.employeeId !== null && before.employeeId === actor.employeeId) {
+      throw new ForbiddenError({ message: "You cannot void customer feedback about yourself." });
+    }
     if (before.voidedAt) throw new InvalidStateTransitionError({ message: "This feedback is already voided." });
     const after = await tx.customerFeedback.update({
       where: { id: before.id },
