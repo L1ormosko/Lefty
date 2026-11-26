@@ -3000,3 +3000,107 @@ unit conversion), `material.no_effective_cost`, `material.cost_out_of_range`, `m
 - **Permission**: `jobs.view` over the usage's job + `cost` set. **Body** (strict): `{ materialId? }` links an unlinked line first (`404` for a
   material of another tenant, `409 material.usage_linked_elsewhere` when linked to another one). **Answers** the costed line; `409` with the
   skip code when it cannot be costed.
+
+## Performance (`/api/v1/performance`) - Phase 5
+
+Code: `src/server/performance` (README there), routes `src/app/api/v1/performance/**`, pure formulas `src/lib/performance-formulas.ts`. Design
+decisions and the exact formula of every kind: `DECISIONS.md` "Phase 5 Task 3". Spec 10.2 (metrics), 10.3 (never feeds work), 10.4 (no universal
+score).
+
+**Access**: definitions are tenant-level configuration. Authoring (create, version, edit, submit, withdraw, retire) needs `performance.configure`
+at TENANT scope (`403`). Reading definitions is the `performance.view` capability; without `performance.configure` only versions that were
+published (`publishedAt` set, current or retired) exist for the caller (`404`). Values are read with `performance.view` over the **employee**
+(their current placements and employer, or OWN): filtered in SQL, `404` for one outside scope. Values of a version that was never published are
+previews: visible only to `performance.configure` / `performance.manage` holders and never about themselves (an employee sees their own values of
+published definitions only). Computing needs `performance.manage` over every employee computed. The Dispatcher holds no performance permission.
+
+**Definition fields**: `id, key, version, kind, dimension, name, description, params, minSample, status (DRAFT | PENDING_APPROVAL | PUBLISHED |
+RETIRED), approvalRequestId, createdById, submittedAt, publishedAt, retiredAt, createdAt, updatedAt`, plus `evidenceTable` and `numeratorKind`
+(`rate` | `rating_sum`) from the catalog. Labels: `PERFORMANCE.KIND.*`, `PERFORMANCE.DIMENSION.*`, `PERFORMANCE.DEFINITION_STATUS.*`.
+`params` (kind-specific, unknown keys refused): `breakdown` (`JOB_TYPE` default | `JOB_CATEGORY`; not for TRAINING_PROGRESS), `windowDays`
+(REPEAT_VISIT_RATE only, 1-365, required). No weights, targets or thresholds.
+
+**Value fields**: `id, definitionId, employeeId, orgUnitId (primary unit at computation), periodStart, periodEnd (YYYY-MM-DD, tenant-local,
+end exclusive), jobTypeId | jobCategory (neither for TRAINING_PROGRESS), numerator, denominator (the opportunities), sampleSize, enoughData,
+computedAt, computedById | systemActor`, plus `key, version, kind, dimension, definitionStatus, minSample, evidenceTable, numeratorKind`. Lists
+carry `evidenceCount`; `GET /performance/values/{id}` carries `evidenceIds` (ids in `evidenceTable`). `enoughData = false` is shown as "not
+enough data" (`PERFORMANCE.NOT_ENOUGH_DATA`). A rate is `numerator / denominator`; CUSTOMER_FEEDBACK_AVERAGE's average is `numerator /
+denominator` (sum of 1-5 ratings over their count). There is no combined score, total or rank anywhere.
+
+Error detail codes (labels `PERFORMANCE.ERROR.*`): `performance.invalid_params`, `performance.key_taken`, `performance.open_version_exists`,
+`performance.definition_has_values`, `performance.publication_policy_missing`.
+
+### GET /api/v1/performance/catalog
+
+- **Permission**: `performance.view`. **Answers** the seven kinds: `[{ kind, dimension, evidenceTable, numeratorKind, breakdowns, params }]`.
+
+### GET /api/v1/performance/definitions
+
+- **Permission**: `performance.view`. **Query**: cursor page, `status?`, `key?`, `kind?`. Order: key, then version descending. Without
+  `performance.configure` only published (or once-published, now retired) versions.
+
+### POST /api/v1/performance/definitions
+
+- **Permission**: `performance.configure` (TENANT). **Idempotency**: yes. **Body** (strict): `{ key (^[a-z][a-z0-9_]{0,62}$), kind, name,
+  description?, params? ({}), minSample (1-10000) }`. **Answers** `201` version 1 as DRAFT with normalized params. **Errors**: `400`
+  `performance.invalid_params`; `409` `performance.key_taken` (use `/versions`). **Audit** `performance_metric_definition.create`.
+
+### GET /api/v1/performance/definitions/{id}
+
+- **Permission**: `performance.view`. `404` when missing or not visible (never-published version for a non-author).
+
+### PATCH /api/v1/performance/definitions/{id}
+
+- **Permission**: `performance.configure` (TENANT). **Body** (strict, at least one): `{ name?, description? (null clears), params?, minSample? }`;
+  the kind never changes. **Errors**: `409 INVALID_STATE_TRANSITION` (not DRAFT); `409 performance.definition_has_values` (values were computed
+  from it: retire it and create a new version). **Audit** `performance_metric_definition.update`.
+
+### POST /api/v1/performance/definitions/{id}/versions
+
+- **Permission**: `performance.configure` (TENANT). **Idempotency**: yes. **Body** (strict): `{ name?, description?, params?, minSample? }`
+  applied over a copy of version `{id}`; number = highest + 1, DRAFT, same kind. **Errors**: `409 performance.open_version_exists` (a DRAFT or
+  pending version of the key exists). **Audit** `performance_metric_definition.create_version`.
+
+### POST /api/v1/performance/definitions/{id}/submit
+
+- **Permission**: `performance.configure` (TENANT). **Idempotency**: yes. **Body** (strict): `{ reason? }` (shown to approvers). DRAFT ->
+  PENDING_APPROVAL with an approval request (subject `PERFORMANCE_METRIC_DEFINITION`, tenant-level; approver permission from the policy,
+  `performance.publish` by default; the requester and the version's author can never decide). **Publication always needs approval**: without an
+  active policy the answer is `409 performance.publication_policy_missing` and nothing changes. On approval the PUBLISHED version of the key is
+  retired (`by: superseded`) and this one published; on rejection, cancellation or expiry it returns to DRAFT. **Audit**
+  `performance_metric_definition.submit`, then `.publish` / `.retire` / `.return_to_draft`.
+
+### POST /api/v1/performance/definitions/{id}/withdraw
+
+- **Permission**: `performance.configure` (TENANT). **Body** (strict): `{ reason }`. PENDING_APPROVAL -> DRAFT; the approval request is
+  cancelled. **Errors**: `409 INVALID_STATE_TRANSITION`. **Audit** `performance_metric_definition.return_to_draft` (`by: withdrawn`).
+
+### POST /api/v1/performance/definitions/{id}/retire
+
+- **Permission**: `performance.configure` (TENANT). **Body** (strict): `{ reason }`. PUBLISHED -> RETIRED (values stay readable) or DRAFT ->
+  RETIRED (discarded). A pending version must be withdrawn first (`409`). **Audit** `performance_metric_definition.retire`.
+
+### POST /api/v1/performance/definitions/{id}/compute
+
+- **Permission**: `performance.manage` over every employee. **Idempotency**: yes. **Body** (strict): `{ periodStart, periodEnd (YYYY-MM-DD,
+  end exclusive, at most 366 days), employeeIds? (1-200) }`; without `employeeIds`, every non-terminated employee in the caller's scope (at most
+  500, else `400`). `404` when a listed employee is outside scope. DRAFT (preview), PENDING_APPROVAL and PUBLISHED versions are computed; RETIRED
+  `409`. Appends one value per employee x breakdown with at least one opportunity (TRAINING_PROGRESS: one per employee, sample 0 included).
+  **Answers** `201 { definitionId, key, version, periodStart, periodEnd, employeeCount, values: [{ id, employeeId, orgUnitId, jobTypeId,
+  jobCategory, numerator, denominator, sampleSize, enoughData, evidenceCount, computedAt }] }`. `400` when one value would count more than 10,000
+  records. **Audit** `performance_metric_value.compute` (value ids).
+
+### GET /api/v1/performance/values
+
+- **Permission**: `performance.view` (scoped). **Query**: cursor page, `employeeId?`, `definitionId?`, `key?`, `periodStart?`, `periodEnd?`,
+  `jobTypeId?`, `jobCategory?`. Every snapshot (recomputations included), newest `computedAt` first; `evidenceCount` instead of the ids.
+
+### GET /api/v1/performance/values/{id}
+
+- **Permission**: `performance.view` (scoped). One value with `evidenceIds`. `404` when missing, outside scope or not visible.
+
+### GET /api/v1/performance/employees/{employeeId}/values
+
+- **Permission**: `performance.view` over the employee (`404` outside scope). **Query** (strict): `definitionId?`, `key?`, `from?` (periods
+  starting on or after), `to?` (periods ending on or before), `enoughDataOnly` (`true|false`, default false). **Answers** the CURRENT value
+  (newest snapshot) per definition version, period and breakdown, ordered by key and period (newest first). Each entry stands alone.
