@@ -22,7 +22,8 @@ const nothingToChange = { message: "Nothing to change." };
 const hasSomeField = (value: Record<string, unknown>) => Object.values(value).some((field) => field !== undefined);
 
 export const idParams = z.object({ id });
-export const planChildParams = z.object({ id, childId: id });
+export const goalParams = z.object({ id, goalId: id });
+export const actionParams = z.object({ id, actionId: id });
 
 export const DEVELOPMENT_PLAN_STATUSES = ["DRAFT", "ACTIVE", "COMPLETED", "CANCELLED"] as const;
 export const DEVELOPMENT_GOAL_STATUSES = ["OPEN", "ACHIEVED", "DROPPED"] as const;

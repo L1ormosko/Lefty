@@ -1421,6 +1421,15 @@
     "TRAINING.RECORD.NO_EXPIRY": "Does not expire",
     "TRAINING.RECORD.EVIDENCE_METADATA_ONLY": "Only the evidence description is stored; no file storage is configured.",
     "TRAINING.ERROR.ALREADY_OPEN": "This employee already has an open assignment for this course.",
-    "TRAINING.ERROR.OWN_RECORD": "You cannot decide on your own training records."
+    "TRAINING.ERROR.OWN_RECORD": "You cannot decide on your own training records.",
+    "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED.TITLE": "A development plan was started for you",
+    "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED.BODY": "See it in your profile.",
+    "TRAINING.RECOMMENDATION_DISMISS.NO_LONGER_APPLIES": "Dismissed automatically: the reason no longer applies.",
+    "TRAINING.RECOMMENDATION_DISMISS.ALREADY_ASSIGNED": "Dismissed automatically: the course was already assigned.",
+    "TRAINING.RECOMMENDATION.DEVELOPMENT_ONLY": "Recommendations are for development only and never affect job assignment.",
+    "TRAINING.RECOMMENDATION_REASON.CERTIFICATION_EXPIRED": "The training certification expired on {expiresOn}.",
+    "TRAINING.RECOMMENDATION_REASON.CERTIFICATION_EXPIRING": "The training certification expires on {expiresOn} ({daysRemaining} days left).",
+    "TRAINING.RECOMMENDATION_REASON.JOB_TYPE_TRAINING_MISSING": "A job type needs this training certification, and it is the only requirement missing.",
+    "TRAINING.RECOMMENDATION_REASON.METRIC_BELOW_THRESHOLD": "A published metric ({numerator} of {denominator}, sample {sampleSize}) is below the development threshold."
   }
 }

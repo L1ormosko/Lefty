@@ -1421,6 +1421,15 @@
     "TRAINING.RECORD.NO_EXPIRY": "No vence",
     "TRAINING.RECORD.EVIDENCE_METADATA_ONLY": "Solo se guarda la descripción de la evidencia; no hay almacenamiento de archivos configurado.",
     "TRAINING.ERROR.ALREADY_OPEN": "Este empleado ya tiene una asignación abierta para este curso.",
-    "TRAINING.ERROR.OWN_RECORD": "No puede decidir sobre sus propios registros de capacitación."
+    "TRAINING.ERROR.OWN_RECORD": "No puede decidir sobre sus propios registros de capacitación.",
+    "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED.TITLE": "Se inició un plan de desarrollo para usted",
+    "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED.BODY": "Véalo en su perfil.",
+    "TRAINING.RECOMMENDATION_DISMISS.NO_LONGER_APPLIES": "Descartada automáticamente: el motivo ya no aplica.",
+    "TRAINING.RECOMMENDATION_DISMISS.ALREADY_ASSIGNED": "Descartada automáticamente: el curso ya estaba asignado.",
+    "TRAINING.RECOMMENDATION.DEVELOPMENT_ONLY": "Las recomendaciones son solo para el desarrollo y nunca afectan la asignación de trabajos.",
+    "TRAINING.RECOMMENDATION_REASON.CERTIFICATION_EXPIRED": "La certificación de capacitación venció el {expiresOn}.",
+    "TRAINING.RECOMMENDATION_REASON.CERTIFICATION_EXPIRING": "La certificación de capacitación vence el {expiresOn} (quedan {daysRemaining} días).",
+    "TRAINING.RECOMMENDATION_REASON.JOB_TYPE_TRAINING_MISSING": "Un tipo de trabajo requiere esta certificación de capacitación y es el único requisito que falta.",
+    "TRAINING.RECOMMENDATION_REASON.METRIC_BELOW_THRESHOLD": "Una métrica publicada ({numerator} de {denominator}, muestra {sampleSize}) está por debajo del umbral de desarrollo."
   }
 }

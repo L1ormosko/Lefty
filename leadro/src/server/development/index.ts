@@ -22,7 +22,8 @@ export type { DevelopmentThresholdsView } from "./thresholds";
 export type { PlanView, PlanSummaryView, GoalView, ActionView, ReviewView, RecommendationView } from "./views";
 export {
   idParams as developmentIdParams,
-  planChildParams as developmentPlanChildParams,
+  goalParams as developmentGoalParams,
+  actionParams as developmentActionParams,
   createPlanSchema,
   updatePlanSchema,
   cancelPlanSchema,

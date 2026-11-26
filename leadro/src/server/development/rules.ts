@@ -13,24 +13,24 @@ import { isLowerBetterKind, loadDevelopmentThresholds } from "./thresholds";
  * A course is recommended for a certification when it is ACTIVE and grants that TRAINING certification (if several do,
  * the one with the smallest code, so the choice is stable).
  *
- * 1. `certification_expired` / `certification_expiring`: the employee's TRAINING certification has expired, or expires
+ * 1. `CERTIFICATION_EXPIRED` / `CERTIFICATION_EXPIRING`: the employee's TRAINING certification has expired, or expires
  *    within the tenant's `qualificationWarningDays`, and no renewal is pending HR verification (the qualification
  *    module's verdict QUALIFICATION_EXPIRED, judged at the end of the warning horizon).
- * 2. `job_type_training_missing`: an active job type requires a TRAINING certification the employee does not hold, and
+ * 2. `JOB_TYPE_TRAINING_MISSING`: an active job type requires a TRAINING certification the employee does not hold, and
  *    training is the ONLY thing missing for it (every eligibility failure for the job type is a missing or expired
  *    TRAINING certification that some course grants). A job type the employee is not otherwise qualified or permitted
  *    for is not a training need. Judged with the qualification module's `evaluateCandidates` (no territory, no window).
- * 3. `metric_below_threshold`: the employee's current value (latest period, newest computation) of a PUBLISHED metric
+ * 3. `METRIC_BELOW_THRESHOLD`: the employee's current value (latest period, newest computation) of a PUBLISHED metric
  *    definition with enough data is below the tenant's development threshold for that metric key
  *    (numerator x 1000 < belowMilli x denominator). Disabled when no threshold is configured.
  */
 
 export type RecommendationReason =
-  | { code: "certification_expired"; certificationId: string; expiresOn: string }
-  | { code: "certification_expiring"; certificationId: string; expiresOn: string; daysRemaining: number }
-  | { code: "job_type_training_missing"; jobTypeId: string; certificationId: string }
+  | { code: "CERTIFICATION_EXPIRED"; certificationId: string; expiresOn: string }
+  | { code: "CERTIFICATION_EXPIRING"; certificationId: string; expiresOn: string; daysRemaining: number }
+  | { code: "JOB_TYPE_TRAINING_MISSING"; jobTypeId: string; certificationId: string }
   | {
-      code: "metric_below_threshold";
+      code: "METRIC_BELOW_THRESHOLD";
       metricKey: string;
       definitionId: string;
       metricValueId: string;
@@ -44,7 +44,7 @@ export type RecommendationReason =
       belowMilli: number;
     };
 
-export const RECOMMENDATION_REASON_CODES = ["certification_expired", "certification_expiring", "job_type_training_missing", "metric_below_threshold"] as const;
+export const RECOMMENDATION_REASON_CODES = ["CERTIFICATION_EXPIRED", "CERTIFICATION_EXPIRING", "JOB_TYPE_TRAINING_MISSING", "METRIC_BELOW_THRESHOLD"] as const;
 
 /**
  * What a reason is ABOUT, independent of when it was computed: two reasons with the same identity are the same finding
@@ -53,12 +53,12 @@ export const RECOMMENDATION_REASON_CODES = ["certification_expired", "certificat
  */
 export function reasonIdentity(reason: RecommendationReason): string {
   switch (reason.code) {
-    case "certification_expired":
-    case "certification_expiring":
+    case "CERTIFICATION_EXPIRED":
+    case "CERTIFICATION_EXPIRING":
       return `certification:${reason.certificationId}:${reason.expiresOn}`;
-    case "job_type_training_missing":
+    case "JOB_TYPE_TRAINING_MISSING":
       return `job_type:${reason.jobTypeId}:${reason.certificationId}`;
-    case "metric_below_threshold":
+    case "METRIC_BELOW_THRESHOLD":
       return `metric:${reason.metricKey}:${reason.periodStart}:${reason.jobTypeId ?? ""}:${reason.jobCategory ?? ""}`;
   }
 }
@@ -145,7 +145,7 @@ async function expiryRule(
         reasons,
         employeeId,
         courseId,
-        daysRemaining < 0 ? { code: "certification_expired", certificationId, expiresOn } : { code: "certification_expiring", certificationId, expiresOn, daysRemaining },
+        daysRemaining < 0 ? { code: "CERTIFICATION_EXPIRED", certificationId, expiresOn } : { code: "CERTIFICATION_EXPIRING", certificationId, expiresOn, daysRemaining },
       );
     }
   }
@@ -183,7 +183,7 @@ async function jobTypeRule(
       for (const failure of verdict.failures) {
         if (failure.code !== "QUALIFICATION_MISSING") continue; // an expired one is rule 1's reason
         const certificationId = String(failure.params.id);
-        addReason(reasons, employeeId, courses.get(certificationId) as string, { code: "job_type_training_missing", jobTypeId, certificationId });
+        addReason(reasons, employeeId, courses.get(certificationId) as string, { code: "JOB_TYPE_TRAINING_MISSING", jobTypeId, certificationId });
       }
     }
   }
@@ -239,7 +239,7 @@ async function metricRule(tx: TenantTx, tenantId: string, employeeIds: string[],
     if (!value.enoughData || value.denominator <= 0) continue;
     if (value.numerator * 1000 >= threshold.belowMilli * value.denominator) continue;
     addReason(reasons, value.employeeId, threshold.courseId, {
-      code: "metric_below_threshold",
+      code: "METRIC_BELOW_THRESHOLD",
       metricKey,
       definitionId: value.definitionId,
       metricValueId: value.id,

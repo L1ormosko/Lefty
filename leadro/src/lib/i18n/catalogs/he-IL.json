@@ -1421,6 +1421,15 @@
     "TRAINING.RECORD.NO_EXPIRY": "ללא תפוגה",
     "TRAINING.RECORD.EVIDENCE_METADATA_ONLY": "נשמר רק תיאור הראיה; לא הוגדר אחסון קבצים.",
     "TRAINING.ERROR.ALREADY_OPEN": "לעובד זה כבר יש הקצאה פתוחה לקורס זה.",
-    "TRAINING.ERROR.OWN_RECORD": "אינך יכול להחליט על רשומות ההדרכה שלך."
+    "TRAINING.ERROR.OWN_RECORD": "אינך יכול להחליט על רשומות ההדרכה שלך.",
+    "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED.TITLE": "נפתחה עבורך תוכנית פיתוח",
+    "NOTIFICATION.DEVELOPMENT_PLAN_ACTIVATED.BODY": "התוכנית מופיעה בפרופיל שלך.",
+    "TRAINING.RECOMMENDATION_DISMISS.NO_LONGER_APPLIES": "נדחתה אוטומטית: הסיבה כבר אינה רלוונטית.",
+    "TRAINING.RECOMMENDATION_DISMISS.ALREADY_ASSIGNED": "נדחתה אוטומטית: הקורס כבר שובץ.",
+    "TRAINING.RECOMMENDATION.DEVELOPMENT_ONLY": "ההמלצות נועדו לפיתוח בלבד ואינן משפיעות על שיבוץ עבודות.",
+    "TRAINING.RECOMMENDATION_REASON.CERTIFICATION_EXPIRED": "תעודת ההדרכה פגה בתאריך {expiresOn}.",
+    "TRAINING.RECOMMENDATION_REASON.CERTIFICATION_EXPIRING": "תעודת ההדרכה פגה בתאריך {expiresOn} (נותרו {daysRemaining} ימים).",
+    "TRAINING.RECOMMENDATION_REASON.JOB_TYPE_TRAINING_MISSING": "סוג עבודה דורש את תעודת ההדרכה הזו, והיא הדרישה היחידה שחסרה.",
+    "TRAINING.RECOMMENDATION_REASON.METRIC_BELOW_THRESHOLD": "מדד שפורסם ({numerator} מתוך {denominator}, מדגם {sampleSize}) נמצא מתחת לסף הפיתוח."
   }
 }
