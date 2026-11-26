@@ -1,4 +1,5 @@
 import { registerApprovalNotificationTarget } from "@/server/approvals";
+import { registerDataChallengeNotificationTarget } from "@/server/data-challenges";
 import { registerFinanceAdjustments } from "@/server/finance-adjustments";
 import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
@@ -32,6 +33,8 @@ export function registerNotificationTargets(): void {
   registerFinanceAdjustments();
   // Training assignments and records (assigned / overdue / expiring / expired notifications).
   registerTrainingNotificationTargets();
+  // Phase 5: data challenges (routers and the reviewer are notified with a link to the challenge).
+  registerDataChallengeNotificationTarget();
 }
 
 registerNotificationTargets();

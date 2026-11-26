@@ -35,6 +35,12 @@ export const NOTIFICATION_EVENTS = {
   "training.overdue": { templateKey: "NOTIFICATION.TRAINING_OVERDUE", critical: false, targetType: "training_assignment", params: [] },
   "training.expiring": { templateKey: "NOTIFICATION.TRAINING_EXPIRING", critical: false, targetType: "training_record", params: [] },
   "training.expired": { templateKey: "NOTIFICATION.TRAINING_EXPIRED", critical: false, targetType: "training_record", params: [] },
+  // Data challenges (spec 10.4, 5.8): those who route challenges hear about a new one, the reviewer about an assignment (both
+  // link to the challenge). The employee hears that theirs was decided WITHOUT a link: they hold no data_challenges.view and
+  // read it through self-service. No params: the statement and resolution are free text.
+  "data_challenge.raised": { templateKey: "NOTIFICATION.DATA_CHALLENGE_RAISED", critical: false, targetType: "data_challenge", params: [] },
+  "data_challenge.assigned": { templateKey: "NOTIFICATION.DATA_CHALLENGE_ASSIGNED", critical: false, targetType: "data_challenge", params: [] },
+  "data_challenge.decided": { templateKey: "NOTIFICATION.DATA_CHALLENGE_DECIDED", critical: false, targetType: null, params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
 } as const;
 
