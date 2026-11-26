@@ -6,6 +6,7 @@ import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
 import { registerJobNotificationTarget } from "@/server/jobs";
 import { registerLeadNotifications } from "@/server/leads";
 import { registerMaterialCostApprovalSubject } from "@/server/materials";
+import { registerMetricDefinitionApprovalSubject } from "@/server/performance";
 import { registerRecoveryEngine, registerRecoveryFollowUpTarget, registerRecoveryNotificationTarget } from "@/server/recovery";
 import { registerTrainingNotificationTargets } from "@/server/training";
 
@@ -35,6 +36,8 @@ export function registerNotificationTargets(): void {
   registerTrainingNotificationTargets();
   // Phase 5: data challenges (routers and the reviewer are notified with a link to the challenge).
   registerDataChallengeNotificationTarget();
+  // Phase 5: publishing a performance metric definition version (always through an approval request).
+  registerMetricDefinitionApprovalSubject();
 }
 
 registerNotificationTargets();

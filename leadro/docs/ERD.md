@@ -849,7 +849,7 @@ erDiagram
   event id). `PerformanceMetricDefinition.params`: object, kind-specific keys documented by Task 3 (e.g. `windowDays`), never weights or
   thresholds that trigger anything.
 - `PerformanceMetricValue.evidenceIds`: ids of the records counted in the denominator (the numerator's records are among them), at most
-  10,000. Their table is fixed by the kind. Proposed mapping (Task 3 owns the exact formulas and records them in DECISIONS):
+  10,000. Their table is fixed by the kind. Mapping (the exact, final formulas are in DECISIONS.md "Phase 5 Task 3" and `src/lib/performance-formulas.ts`):
 
 | Kind | Dimension | Denominator (opportunities) | Numerator | Evidence table |
 |---|---|---|---|---|
