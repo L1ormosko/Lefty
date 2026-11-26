@@ -1384,6 +1384,22 @@
     "DATA_CHALLENGE.STATUS.WITHDRAWN": "Retirada",
     "DATA_CHALLENGE.RESOLUTION.ANNOTATED": "Nota añadida",
     "DATA_CHALLENGE.RESOLUTION.CORRECTED": "Corregido",
-    "CUSTOMER_FEEDBACK.CHANNEL.MANUAL": "Ingresada manualmente"
+    "CUSTOMER_FEEDBACK.CHANNEL.MANUAL": "Ingresada manualmente",
+    "NOTIFICATION.TRAINING_ASSIGNED.TITLE": "Se le asignó una capacitación",
+    "NOTIFICATION.TRAINING_ASSIGNED.BODY": "Se le asignó un curso de capacitación.",
+    "NOTIFICATION.TRAINING_OVERDUE.TITLE": "Capacitación atrasada",
+    "NOTIFICATION.TRAINING_OVERDUE.BODY": "Una asignación de capacitación pasó su fecha límite.",
+    "NOTIFICATION.TRAINING_EXPIRING.TITLE": "Una capacitación vence pronto",
+    "NOTIFICATION.TRAINING_EXPIRING.BODY": "Una capacitación completada vence pronto. Planifique la renovación.",
+    "NOTIFICATION.TRAINING_EXPIRED.TITLE": "Capacitación vencida",
+    "NOTIFICATION.TRAINING_EXPIRED.BODY": "Una capacitación completada ha vencido.",
+    "TRAINING.COURSE.ACTIVE": "Activo",
+    "TRAINING.COURSE.ARCHIVED": "Archivado",
+    "TRAINING.ASSIGNMENT.OVERDUE": "Atrasada",
+    "TRAINING.RECORD.EXPIRES_ON": "Vence el {date}",
+    "TRAINING.RECORD.NO_EXPIRY": "No vence",
+    "TRAINING.RECORD.EVIDENCE_METADATA_ONLY": "Solo se guarda la descripción de la evidencia; no hay almacenamiento de archivos configurado.",
+    "TRAINING.ERROR.ALREADY_OPEN": "Este empleado ya tiene una asignación abierta para este curso.",
+    "TRAINING.ERROR.OWN_RECORD": "No puede decidir sobre sus propios registros de capacitación."
   }
 }

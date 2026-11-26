@@ -1384,6 +1384,22 @@
     "DATA_CHALLENGE.STATUS.WITHDRAWN": "בוטלה",
     "DATA_CHALLENGE.RESOLUTION.ANNOTATED": "נוספה הערה",
     "DATA_CHALLENGE.RESOLUTION.CORRECTED": "תוקן",
-    "CUSTOMER_FEEDBACK.CHANNEL.MANUAL": "הוזן ידנית"
+    "CUSTOMER_FEEDBACK.CHANNEL.MANUAL": "הוזן ידנית",
+    "NOTIFICATION.TRAINING_ASSIGNED.TITLE": "הוקצתה לך הדרכה",
+    "NOTIFICATION.TRAINING_ASSIGNED.BODY": "הוקצה לך קורס הדרכה.",
+    "NOTIFICATION.TRAINING_OVERDUE.TITLE": "הדרכה באיחור",
+    "NOTIFICATION.TRAINING_OVERDUE.BODY": "מועד היעד של הקצאת הדרכה עבר.",
+    "NOTIFICATION.TRAINING_EXPIRING.TITLE": "תוקף הדרכה יפוג בקרוב",
+    "NOTIFICATION.TRAINING_EXPIRING.BODY": "תוקפה של הדרכה שהושלמה יפוג בקרוב. יש לתכנן חידוש.",
+    "NOTIFICATION.TRAINING_EXPIRED.TITLE": "תוקף הדרכה פג",
+    "NOTIFICATION.TRAINING_EXPIRED.BODY": "תוקפה של הדרכה שהושלמה פג.",
+    "TRAINING.COURSE.ACTIVE": "פעיל",
+    "TRAINING.COURSE.ARCHIVED": "בארכיון",
+    "TRAINING.ASSIGNMENT.OVERDUE": "באיחור",
+    "TRAINING.RECORD.EXPIRES_ON": "בתוקף עד {date}",
+    "TRAINING.RECORD.NO_EXPIRY": "ללא תפוגה",
+    "TRAINING.RECORD.EVIDENCE_METADATA_ONLY": "נשמר רק תיאור הראיה; לא הוגדר אחסון קבצים.",
+    "TRAINING.ERROR.ALREADY_OPEN": "לעובד זה כבר יש הקצאה פתוחה לקורס זה.",
+    "TRAINING.ERROR.OWN_RECORD": "אינך יכול להחליט על רשומות ההדרכה שלך."
   }
 }

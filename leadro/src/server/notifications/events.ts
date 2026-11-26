@@ -29,6 +29,12 @@ export const NOTIFICATION_EVENTS = {
   // never carries the subject or the amount, the linked request shows them to whoever may still see it.
   "approval.requested": { templateKey: "NOTIFICATION.APPROVAL_REQUESTED", critical: false, targetType: "approval_request", params: [] },
   "approval.decided": { templateKey: "NOTIFICATION.APPROVAL_DECIDED", critical: false, targetType: "approval_request", params: [] },
+  // Training (§10.1, §5.8): the employee hears about a new assignment, an overdue one (with whoever assigned it) and a
+  // verified completion that expires soon or has expired (the sweep). No params: course names are tenant text.
+  "training.assigned": { templateKey: "NOTIFICATION.TRAINING_ASSIGNED", critical: false, targetType: "training_assignment", params: [] },
+  "training.overdue": { templateKey: "NOTIFICATION.TRAINING_OVERDUE", critical: false, targetType: "training_assignment", params: [] },
+  "training.expiring": { templateKey: "NOTIFICATION.TRAINING_EXPIRING", critical: false, targetType: "training_record", params: [] },
+  "training.expired": { templateKey: "NOTIFICATION.TRAINING_EXPIRED", critical: false, targetType: "training_record", params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
 } as const;
 

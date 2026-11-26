@@ -1384,6 +1384,22 @@
     "DATA_CHALLENGE.STATUS.WITHDRAWN": "Withdrawn",
     "DATA_CHALLENGE.RESOLUTION.ANNOTATED": "Note added",
     "DATA_CHALLENGE.RESOLUTION.CORRECTED": "Corrected",
-    "CUSTOMER_FEEDBACK.CHANNEL.MANUAL": "Entered manually"
+    "CUSTOMER_FEEDBACK.CHANNEL.MANUAL": "Entered manually",
+    "NOTIFICATION.TRAINING_ASSIGNED.TITLE": "Training assigned to you",
+    "NOTIFICATION.TRAINING_ASSIGNED.BODY": "A training course was assigned to you.",
+    "NOTIFICATION.TRAINING_OVERDUE.TITLE": "Training overdue",
+    "NOTIFICATION.TRAINING_OVERDUE.BODY": "A training assignment is past its due date.",
+    "NOTIFICATION.TRAINING_EXPIRING.TITLE": "Training expires soon",
+    "NOTIFICATION.TRAINING_EXPIRING.BODY": "A completed training expires soon. Plan the renewal.",
+    "NOTIFICATION.TRAINING_EXPIRED.TITLE": "Training expired",
+    "NOTIFICATION.TRAINING_EXPIRED.BODY": "A completed training has expired.",
+    "TRAINING.COURSE.ACTIVE": "Active",
+    "TRAINING.COURSE.ARCHIVED": "Archived",
+    "TRAINING.ASSIGNMENT.OVERDUE": "Overdue",
+    "TRAINING.RECORD.EXPIRES_ON": "Expires on {date}",
+    "TRAINING.RECORD.NO_EXPIRY": "Does not expire",
+    "TRAINING.RECORD.EVIDENCE_METADATA_ONLY": "Only the evidence description is stored; no file storage is configured.",
+    "TRAINING.ERROR.ALREADY_OPEN": "This employee already has an open assignment for this course.",
+    "TRAINING.ERROR.OWN_RECORD": "You cannot decide on your own training records."
   }
 }
