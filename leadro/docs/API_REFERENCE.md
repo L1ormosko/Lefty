@@ -3213,8 +3213,9 @@ to the challenge; `data_challenge.decided` (the employee, no link).
   correctedBody?, correctionAuditEventId? }`: COACHING_RECORD needs `correctedBody` (the note is archived and a corrected copy created through
   the coaching module, `resolutionDetails = { auditEventId, correctedCoachingRecordId }`); EMPLOYEE_QUALIFICATION needs
   `correctionAuditEventId` of the correction made first through `/api/v1/qualifications/*` (about this record, successful, newer than the
-  challenge; `resolutionDetails = { auditEventId, action }`); PERFORMANCE_METRIC_VALUE and TRAINING_RECORD cannot be CORRECTED yet (`400` on
-  `resolutionKind`). **Audit**: `data_challenge.uphold` (+ `coaching_record.correct`).
+  challenge; `resolutionDetails = { auditEventId, action }`); TRAINING_RECORD likewise needs `correctionAuditEventId` of a
+  `training_record.reject` or `training_record.revoke` of this record (`/api/v1/training/records/{id}/reject|revoke`);
+  PERFORMANCE_METRIC_VALUE cannot be CORRECTED yet (`400` on `resolutionKind`). **Audit**: `data_challenge.uphold` (+ `coaching_record.correct`).
 
 ### POST /api/v1/data-challenges/{id}/reject
 - UNDER_REVIEW > REJECTED, by the assigned reviewer. **Permission**: `data_challenges.reject`. **Body**: `{ reason (<= 4000) }`, stored as

@@ -23,8 +23,9 @@ Invariants:
 3. Never a silent edit. ANNOTATED stores the annotation. CORRECTED requires proof from the owning module: a coaching note is
    corrected here through `supersedeCoachingRecordInTx` (challenged version archived, corrected copy created); a
    qualification is corrected first through `/api/v1/qualifications/*` and the reviewer names that audit event, which must be
-   about this record, successful and newer than the challenge. Metric values and training records can only be annotated
-   until their modules offer a correction API (hand-off in DECISIONS). `resolutionDetails` holds the audit event id.
+   about this record, successful and newer than the challenge; a training record likewise, through the training module's
+   reject / revoke (only those two actions count). Metric values can only be annotated until the performance module offers a
+   correction API (hand-off in DECISIONS). `resolutionDetails` holds the audit event id.
 4. Notifications: routers (`data_challenges.assign` over the employee's units) on raise, the reviewer on assignment (both
    link to the challenge, re-authorized at read time), the employee on a decision (no link, no text). No free text in
    notifications or audit events.

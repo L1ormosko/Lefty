@@ -7,6 +7,7 @@ import { POST as reject } from "@/app/api/v1/data-challenges/[id]/reject/route";
 import { POST as withdraw } from "@/app/api/v1/data-challenges/[id]/withdraw/route";
 import { POST as createRecord } from "@/app/api/v1/coaching/records/route";
 import { POST as rejectQualification } from "@/app/api/v1/qualifications/[id]/reject/route";
+import { POST as rejectTrainingRecord } from "@/app/api/v1/training/records/[id]/reject/route";
 import { GET as listNotifications } from "@/app/api/v1/notifications/route";
 import { withTenant } from "@/server/db";
 import { buildWorld, disconnect, type World } from "../authz/fixtures";
@@ -186,18 +187,31 @@ describe("deciding", () => {
     expect((await notificationsOf(w.techA1.userId, "data_challenge.decided")).map((row) => row.eventId)).toContain(`${challenge.id}:decided`);
   });
 
-  it("metric values and training records can be annotated but not marked corrected (no correction API yet)", async () => {
+  it("metric values can be annotated but not marked corrected (no correction API yet)", async () => {
     const challenge = await underReview();
     const refused = await upholdAs(hr, challenge.id, { resolutionKind: "CORRECTED", resolution: "Fixed" });
     expect(refused.status).toBe(400);
     expect(refused.json.error.field).toBe("resolutionKind");
+    expect((await upholdAs(hr, challenge.id, { resolutionKind: "ANNOTATED", resolution: "Two were customer cancellations." })).status).toBe(200);
+  });
 
+  it("a training record is corrected through the training module's reject / revoke; the uphold names that audit event", async () => {
     const record = await createTrainingRecord(w.tenantId, techA1Employee(), w.hr.userId);
     const raised = await raiseAs(techA1, { targetType: "TRAINING_RECORD", targetId: record.id, statement: "I completed it in February." });
     expect(raised.status).toBe(201);
-    await assignTo(hr, raised.json.data.id, w.hr.userId);
-    expect((await upholdAs(hr, raised.json.data.id, { resolutionKind: "CORRECTED", resolution: "x" })).status).toBe(400);
-    expect((await upholdAs(hr, raised.json.data.id, { resolutionKind: "ANNOTATED", resolution: "Completion was in February." })).status).toBe(200);
+    const id = raised.json.data.id;
+    await assignTo(hr, id, w.hr.userId);
+    expect((await upholdAs(hr, id, { resolutionKind: "CORRECTED", resolution: "x" })).json.error.field).toBe("correctionAuditEventId");
+    // Another action on the record (here the challenge's own audit event is about something else entirely) is not proof.
+    const [unrelated] = await auditEvents(w.tenantId, "data_challenge.raise", id);
+    expect((await upholdAs(hr, id, { resolutionKind: "CORRECTED", resolution: "x", correctionAuditEventId: unrelated.id })).status).toBe(400);
+
+    const rejected = await call(rejectTrainingRecord, "POST", "/x", { cookie: hr, params: { id: record.id }, body: { reason: "Wrong completion date" } });
+    expect(rejected.status).toBe(200);
+    const [correction] = await auditEvents(w.tenantId, "training_record.reject", record.id);
+    const upheld = await upholdAs(hr, id, { resolutionKind: "CORRECTED", resolution: "Rejected; please record the February completion.", correctionAuditEventId: correction.id });
+    expect(upheld.status).toBe(200);
+    expect(upheld.json.data.resolutionDetails).toEqual({ auditEventId: correction.id, action: "training_record.reject" });
   });
 
   it("a shared coaching note is corrected through the coaching module: the challenged version is archived, a corrected copy is created", async () => {

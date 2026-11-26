@@ -165,7 +165,7 @@ async function applyCorrection(
       targetType: path.auditTargetType,
       targetId,
       outcome: "SUCCESS",
-      action: { startsWith: path.actionPrefix },
+      action: path.actions ? { in: [...path.actions] } : { startsWith: path.actionPrefix },
       occurredAt: { gte: challenge.raisedAt },
     },
     select: { id: true, action: true },

@@ -70,15 +70,26 @@ export async function assertChallengeableByEmployee(
  * How a CORRECTED resolution is proven, per target type (see `upholdDataChallengeSchema`):
  * - `in_transaction`: this module calls the owning module's correction API inside the decision's transaction;
  * - `audit_reference`: the owning module's existing endpoints made the correction, and the reviewer names its audit event,
- *   which must be about the challenged record (`auditTargetType` + id), succeeded, and happened after the challenge was raised;
+ *   which must be about the challenged record (`auditTargetType` + id), succeeded, happened after the challenge was raised, and
+ *   is one of the correcting actions (`actions` when listed, else any action starting with `actionPrefix`);
  * - `none`: no correction API exists yet, so the challenge can only be annotated (hand-off in docs/DECISIONS.md "Phase 5 Task 4").
  */
 export const CORRECTION_PATH: Record<
   DataChallengeTargetTypeName,
-  { kind: "in_transaction" } | { kind: "audit_reference"; auditTargetType: string; actionPrefix: string } | { kind: "none" }
+  | { kind: "in_transaction" }
+  | { kind: "audit_reference"; auditTargetType: string; actionPrefix: string; actions?: readonly string[] }
+  | { kind: "none" }
 > = {
   COACHING_RECORD: { kind: "in_transaction" },
   EMPLOYEE_QUALIFICATION: { kind: "audit_reference", auditTargetType: "EmployeeQualification", actionPrefix: "qualification." },
   PERFORMANCE_METRIC_VALUE: { kind: "none" },
-  TRAINING_RECORD: { kind: "none" },
+  // A training record's completion is frozen once recorded, so HR "corrects" a wrong one by rejecting it (still pending) or
+  // revoking it (verified) through `/api/v1/training/records/{id}/reject|revoke`; the employee or manager then records the
+  // right completion. Only those two actions count: a verification is not a correction.
+  TRAINING_RECORD: {
+    kind: "audit_reference",
+    auditTargetType: "TrainingRecord",
+    actionPrefix: "training_record.",
+    actions: ["training_record.reject", "training_record.revoke"],
+  },
 };
