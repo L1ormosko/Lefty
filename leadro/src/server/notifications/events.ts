@@ -29,6 +29,12 @@ export const NOTIFICATION_EVENTS = {
   // never carries the subject or the amount, the linked request shows them to whoever may still see it.
   "approval.requested": { templateKey: "NOTIFICATION.APPROVAL_REQUESTED", critical: false, targetType: "approval_request", params: [] },
   "approval.decided": { templateKey: "NOTIFICATION.APPROVAL_DECIDED", critical: false, targetType: "approval_request", params: [] },
+  // Data challenges (spec 10.4, 5.8): those who route challenges hear about a new one, the reviewer about an assignment (both
+  // link to the challenge). The employee hears that theirs was decided WITHOUT a link: they hold no data_challenges.view and
+  // read it through self-service. No params: the statement and resolution are free text.
+  "data_challenge.raised": { templateKey: "NOTIFICATION.DATA_CHALLENGE_RAISED", critical: false, targetType: "data_challenge", params: [] },
+  "data_challenge.assigned": { templateKey: "NOTIFICATION.DATA_CHALLENGE_ASSIGNED", critical: false, targetType: "data_challenge", params: [] },
+  "data_challenge.decided": { templateKey: "NOTIFICATION.DATA_CHALLENGE_DECIDED", critical: false, targetType: null, params: [] },
   "account.security_alert": { templateKey: "NOTIFICATION.SECURITY_ALERT", critical: true, targetType: null, params: [] },
 } as const;
 

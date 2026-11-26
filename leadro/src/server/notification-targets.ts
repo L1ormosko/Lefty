@@ -1,4 +1,5 @@
 import { registerApprovalNotificationTarget } from "@/server/approvals";
+import { registerDataChallengeNotificationTarget } from "@/server/data-challenges";
 import { registerFinanceAdjustments } from "@/server/finance-adjustments";
 import { registerFollowUpNotificationTarget } from "@/server/follow-ups";
 import { registerJobOutcomeNotificationTarget } from "@/server/job-outcomes";
@@ -29,6 +30,8 @@ export function registerNotificationTargets(): void {
   // Refunds, adjustments, chargeback write-offs (approval subjects), provider chargebacks (intake) and the finance review
   // reactions to a reopened job or a corrected outcome.
   registerFinanceAdjustments();
+  // Phase 5: data challenges (routers and the reviewer are notified with a link to the challenge).
+  registerDataChallengeNotificationTarget();
 }
 
 registerNotificationTargets();
