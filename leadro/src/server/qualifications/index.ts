@@ -5,6 +5,10 @@ export { listSkills, createSkill, updateSkill, listCertifications, createCertifi
 export { createQualification, updateQualification, getQualification, listQualifications } from "./employee-qualifications";
 export { verifyQualification, rejectQualification, revokeQualification } from "./verification";
 
+// TRAINING qualifications from verified training records (the training module calls these in its transaction)
+export { grantTrainingQualificationInTx, restateTrainingQualificationInTx } from "./training-grants";
+export type { GrantTrainingQualificationInput, TrainingQualificationBasis, TrainingGrantOutcome } from "./training-grants";
+
 // Territories, job-category permissions, availability
 export { createTerritory, endTerritory, listTerritories } from "./territories";
 export { grantJobPermission, endJobPermission, listJobPermissions } from "./job-permissions";

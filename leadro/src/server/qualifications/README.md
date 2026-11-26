@@ -15,6 +15,10 @@ Public API (`index.ts`):
   `renderEligibilityFailure(translate, failure)` for server-rendered text.
 - Expiry: `findExpiringQualifications(tx, tenantId, { withinDays?, includeExpired? })` (system query for the
   notification engine, no actor) and `listExpiringQualifications(actor, query)` (scoped API).
+- Training (Phase 5): `grantTrainingQualificationInTx(tx, ctx, { employeeId, certificationId, completedOn, expiresOn,
+  trainingRecordId })` creates or renews (never shortens) the VERIFIED TRAINING qualification a verified training record
+  supports; `restateTrainingQualificationInTx(tx, ctx, { qualificationId, basis, reason })` revokes it (basis null) or
+  resets its dates after a supporting record was revoked. No permission check: the training module authorized itself.
 - Records: catalogs (`listSkills`, `createSkill`, ..., `*Certification`), employee records
   (`createQualification`, `updateQualification`, `getQualification`, `listQualifications`), HR decisions
   (`verifyQualification`, `rejectQualification`, `revokeQualification`), `createTerritory` / `endTerritory`,
