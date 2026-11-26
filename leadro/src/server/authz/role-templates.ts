@@ -154,6 +154,11 @@ const unitManagerGrants = (): TemplateGrant[] => [
   ...grantActions("coaching", ["VIEW", "CREATE", "EDIT"]),
   ...grantActions("data_challenges", ["VIEW", "ASSIGN"]),
   ...view("customer_feedback"),
+  // Phase 6 (spec 5.3, 5.4): operational dashboards of the unit. Local revenue / material cost widgets come from financial KPIs,
+  // which check the manager's own financial grants (financial_reports.view, scoped) per KPI; no financial dashboard family.
+  // The report builder inside the unit, without export.
+  ...view("analytics_operational"),
+  ...grantActions("reports", ["VIEW", "CREATE"]),
 ];
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
@@ -213,6 +218,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("permissions"),
       // "Limited": may assign roles, but only non-sensitive ones. The permissions module enforces it.
       ...grantActions("permissions", ["ASSIGN"], { set: "non_sensitive_roles" }),
+      // Phase 6 (spec 5.1, 5.2, 13.1, 13.2): executive and operational dashboards; financial KPIs on them still check the COO's
+      // financial grants (financial_reports.view). The report builder without export (exports are Finance's, spec 5.7).
+      ...view("analytics_executive"),
+      ...view("analytics_operational"),
+      ...grantActions("reports", ["VIEW", "CREATE"]),
     ],
   }),
   defineTemplate({
@@ -241,6 +251,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...full("finance_reconciliation"),
       ...grantActions("materials", ["VIEW", "APPROVE", "EXPORT"], { includeFields: ["cost"] }),
       ...full("approvals"),
+      // Phase 6 (spec 5.7 "Export authorized reports", 13.3): financial dashboards and the report builder with export. Still no
+      // operational dashboards (spec 26.3: Finance gains no operational permissions).
+      ...view("analytics_financial"),
+      ...grantActions("reports", ["VIEW", "CREATE", "EXPORT"]),
     ],
   }),
   defineTemplate({
@@ -318,6 +332,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...grantActions("recovery", ["VIEW", "CREATE", "EDIT", "ASSIGN", "MANAGE"]),
       ...view("job_outcomes"),
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT", "ASSIGN"]),
+      // Phase 6 (spec 5.6 widgets and Reports): lead analytics and the report builder. Export is allowed because the role already
+      // holds leads.export; an export also needs the dataset's own export permission, so this opens lead datasets only.
+      ...view("analytics_lead"),
+      ...grantActions("reports", ["VIEW", "CREATE", "EXPORT"]),
     ],
   }),
   defineTemplate({
@@ -342,6 +360,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...view("completion_forms"),
       ...grantActions("follow_ups", ["VIEW", "CREATE", "EDIT"]),
       ...view("materials"),
+      // Phase 6: the dispatch subset of operational analytics only (the KPIs the catalog places in the `dispatch_kpis` set:
+      // unassigned jobs, time to assignment / arrival, dispatch efficiency). No employee productivity, no money, no report builder.
+      ...view("analytics_operational", { set: "dispatch_kpis" }),
     ],
   }),
   defineTemplate({
@@ -386,6 +407,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...full("development_plans"),
       ...full("coaching"),
       ...full("data_challenges"),
+      // Phase 6 (spec 5.8 "Reports"): the report builder over the datasets HR's own permissions allow; no dashboards, no export.
+      ...grantActions("reports", ["VIEW", "CREATE"]),
     ],
   }),
   defineTemplate({
