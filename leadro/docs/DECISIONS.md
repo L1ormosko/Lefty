@@ -1127,7 +1127,9 @@ Module `src/server/finance-adjustments` (one module: the three record types shar
 - **Provider chargebacks** come through the existing intake: the payments module gained `registerIntakeEventHandler(eventType, handler)`
   (globalThis registry) and `ProviderEvent.chargeback`; this module registers `chargeback.opened`. Validation before any write: chargeback
   fields present, a provider payment of the same provider with that reference (else UNMATCHED `unknown_payment`), same currency, chargeback
-  reference not seen (else DUPLICATE). Payments stays independent of this module (no import cycle).
+  reference not seen (else DUPLICATE). Payments stays independent of this module (no import cycle). A chargeback recorded BY HAND carries
+  no provider reference, so if the same dispute later also arrives from a provider it is a second record: record by hand only what no
+  intake delivers (the provider one's flag then shows `exceedsRemaining`, and reconciliation sees the double).
 - **Finance review flags** (spec 11.7 "flag for finance review"): raised by `system:finance-review` once per triggering event with a
   deterministic key: `job_reopened:<statusHistoryId>`, `outcome_corrected:<jobEventId>`, `refund_posted:<refundId>`,
   `chargeback_opened:<chargebackId>`, `material_cost_currency:<usageId>`; manual ones `manual:<userId>:<key>`. Insert = `ON CONFLICT DO
