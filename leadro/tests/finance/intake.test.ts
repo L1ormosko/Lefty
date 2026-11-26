@@ -141,6 +141,22 @@ describe("with a provider", () => {
     expect(await ledgerOf(w, job.id)).toHaveLength(1);
   });
 
+  it("P4-R3: concurrent events with different ids about one provider payment: one ACCEPTED, the rest DUPLICATE", async () => {
+    registerPaymentProvider(testProvider);
+    const job = await makeJob(w);
+    const paymentRef = `pay_${randomUUID()}`;
+    const results = await Promise.all(Array.from({ length: 6 }, () => deliver(paymentEvent(job.id, { paymentRef }))));
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    const statuses = results.map((r) => r.json.data.status as string);
+    expect(statuses.filter((status) => status === "ACCEPTED")).toHaveLength(1);
+    expect(statuses.filter((status) => status === "DUPLICATE")).toHaveLength(5);
+    const accepted = results.find((r) => r.json.data.status === "ACCEPTED");
+    const rows = await withTenant(w.tenantId, (tx) => tx.paymentIntakeEvent.findMany({ where: { jobId: job.id, status: "DUPLICATE" } }));
+    expect(rows.every((row) => row.duplicateOfId === accepted?.json.data.eventId && row.paymentId === null)).toBe(true);
+    expect(await paymentsOf(job.id)).toHaveLength(1);
+    expect(await ledgerOf(w, job.id)).toHaveLength(1);
+  });
+
   it("the same event id with different content is a 409, and nothing changes", async () => {
     registerPaymentProvider(testProvider);
     const job = await makeJob(w);

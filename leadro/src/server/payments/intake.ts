@@ -230,7 +230,7 @@ async function processEvent(tx: TenantTx, eventId: string, incoming: ProviderEve
   const earlier = await tx.payment.findFirst({ where: { tenantId: event.tenantId, provider: providerKey, providerRef: payment.providerRef }, select: { intakeEventId: true } });
   if (earlier) return finish("DUPLICATE", { rejectionCode: "duplicate_provider_ref", duplicateOfId: earlier.intakeEventId, jobId: job.id });
 
-  const { payment: created } = await createPaymentIdempotently(tx, event.tenantId, job, paymentKeys.provider(providerKey, payment.providerRef), {
+  const { payment: created, replayed } = await createPaymentIdempotently(tx, event.tenantId, job, paymentKeys.provider(providerKey, payment.providerRef), {
     origin: "PROVIDER",
     method: payment.method ?? "CARD",
     status: "RECEIVED",
@@ -241,6 +241,11 @@ async function processEvent(tx: TenantTx, eventId: string, incoming: ProviderEve
     intakeEventId: event.id,
     receivedAt: incoming.occurredAt ?? new Date(),
   });
+  // Another event about the same provider payment (different event id) committed between the check above and this insert:
+  // the payment is theirs, so this event is a DUPLICATE like in the sequential case (review P4-R3), never a second ACCEPTED.
+  if (replayed && created.intakeEventId !== event.id) {
+    return finish("DUPLICATE", { rejectionCode: "duplicate_provider_ref", duplicateOfId: created.intakeEventId, jobId: job.id });
+  }
   await postPaymentReceivedInTx(tx, created, job, { system: INTAKE_SYSTEM_ACTOR });
   return finish("ACCEPTED", { paymentId: created.id, jobId: job.id });
 }
