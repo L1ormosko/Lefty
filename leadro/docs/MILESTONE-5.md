@@ -85,11 +85,11 @@ oneself is refused, a challenged note's author cannot review the challenge.
 
 | Check | Result |
 |---|---|
-| `npm test` (Vitest) | **TEST_RESULT** |
+| `npm test` (Vitest) | **182 files, 2490 tests: 2490 passed, 0 failed, 0 skipped** (581 s; 2471 at the end of Task 6, before the review) |
 | `npm run typecheck` | passed, 0 errors |
 | `npm run lint` | passed, 0 problems |
 | `npm run i18n:check` | passed |
-| `npm run build` | BUILD_RESULT |
+| `npm run build` | passed (Next.js production build, after `rm -rf .next`) |
 | `npm run test:e2e` | not run for this milestone (no Phase 5 screen exists; the Phase 1 specs are unchanged) |
 
 Error log lines printed by negative tests (trigger refusals, failing handlers) are expected. Phase 5 adds 23 test files: pure rule tests
