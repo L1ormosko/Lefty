@@ -54,7 +54,7 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `job_types` | view, configure (job type catalog, job workflow settings) |
 | `compensation` | view*, create, edit, approve*, reject, export, configure* |
 | `financial_reports` | view*, export* |
-| `performance` | view, export |
+| `performance` | view (metric values; coaching content is the opt-in `coaching` set), edit (add context to a value or period), export*, manage (run a computation), configure (author / submit metric definition versions), publish* (approver of a definition's publication) |
 | `shifts` | view, create (start a shift), edit (end / correct one), approve (accept a shift started or ended under an exception) |
 | `location` | view*, create (record an event: a technician's own), approve* (verify or override an arrival / location exception) |
 | `job_outcomes` | view, create (report a visit outcome), edit (correct one), configure (lost reasons) |
@@ -69,6 +69,14 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `finance_adjustments` | view, create*, approve* |
 | `finance_reconciliation` | view, create (start a run), edit (resolve an exception), assign, export* |
 | `approvals` | view (own requests + approver queue), manage (see and cancel every request in scope), configure* (approval policies) |
+| `training` | view, create (record a completion), edit (change an assignment: due date, cancel), assign (assign a course; accept / dismiss a training recommendation), approve (verify, reject or revoke a record), manage (course catalog) |
+| `development_plans` | view*, create, edit (goals, actions, status, add a review entry) |
+| `coaching` | view*, create, edit |
+| `data_challenges` | view*, assign (give a challenge to a reviewer), approve (uphold), reject |
+| `customer_feedback` | view, create (record manually), edit (void a mis-recorded entry) |
+
+`PUBLISH` is an 11th action beyond spec 4.3's ten (Phase 5, see section 12): the approval policy for metric publication names
+`performance.publish` as its approver permission, so publishing is a different person's decision than authoring (`performance.configure`).
 
 Phase 2 additions (`qualifications`, `notifications`, `job_types`, and `manage` on customers/leads) are not rows of the
 4.5 matrix; their defaults are in section 5 ("Phase 2 modules"). `notifications.*` is a capability check: the
@@ -98,6 +106,12 @@ the `base` (non-sensitive) fields only; a sensitive set is visible only to a gra
 | `job_outcomes.financial_fields` | job_outcomes | `financial` |
 | `location.coordinate_fields` | location | `coordinates` |
 | `materials.cost_fields` | materials | `cost` |
+| `performance.coaching_fields` | performance | `coaching` |
+
+`performance.coaching_fields` (spec 10.4, 22.2): the coaching content around performance data read through `performance.*`:
+`MetricContextNote.body` (`METRIC_CONTEXT_NOTE_FIELD_MAP`) and the coaching notes, plans and challenges that development read models
+(Phase 5 Task 6) embed. Metric values themselves are all `base` (`PERFORMANCE_METRIC_VALUE_FIELD_MAP`). The coaching, plan and challenge
+records' own endpoints are gated by their own (sensitive) modules. Named by the management chain and HR only (section 12).
 
 `location.coordinate_fields` (spec 22.2): `LocationEvent.latitude` / `longitude` (`LOCATION_EVENT_FIELD_MAP`). A plain `location.view` grant reads when, what
 kind, how accurate and what the server concluded, never where. Only the Owner/CEO template names it (`includeFields`); no other shipped template does.
@@ -191,7 +205,7 @@ Cell vocabulary from the spec -> grants:
 | Jobs | `jobs.*` T | `jobs.*` T | view cond `{fields:"financial"}` T | view, create, edit, assign ORG_UNIT | same | view, create, edit, assign (plain grants = operational fields, no financial set) T | view cond `{set:"recovery_related"}` | view ASSIGNED, edit cond `{fields:"execution"}` |
 | Compensation | `compensation.*` T | view T | `compensation.*` T | configurable (default view ORG_UNIT) | view (limited) ORG_UNIT | - | - | view OWN (own statements) |
 | Financial reports | view, export T | view T | view, export T | view ORG_UNIT | view (limited) ORG_UNIT | - | - | - (self-service, not the module permission) |
-| Performance | view, export T | view T | - | view ORG_UNIT | view ORG_UNIT | - | view cond `{set:"lead_team"}` | view OWN |
+| Performance | `performance.*` + `coaching` set T | view T (no `coaching` set) | - | view, edit + `coaching`, manage ORG_UNIT | same | - | view cond `{set:"lead_team", includeFields:["coaching"]}` | view OWN (no `coaching` set) |
 | Permissions | `permissions.*` T | view, assign (limited, non-sensitive roles) | - | - | - | - | - | - |
 
 T = scope `TENANT`. "Limited" is deliberately narrower than "Scoped" and is expressed as a smaller
@@ -435,3 +449,45 @@ Rules:
   (`MILESTONE-4.md`). An approver of a MATERIAL_COST_CHANGE request who lacks the `materials.view` `cost` set decides without seeing the
   unit costs (`moneyRedacted`). Known open points for the owner: an `approvals.configure` holder can deactivate the policy covering their
   own request (policy changes are audited, not approved), and unit managers may record the payout of an approved refund.
+
+## 12. Phase 5: workforce intelligence (permission catalog + templates)
+
+Defaults (templates in `role-templates.ts`; a tenant edits its own copy afterwards). Scope follows the assignment: managers their
+unit, Team Leader the team unit, Technician `OWN`, Owner / COO / HR tenant-wide.
+
+| Module | Owner | COO | Finance | State / Regional / City Mgr | Team Leader | Lead Ops | HR | Customer Relations | Dispatcher | Technician |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `performance` | full + `coaching` | view | - | view, edit + `coaching`; manage | view, edit + `coaching` | view + `coaching` `{set:"lead_team"}` | view, edit + `coaching`; configure | - | - | view (OWN) |
+| `training` | full | view | - | view, edit, assign | view | view `{set:"lead_team"}` | full | - | - | view (OWN) |
+| `development_plans` | full | - | - | view, create, edit | view | - | full | - | - | - (self-service) |
+| `coaching` | full | - | - | view, create, edit | view, create, edit | view, create `{set:"lead_team"}` | full | - | - | - (self-service) |
+| `data_challenges` | full | - | - | view, assign | - | - | full | - | - | - (raised through self-service) |
+| `customer_feedback` | full | view | - | view | view | - | - | full | - | - |
+
+Rules:
+- **Spec 10.3 is structural.** No template that dispatches (Dispatcher) holds any performance or development permission, and no
+  Phase 5 permission grants anything on dispatch, jobs, employees, compensation or qualification eligibility. An architecture test
+  (Task 3) asserts that dispatch / qualifications / jobs / ledger / approvals / employees never import the performance modules.
+- **Coaching content** (`performance.coaching_fields`, tag `coaching`, spec 22.2) is named only by the employee's management chain
+  (State / Regional / City managers, Team Leader, Lead Operations for the lead team), HR and the Owner. The COO sees metric values
+  ("Performance: View", spec 4.5) without it. Coaching notes, plans and challenges are also their own modules whose `view` is
+  sensitive, so a custom role holding one requires MFA.
+- **Self-service (spec 5.11).** Employees read their own published metric values with evidence, training records and assignments,
+  certification status, their non-DRAFT plans, the coaching and context notes marked shared, and their own challenges through
+  `/api/v1/me/*` (Task 6), and raise challenges there. Those paths filter on the caller and need no module permission; the
+  Technician template's `performance.view` / `training.view` (OWN) remain for the module endpoints.
+- **Metric definitions.** HR (and the Owner) author versions (`performance.configure`, which forces MFA like every `*.configure`).
+  Publishing always goes through the approval engine (subject `PERFORMANCE_METRIC_DEFINITION`, seeded policy
+  `performance_metric_publication`, approver permission `performance.publish`, held by the Owner only by default); the author can never
+  decide it (separation of duties). The database refuses a PENDING_APPROVAL or PUBLISHED version without an approval request.
+- **HR (spec 5.8)**: full training (catalog, assignments, recording and verifying completions), plans, coaching, and the review of
+  employee-submitted corrections (`data_challenges.approve` / `.reject`). Still no financial data (no finance module, no compensation,
+  no financial field set; a test pins it).
+- **Managers (spec 5.4)**: assign training and accept / dismiss recommendations (`training.assign`), run plans and coaching, add context to
+  values (`performance.edit`), trigger a computation for their unit (`performance.manage`), route challenges to a reviewer
+  (`data_challenges.assign`). They do not record or verify completions, decide challenges, export, author or publish metrics.
+- **Customer Relations** records customer feedback manually (no survey provider) and voids a mis-recorded entry; feedback becomes a
+  metric input only through a published CUSTOMER_FEEDBACK_AVERAGE definition.
+- **`lead_team`** is a record set no service resolves yet (it already qualified Lead Ops' `employees.*` and `performance.view`); until a
+  service supplies it, those grants match nothing (fail closed).
+- Tests: `tests/authz/workforce-catalog.test.ts` (catalog, templates, labels), `tests/db/phase5-schema.test.ts` (schema).

@@ -23,6 +23,10 @@ const TENANT_OWNED_TABLES = [
   "ApprovalRequest", "ApprovalDecision", "ReconciliationRun", "ReconciliationException", "PaymentIntakeEvent",
   // Phase 4 follow-up migration 20261125100000_phase4_review_flags
   "FinanceReviewFlag",
+  // Phase 5 workforce intelligence (14), migration 20261126100000_phase5_workforce
+  "TrainingCourse", "TrainingAssignment", "TrainingRecord", "PerformanceMetricDefinition", "PerformanceMetricValue",
+  "MetricContextNote", "CoachingRecord", "DevelopmentPlan", "DevelopmentGoal", "DevelopmentAction", "DevelopmentPlanReview",
+  "TrainingRecommendation", "DataChallenge", "CustomerFeedback",
 ];
 
 let A: { id: string };

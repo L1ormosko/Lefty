@@ -66,6 +66,8 @@ enum PermissionAction {
   EXPORT
   MANAGE
   CONFIGURE
+  /// Phase 5: approve the publication of a performance metric definition (the approval policy's approver permission).
+  PUBLISH
 }
 
 enum ScopeType {
@@ -206,6 +208,22 @@ model Tenant {
   reconciliationExceptions ReconciliationException[]
   paymentIntakeEvents      PaymentIntakeEvent[]
   financeReviewFlags       FinanceReviewFlag[]
+
+  // Phase 5
+  trainingCourses         TrainingCourse[]
+  trainingAssignments     TrainingAssignment[]
+  trainingRecords         TrainingRecord[]
+  metricDefinitions       PerformanceMetricDefinition[]
+  metricValues            PerformanceMetricValue[]
+  metricContextNotes      MetricContextNote[]
+  coachingRecords         CoachingRecord[]
+  developmentPlans        DevelopmentPlan[]
+  developmentGoals        DevelopmentGoal[]
+  developmentActions      DevelopmentAction[]
+  developmentPlanReviews  DevelopmentPlanReview[]
+  trainingRecommendations TrainingRecommendation[]
+  dataChallenges          DataChallenge[]
+  customerFeedback        CustomerFeedback[]
 }
 
 model LegalEntity {
@@ -285,6 +303,10 @@ model OrgUnit {
   reconciliationExceptions ReconciliationException[] @relation("ReconciliationExceptionOrgUnit")
   financeReviewFlags       FinanceReviewFlag[]       @relation("FinanceReviewFlagOrgUnit")
 
+  // Phase 5
+  metricValues     PerformanceMetricValue[] @relation("PerformanceMetricValueOrgUnit")
+  customerFeedback CustomerFeedback[]       @relation("CustomerFeedbackOrgUnit")
+
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
   @@index([tenantId, type])
@@ -341,6 +363,17 @@ model Employee {
   recoveryCasesAssigned     LeadRecoveryCase[]    @relation("RecoveryCaseAssignee")
   recoveryAttempts          RecoveryAttempt[]     @relation("RecoveryAttemptEmployee")
   followUpsAssigned         FollowUpTask[]        @relation("FollowUpAssignee")
+
+  // Phase 5
+  trainingAssignments     TrainingAssignment[]
+  trainingRecords         TrainingRecord[]
+  metricValues            PerformanceMetricValue[]
+  metricContextNotes      MetricContextNote[]
+  coachingRecords         CoachingRecord[]
+  developmentPlans        DevelopmentPlan[]
+  trainingRecommendations TrainingRecommendation[]
+  dataChallenges          DataChallenge[]
+  customerFeedback        CustomerFeedback[]
 
   @@unique([id, tenantId])
   @@unique([userId, tenantId])
@@ -489,6 +522,27 @@ model User {
   financeReviewFlagsRaised         FinanceReviewFlag[]       @relation("FinanceReviewFlagRaisedBy")
   financeReviewFlagsAssigned       FinanceReviewFlag[]       @relation("FinanceReviewFlagAssignedTo")
   financeReviewFlagsResolved       FinanceReviewFlag[]       @relation("FinanceReviewFlagResolvedBy")
+
+  // Phase 5
+  trainingCoursesCreated         TrainingCourse[]              @relation("TrainingCourseCreatedBy")
+  trainingAssignmentsMade        TrainingAssignment[]          @relation("TrainingAssignmentAssignedBy")
+  trainingAssignmentsCancelled   TrainingAssignment[]          @relation("TrainingAssignmentCancelledBy")
+  trainingRecordsRecorded        TrainingRecord[]              @relation("TrainingRecordRecordedBy")
+  trainingRecordsVerified        TrainingRecord[]              @relation("TrainingRecordVerifiedBy")
+  metricDefinitionsCreated       PerformanceMetricDefinition[] @relation("PerformanceMetricDefinitionCreatedBy")
+  metricValuesComputed           PerformanceMetricValue[]      @relation("PerformanceMetricValueComputedBy")
+  metricContextNotesWritten      MetricContextNote[]           @relation("MetricContextNoteAuthor")
+  coachingRecordsWritten         CoachingRecord[]              @relation("CoachingRecordAuthor")
+  developmentPlansOwned          DevelopmentPlan[]             @relation("DevelopmentPlanOwner")
+  developmentPlansCreated        DevelopmentPlan[]             @relation("DevelopmentPlanCreatedBy")
+  developmentPlanReviewsWritten  DevelopmentPlanReview[]       @relation("DevelopmentPlanReviewer")
+  trainingRecommendationsMade    TrainingRecommendation[]      @relation("TrainingRecommendationGeneratedBy")
+  trainingRecommendationsDecided TrainingRecommendation[]      @relation("TrainingRecommendationDecidedBy")
+  dataChallengesRaised           DataChallenge[]               @relation("DataChallengeRaisedBy")
+  dataChallengesReviewing        DataChallenge[]               @relation("DataChallengeReviewer")
+  dataChallengesResolved         DataChallenge[]               @relation("DataChallengeResolvedBy")
+  customerFeedbackRecorded       CustomerFeedback[]            @relation("CustomerFeedbackRecordedBy")
+  customerFeedbackVoided         CustomerFeedback[]            @relation("CustomerFeedbackVoidedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -1110,6 +1164,9 @@ model Customer {
   approvalRequests   ApprovalRequest[]
   financeReviewFlags FinanceReviewFlag[]
 
+  // Phase 5
+  customerFeedback CustomerFeedback[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, number])
   @@index([tenantId, archivedAt, createdAt])
@@ -1454,6 +1511,9 @@ model Certification {
   jobRequirements JobRequirement[]
   qualifications  EmployeeQualification[]
 
+  // Phase 5
+  trainingCourses TrainingCourse[]
+
   @@unique([id, tenantId])
   @@unique([id, type, tenantId])
   @@unique([tenantId, code])
@@ -1492,7 +1552,12 @@ model EmployeeQualification {
   certification Certification? @relation(fields: [certificationId, kind, tenantId], references: [id, type, tenantId], onDelete: Restrict)
   verifiedBy    User?          @relation("QualificationVerifiedBy", fields: [verifiedById, tenantId], references: [id, tenantId], onDelete: Restrict)
 
+  // Phase 5
+  trainingRecords TrainingRecord[]
+  challenges      DataChallenge[]
+
   @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
   @@unique([tenantId, employeeId, skillId])
   @@index([tenantId, employeeId, status])
   @@index([tenantId, skillId])
@@ -1587,6 +1652,9 @@ model JobType {
 
   // Phase 3
   completionForms JobCompletionFormDefinition[]
+
+  // Phase 5
+  metricValues PerformanceMetricValue[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, code])
@@ -1712,6 +1780,9 @@ model Job {
   reconciliationExceptions ReconciliationException[]
   paymentIntakeEvents      PaymentIntakeEvent[]
   financeReviewFlags       FinanceReviewFlag[]
+
+  // Phase 5
+  customerFeedback CustomerFeedback[]
 
   @@unique([id, tenantId])
   // Lets a recovery case reference (job, customer) so a case and its job can never disagree on the customer.
@@ -2979,6 +3050,8 @@ enum ApprovalSubjectType {
   REFUND
   CHARGEBACK_WRITE_OFF
   HIGH_VALUE_DISCOUNT
+  /// Phase 5: publishing a performance metric definition version (spec 10.2).
+  PERFORMANCE_METRIC_DEFINITION
 }
 
 enum ApprovalRequestStatus {
@@ -3410,6 +3483,9 @@ model ApprovalRequest {
   adjustments  Adjustment[]          @relation("AdjustmentApproval")
   chargebacks  Chargeback[]          @relation("ChargebackWriteOffApproval")
 
+  // Phase 5
+  metricDefinitions PerformanceMetricDefinition[] @relation("PerformanceMetricDefinitionApproval")
+
   @@unique([id, tenantId])
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, status, requestedAt])
@@ -3609,4 +3685,616 @@ model FinanceReviewFlag {
   @@index([tenantId, orgUnitId, status])
   @@index([tenantId, jobId])
   @@index([tenantId, assignedToId, status])
+}
+
+// ═════════════════════════ Phase 5: workforce intelligence (spec Part 10, 5.4, 5.8, 5.11, 22.2) ═════════════════════════
+// Training, performance metrics, coaching, development plans, recommendations, data challenges and manual customer feedback.
+// Performance data is for development only (spec 10.3): nothing here is read by dispatch, eligibility, assignment, compensation
+// or employment status. There is no combined score anywhere: every metric value is one dimension, one job type or job category,
+// one period, with its sample and evidence (spec 10.4).
+
+enum TrainingAssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+/// Who started an assignment: a person, or a person accepting a rule-based recommendation (never automatic, spec 28.6).
+enum TrainingAssignmentSource {
+  MANUAL
+  RECOMMENDATION
+}
+
+/// A completion is recorded first and verified by HR; only a VERIFIED record counts (and may create a TRAINING qualification).
+enum TrainingRecordStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  REVOKED
+}
+
+/// The fixed catalog of computable metric kinds (spec 10.2). Each kind has a documented numerator, denominator and evidence
+/// over existing records (docs/ERD.md "Phase 5"); there are no free formulas, weights or targets.
+enum PerformanceMetricKind {
+  REPEAT_VISIT_RATE
+  ON_TIME_ARRIVAL
+  DOCUMENTATION_COMPLETENESS
+  OUTCOME_CONVERSION
+  RECOVERY_CONVERSION
+  CUSTOMER_FEEDBACK_AVERAGE
+  TRAINING_PROGRESS
+}
+
+/// Spec 10.2 "possible dimensions". WORK_QUALITY and PRODUCTIVITY have no computable kind yet (no defined data source).
+enum PerformanceDimension {
+  WORK_QUALITY
+  REPEAT_VISITS
+  CUSTOMER_FEEDBACK
+  TIMELINESS
+  DOCUMENTATION
+  PRODUCTIVITY
+  SALES
+  TRAINING_PROGRESS
+}
+
+enum PerformanceMetricStatus {
+  DRAFT
+  PENDING_APPROVAL
+  PUBLISHED
+  RETIRED
+}
+
+enum DevelopmentPlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum DevelopmentGoalStatus {
+  OPEN
+  ACHIEVED
+  DROPPED
+}
+
+enum DevelopmentActionKind {
+  TRAINING
+  COACHING
+  OTHER
+}
+
+enum DevelopmentActionStatus {
+  PLANNED
+  DONE
+  CANCELLED
+}
+
+enum TrainingRecommendationStatus {
+  OPEN
+  ACCEPTED
+  DISMISSED
+}
+
+/// What an employee may challenge (spec 10.4, 5.8 "employee-submitted corrections"); one typed reference column per kind.
+enum DataChallengeTargetType {
+  PERFORMANCE_METRIC_VALUE
+  TRAINING_RECORD
+  COACHING_RECORD
+  EMPLOYEE_QUALIFICATION
+}
+
+enum DataChallengeStatus {
+  OPEN
+  UNDER_REVIEW
+  UPHELD
+  REJECTED
+  WITHDRAWN
+}
+
+/// How an UPHELD challenge was settled: an annotation shown next to the data, or a correction made by the owning module (audited).
+enum DataChallengeResolution {
+  ANNOTATED
+  CORRECTED
+}
+
+/// Feedback is entered by a person (no survey provider is integrated, spec 28.3).
+enum CustomerFeedbackChannel {
+  MANUAL
+}
+
+/// A training course (spec 10.1 "Training", 5.8). Completing a course that names a TRAINING-type Certification makes the
+/// verified record create or renew the employee's qualification (through the qualifications module), so eligibility sees it.
+model TrainingCourse {
+  id                String            @id @default(cuid())
+  tenantId          String
+  /// Stable lowercase code, unique per tenant (CHECK training_course_code_format).
+  code              String
+  name              String
+  /// Tenant-defined grouping, e.g. "safety", "electrical".
+  category          String?
+  description       String?           @db.Text
+  /// Optional TRAINING-type certification this course grants (composite FK on (id, type) pins the type).
+  certificationId   String?
+  certificationKind QualificationKind @default(TRAINING)
+  /// How long a completion stays valid; null = does not expire.
+  validityDays      Int?
+  active            Boolean           @default(true)
+  archivedAt        DateTime?         @db.Timestamptz(3)
+  createdById       String?
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  certification   Certification?           @relation(fields: [certificationId, certificationKind, tenantId], references: [id, type, tenantId], onDelete: Restrict)
+  createdBy       User?                    @relation("TrainingCourseCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignments     TrainingAssignment[]
+  records         TrainingRecord[]
+  recommendations TrainingRecommendation[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, active, category])
+  @@index([tenantId, certificationId])
+}
+
+/// A course assigned to an employee with an optional due date. Overdue is derived (dueDate < today, still open), never stored.
+/// At most one open (ASSIGNED / IN_PROGRESS) assignment per employee and course (partial unique index).
+model TrainingAssignment {
+  id               String                   @id @default(cuid())
+  tenantId         String
+  employeeId       String
+  courseId         String
+  /// Tenant-local due date; null = no deadline.
+  dueDate          DateTime?                @db.Date
+  status           TrainingAssignmentStatus @default(ASSIGNED)
+  source           TrainingAssignmentSource @default(MANUAL)
+  /// Set exactly when source = RECOMMENDATION: the accepted recommendation (same employee and course, composite FK).
+  recommendationId String?
+  assignedById     String
+  assignedAt       DateTime                 @default(now()) @db.Timestamptz(3)
+  note             String?                  @db.Text
+  /// The record that fulfilled it (same employee and course, composite FK).
+  trainingRecordId String?
+  completedAt      DateTime?                @db.Timestamptz(3)
+  cancelledAt      DateTime?                @db.Timestamptz(3)
+  cancelledById    String?
+  cancelReason     String?
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                 @updatedAt @db.Timestamptz(3)
+
+  tenant             Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee           Employee                @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  course             TrainingCourse          @relation(fields: [courseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recommendation     TrainingRecommendation? @relation(fields: [recommendationId, employeeId, courseId, tenantId], references: [id, employeeId, courseId, tenantId], onDelete: Restrict)
+  trainingRecord     TrainingRecord?         @relation(fields: [trainingRecordId, employeeId, courseId, tenantId], references: [id, employeeId, courseId, tenantId], onDelete: Restrict)
+  assignedBy         User                    @relation("TrainingAssignmentAssignedBy", fields: [assignedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  cancelledBy        User?                   @relation("TrainingAssignmentCancelledBy", fields: [cancelledById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  developmentActions DevelopmentAction[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@unique([tenantId, recommendationId])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, status, dueDate])
+  @@index([tenantId, courseId, status])
+}
+
+/// A completed course. Recorded (PENDING_VERIFICATION), then verified or rejected by HR; a verified record can later be revoked.
+/// Evidence is metadata only while no StorageProvider is configured (`evidenceStorageKey` stays null).
+model TrainingRecord {
+  id                     String               @id @default(cuid())
+  tenantId               String
+  employeeId             String
+  courseId               String
+  completedAt            DateTime             @db.Timestamptz(3)
+  /// Tenant-local expiry date (completion + course validity, set by the service); null = does not expire.
+  expiresAt              DateTime?            @db.Date
+  status                 TrainingRecordStatus @default(PENDING_VERIFICATION)
+  /// Free reference to the evidence, e.g. a certificate number or the training provider's id.
+  evidenceReference      String?
+  evidenceFileName       String?
+  evidenceContentType    String?
+  evidenceSizeBytes      Int?
+  evidenceChecksumSha256 String?
+  evidenceStorageKey     String?
+  notes                  String?              @db.Text
+  recordedById           String
+  recordedAt             DateTime             @default(now()) @db.Timestamptz(3)
+  verifiedById           String?
+  verifiedAt             DateTime?            @db.Timestamptz(3)
+  /// Why HR rejected or revoked it.
+  decisionReason         String?
+  /// The EmployeeQualification the verification created or renewed (same employee, composite FK).
+  qualificationId        String?
+  createdAt              DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime             @updatedAt @db.Timestamptz(3)
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee      Employee               @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  course        TrainingCourse         @relation(fields: [courseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy    User                   @relation("TrainingRecordRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  verifiedBy    User?                  @relation("TrainingRecordVerifiedBy", fields: [verifiedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  qualification EmployeeQualification? @relation(fields: [qualificationId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  assignments   TrainingAssignment[]
+  challenges    DataChallenge[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@unique([id, employeeId, courseId, tenantId])
+  @@index([tenantId, employeeId, completedAt])
+  @@index([tenantId, status, recordedAt])
+  @@index([tenantId, courseId])
+  @@index([tenantId, expiresAt])
+}
+
+/// A versioned metric definition (spec 10.2). `key` is stable across versions; a version's content is frozen once it leaves
+/// DRAFT (trigger). Publishing goes through the approval engine (subject PERFORMANCE_METRIC_DEFINITION; PENDING_APPROVAL and
+/// PUBLISHED need `approvalRequestId`). One PUBLISHED version per key. Employees see values of PUBLISHED definitions only.
+model PerformanceMetricDefinition {
+  id                String                  @id @default(cuid())
+  tenantId          String
+  /// Lowercase key, e.g. "on_time_arrival" (CHECK performance_metric_definition_key_format).
+  key               String
+  version           Int                     @default(1)
+  kind              PerformanceMetricKind
+  /// Fixed by the kind (CHECK performance_metric_definition_kind_dimension).
+  dimension         PerformanceDimension
+  name              String
+  description       String?                 @db.Text
+  /// Kind-specific parameters (e.g. the repeat-visit window in days); documented per kind, validated by the service. No weights.
+  params            Json                    @default("{}")
+  /// Below this sample a value is shown as "not enough data".
+  minSample         Int
+  status            PerformanceMetricStatus @default(DRAFT)
+  approvalRequestId String?
+  createdById       String?
+  submittedAt       DateTime?               @db.Timestamptz(3)
+  publishedAt       DateTime?               @db.Timestamptz(3)
+  retiredAt         DateTime?               @db.Timestamptz(3)
+  createdAt         DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                @updatedAt @db.Timestamptz(3)
+
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  approvalRequest  ApprovalRequest?         @relation("PerformanceMetricDefinitionApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy        User?                    @relation("PerformanceMetricDefinitionCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  values           PerformanceMetricValue[]
+  developmentGoals DevelopmentGoal[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, key, version])
+  @@index([tenantId, status])
+}
+
+/// One computed value: one definition version x employee x period x job type OR job category (none only for TRAINING_PROGRESS,
+/// which is not job-based). Append-only snapshots: recomputation inserts a new row and the newest `computedAt` is current.
+/// `evidenceIds` are the ids of the underlying records (their table is fixed by the kind, docs/ERD.md). `enoughData` =
+/// sampleSize >= the definition's minSample (checked on insert).
+model PerformanceMetricValue {
+  id           String   @id @default(cuid())
+  tenantId     String
+  definitionId String
+  employeeId   String
+  /// The employee's primary org unit when computed (snapshot, for the team comparison and scope filters).
+  orgUnitId    String?
+  /// Tenant-local period [periodStart, periodEnd).
+  periodStart  DateTime @db.Date
+  periodEnd    DateTime @db.Date
+  jobTypeId    String?
+  jobCategory  String?
+  numerator    Int
+  /// The opportunities (spec 10.2 "available opportunities").
+  denominator  Int
+  sampleSize   Int
+  enoughData   Boolean
+  evidenceIds  String[] @default([])
+  computedAt   DateTime @default(now()) @db.Timestamptz(3)
+  computedById String?
+  systemActor  String?
+
+  tenant       Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  definition   PerformanceMetricDefinition @relation(fields: [definitionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee     Employee                    @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit      OrgUnit?                    @relation("PerformanceMetricValueOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  jobType      JobType?                    @relation(fields: [jobTypeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  computedBy   User?                       @relation("PerformanceMetricValueComputedBy", fields: [computedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  contextNotes MetricContextNote[]
+  coaching     CoachingRecord[]
+  challenges   DataChallenge[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@index([tenantId, employeeId, definitionId, periodStart, computedAt])
+  @@index([tenantId, definitionId, periodStart, jobTypeId], map: "PerformanceMetricValue_team_job_type_idx")
+  @@index([tenantId, definitionId, periodStart, jobCategory], map: "PerformanceMetricValue_team_job_category_idx")
+  @@index([tenantId, orgUnitId, definitionId, periodStart])
+}
+
+/// A manager's context on a metric value or on a period of an employee (spec 10.4 "managers must be able to add context").
+/// What a note says and what it is about never change (trigger); only sharing and archiving do.
+model MetricContextNote {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  employeeId         String
+  /// Set = context on that value (same employee, composite FK); null = context on the period below.
+  metricValueId      String?
+  periodStart        DateTime? @db.Date
+  periodEnd          DateTime? @db.Date
+  body               String    @db.Text
+  authorId           String
+  sharedWithEmployee Boolean   @default(false)
+  sharedAt           DateTime? @db.Timestamptz(3)
+  archivedAt         DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee    Employee                @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  metricValue PerformanceMetricValue? @relation(fields: [metricValueId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  author      User                    @relation("MetricContextNoteAuthor", fields: [authorId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, metricValueId])
+  @@index([tenantId, employeeId, createdAt])
+}
+
+/// A coaching note (spec 10.4). Sensitive (spec 22.2): visible to the employee's management chain and HR; the employee sees it
+/// only once shared. Never deleted (archived instead).
+model CoachingRecord {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  employeeId         String
+  authorId           String
+  /// When the coaching conversation took place.
+  occurredAt         DateTime  @default(now()) @db.Timestamptz(3)
+  body               String    @db.Text
+  /// Optional metric value the note is about (same employee, composite FK).
+  metricValueId      String?
+  sharedWithEmployee Boolean   @default(false)
+  sharedAt           DateTime? @db.Timestamptz(3)
+  archivedAt         DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant             Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee           Employee                @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  author             User                    @relation("CoachingRecordAuthor", fields: [authorId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  metricValue        PerformanceMetricValue? @relation(fields: [metricValueId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  developmentActions DevelopmentAction[]
+  challenges         DataChallenge[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@index([tenantId, employeeId, occurredAt])
+  @@index([tenantId, authorId, occurredAt])
+}
+
+/// A development plan for one employee and period (spec 10.4, 5.4, 5.8), owned by a manager or HR person. The employee sees
+/// their own plans once they leave DRAFT. Goals and actions hang off it; reviews are append-only history.
+model DevelopmentPlan {
+  id           String                @id @default(cuid())
+  tenantId     String
+  employeeId   String
+  ownerId      String
+  title        String
+  summary      String?               @db.Text
+  status       DevelopmentPlanStatus @default(DRAFT)
+  periodStart  DateTime              @db.Date
+  periodEnd    DateTime              @db.Date
+  createdById  String?
+  activatedAt  DateTime?             @db.Timestamptz(3)
+  completedAt  DateTime?             @db.Timestamptz(3)
+  cancelledAt  DateTime?             @db.Timestamptz(3)
+  cancelReason String?
+  createdAt    DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant    Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee  Employee                @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  owner     User                    @relation("DevelopmentPlanOwner", fields: [ownerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy User?                   @relation("DevelopmentPlanCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  goals     DevelopmentGoal[]
+  actions   DevelopmentAction[]
+  reviews   DevelopmentPlanReview[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, tenantId])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, ownerId, status])
+}
+
+model DevelopmentGoal {
+  id                 String                @id @default(cuid())
+  tenantId           String
+  planId             String
+  title              String
+  description        String?               @db.Text
+  status             DevelopmentGoalStatus @default(OPEN)
+  targetDate         DateTime?             @db.Date
+  /// Optional metric the goal is about (development use only; never a threshold that triggers anything).
+  metricDefinitionId String?
+  position           Int                   @default(0)
+  achievedAt         DateTime?             @db.Timestamptz(3)
+  createdAt          DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant           Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan             DevelopmentPlan              @relation(fields: [planId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  metricDefinition PerformanceMetricDefinition? @relation(fields: [metricDefinitionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  actions          DevelopmentAction[]
+
+  @@unique([id, tenantId])
+  @@unique([id, planId, tenantId])
+  @@index([tenantId, planId, position])
+}
+
+/// One step of a plan: TRAINING links a training assignment, COACHING may link a coaching record, OTHER is free text. The
+/// plan's employee is copied here so the composite FKs keep the linked assignment / coaching record on the same employee.
+model DevelopmentAction {
+  id                   String                  @id @default(cuid())
+  tenantId             String
+  planId               String
+  employeeId           String
+  /// Optional goal of the same plan (composite FK).
+  goalId               String?
+  kind                 DevelopmentActionKind
+  description          String                  @db.Text
+  status               DevelopmentActionStatus @default(PLANNED)
+  dueDate              DateTime?               @db.Date
+  trainingAssignmentId String?
+  coachingRecordId     String?
+  completedAt          DateTime?               @db.Timestamptz(3)
+  createdAt            DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime                @updatedAt @db.Timestamptz(3)
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan               DevelopmentPlan     @relation(fields: [planId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  goal               DevelopmentGoal?    @relation(fields: [goalId, planId, tenantId], references: [id, planId, tenantId], onDelete: Restrict)
+  trainingAssignment TrainingAssignment? @relation(fields: [trainingAssignmentId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  coachingRecord     CoachingRecord?     @relation(fields: [coachingRecordId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, planId])
+  @@index([tenantId, trainingAssignmentId])
+  @@index([tenantId, coachingRecordId])
+}
+
+/// Review history of a plan (spec 10.4 "review history"). Append-only (trigger): a later review is a new row.
+model DevelopmentPlanReview {
+  id         String                @id @default(cuid())
+  tenantId   String
+  planId     String
+  reviewerId String
+  /// The plan's status when it was reviewed (snapshot).
+  planStatus DevelopmentPlanStatus
+  body       String                @db.Text
+  reviewedAt DateTime              @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan     DevelopmentPlan @relation(fields: [planId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reviewer User            @relation("DevelopmentPlanReviewer", fields: [reviewerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, planId, reviewedAt])
+}
+
+/// A deterministic, rule-based training suggestion (spec 5.4 "recommend training"). `reasons` lists every reason shown to the
+/// manager (codes + ids). A person accepts it (-> a TrainingAssignment with source RECOMMENDATION) or dismisses it with a
+/// reason; it is never auto-assigned. One OPEN recommendation per employee and course (partial unique index).
+model TrainingRecommendation {
+  id            String                       @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  courseId      String
+  /// Array of { code, ...ids/numbers }; never free text (docs/ERD.md "Phase 5" contracts).
+  reasons       Json
+  status        TrainingRecommendationStatus @default(OPEN)
+  /// Null = produced by the rule engine without a person (system run).
+  generatedById String?
+  generatedAt   DateTime                     @default(now()) @db.Timestamptz(3)
+  decidedById   String?
+  decidedAt     DateTime?                    @db.Timestamptz(3)
+  dismissReason String?
+  createdAt     DateTime                     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime                     @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee    Employee             @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  course      TrainingCourse       @relation(fields: [courseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  generatedBy User?                @relation("TrainingRecommendationGeneratedBy", fields: [generatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  decidedBy   User?                @relation("TrainingRecommendationDecidedBy", fields: [decidedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignments TrainingAssignment[]
+
+  @@unique([id, tenantId])
+  @@unique([id, employeeId, courseId, tenantId])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, status, generatedAt])
+}
+
+/// An employee's challenge of information about them (spec 10.4, 5.8). Exactly one typed target, matching `targetType`, of
+/// the same employee (composite FKs). A challenge never edits the target: an UPHELD resolution is an annotation or a correction
+/// performed (and audited) by the owning module. One open (OPEN / UNDER_REVIEW) challenge per target (partial unique index).
+model DataChallenge {
+  id                String                   @id @default(cuid())
+  tenantId          String
+  employeeId        String
+  targetType        DataChallengeTargetType
+  metricValueId     String?
+  trainingRecordId  String?
+  coachingRecordId  String?
+  qualificationId   String?
+  statement         String                   @db.Text
+  status            DataChallengeStatus      @default(OPEN)
+  raisedById        String
+  raisedAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  reviewerId        String?
+  assignedAt        DateTime?                @db.Timestamptz(3)
+  resolutionKind    DataChallengeResolution?
+  /// The annotation (UPHELD) or the reason (REJECTED); shown to the employee.
+  resolution        String?                  @db.Text
+  /// Ids and codes only, e.g. the audit event of a correction.
+  resolutionDetails Json?
+  resolvedById      String?
+  resolvedAt        DateTime?                @db.Timestamptz(3)
+  withdrawnAt       DateTime?                @db.Timestamptz(3)
+  createdAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                 @updatedAt @db.Timestamptz(3)
+
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  employee       Employee                @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  metricValue    PerformanceMetricValue? @relation(fields: [metricValueId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  trainingRecord TrainingRecord?         @relation(fields: [trainingRecordId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  coachingRecord CoachingRecord?         @relation(fields: [coachingRecordId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  qualification  EmployeeQualification?  @relation(fields: [qualificationId, employeeId, tenantId], references: [id, employeeId, tenantId], onDelete: Restrict)
+  raisedBy       User                    @relation("DataChallengeRaisedBy", fields: [raisedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  reviewer       User?                   @relation("DataChallengeReviewer", fields: [reviewerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  resolvedBy     User?                   @relation("DataChallengeResolvedBy", fields: [resolvedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, reviewerId, status])
+  @@index([tenantId, status, raisedAt])
+  @@index([tenantId, metricValueId])
+  @@index([tenantId, trainingRecordId])
+  @@index([tenantId, coachingRecordId])
+  @@index([tenantId, qualificationId])
+}
+
+/// Customer feedback about a job, entered manually (no survey provider, spec 28.3). `employeeId` = the employee it is about
+/// (null = about the job / company; then it counts for nobody). A mis-recorded entry is voided (with reason), never edited away.
+model CustomerFeedback {
+  id           String                  @id @default(cuid())
+  tenantId     String
+  jobId        String
+  /// The job's customer (composite FK (jobId, customerId) keeps them consistent).
+  customerId   String
+  employeeId   String?
+  /// 1-5; null = comment only.
+  rating       Int?
+  comment      String?                 @db.Text
+  channel      CustomerFeedbackChannel @default(MANUAL)
+  /// The job's org unit when recorded (scope snapshot).
+  orgUnitId    String?
+  receivedAt   DateTime                @default(now()) @db.Timestamptz(3)
+  recordedById String
+  recordedAt   DateTime                @default(now()) @db.Timestamptz(3)
+  voidedAt     DateTime?               @db.Timestamptz(3)
+  voidedById   String?
+  voidReason   String?
+  createdAt    DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime                @updatedAt @db.Timestamptz(3)
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job        Job       @relation(fields: [jobId, customerId, tenantId], references: [id, customerId, tenantId], onDelete: Restrict)
+  customer   Customer  @relation(fields: [customerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  employee   Employee? @relation(fields: [employeeId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  orgUnit    OrgUnit?  @relation("CustomerFeedbackOrgUnit", fields: [orgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recordedBy User      @relation("CustomerFeedbackRecordedBy", fields: [recordedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  voidedBy   User?     @relation("CustomerFeedbackVoidedBy", fields: [voidedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, customerId, receivedAt])
+  @@index([tenantId, employeeId, receivedAt])
+  @@index([tenantId, orgUnitId, receivedAt])
 }

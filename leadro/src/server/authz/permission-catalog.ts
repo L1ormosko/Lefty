@@ -14,6 +14,8 @@ export const PERMISSION_ACTIONS = [
   "EXPORT",
   "MANAGE",
   "CONFIGURE",
+  // Phase 5: approving the publication of a performance metric definition (not one of spec 4.3's ten; see PERMISSIONS.md 12).
+  "PUBLISH",
 ] as const;
 export type PermissionActionName = (typeof PERMISSION_ACTIONS)[number];
 
@@ -58,7 +60,10 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   ...mod("job_types", "job types and job workflow", ["VIEW", "CONFIGURE"]),
   ...mod("compensation", "compensation", ["VIEW", "CREATE", "EDIT", "APPROVE", "REJECT", "EXPORT", "CONFIGURE"], ["VIEW", "APPROVE", "CONFIGURE"]),
   ...mod("financial_reports", "financial reports", ["VIEW", "EXPORT"], ["VIEW", "EXPORT"]),
-  ...mod("performance", "performance data", ["VIEW", "EXPORT"]),
+  // Performance (spec 10.2-10.4; development use only, spec 10.3). VIEW reads metric values (coaching content around them is the
+  // opt-in `coaching` set), EDIT adds manager context to a value or period, MANAGE runs a computation, CONFIGURE authors metric
+  // definition versions and submits them, PUBLISH is the approver permission of a definition's publication (never its author).
+  ...mod("performance", "performance data", ["VIEW", "EDIT", "EXPORT", "MANAGE", "CONFIGURE", "PUBLISH"], ["EXPORT", "PUBLISH"]),
 
   // ── Phase 3: field operations and recovery ──
   // Shifts (spec 8.1): CREATE starts a shift, EDIT ends/corrects one (technicians: own shift, OWN scope),
@@ -97,6 +102,23 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   // Approval engine (spec 21.3). Who may DECIDE a request is the policy's `approverPermission`, not this module:
   // VIEW = the approver queue and own requests, MANAGE = see every request in scope and cancel others', CONFIGURE = policies.
   ...mod("approvals", "approval requests and policies", ["VIEW", "MANAGE", "CONFIGURE"], ["CONFIGURE"]),
+
+  // ── Phase 5: workforce intelligence (spec Part 10, 5.4, 5.8, 5.11, 22.2) ──
+  // Employees read their own training, plans, shared coaching notes and challenges through self-service paths (`/api/v1/me/*`),
+  // which filter on the caller; these module permissions are for the people who manage others.
+  // Training: VIEW records / assignments, CREATE records a completion, EDIT changes an assignment (due date, cancel), ASSIGN
+  // assigns a course (also: accepts or dismisses a training recommendation), APPROVE verifies / rejects / revokes a record (HR),
+  // MANAGE = the course catalog.
+  ...mod("training", "training courses, assignments and records", ["VIEW", "CREATE", "EDIT", "ASSIGN", "APPROVE", "MANAGE"]),
+  // Development plans with goals, actions and review history. EDIT includes adding a review entry.
+  ...mod("development_plans", "development plans", ["VIEW", "CREATE", "EDIT"], ["VIEW"]),
+  // Coaching notes (sensitive, spec 22.2): the employee's management chain and HR.
+  ...mod("coaching", "coaching notes", ["VIEW", "CREATE", "EDIT"], ["VIEW"]),
+  // Employee challenges of their own data (raised through self-service): ASSIGN gives one to a reviewer, APPROVE upholds it,
+  // REJECT rejects it with a reason. Nobody reviews their own challenge (service check + CHECK constraint).
+  ...mod("data_challenges", "employee data challenges", ["VIEW", "ASSIGN", "APPROVE", "REJECT"], ["VIEW"]),
+  // Manually recorded customer feedback (no survey provider). EDIT voids a mis-recorded entry.
+  ...mod("customer_feedback", "customer feedback", ["VIEW", "CREATE", "EDIT"]),
 ];
 
 export const permissionKey = (p: Pick<PermissionDef, "module" | "action">) =>
@@ -143,6 +165,13 @@ export const SENSITIVE_FIELD_CATEGORIES = [
     module: "materials",
     tag: "cost",
     description: "Unit costs and cost history of materials (spec 11.4); a plain materials.view grant never reveals them",
+  },
+  {
+    key: "performance.coaching_fields",
+    module: "performance",
+    tag: "coaching",
+    description:
+      "Coaching content around performance data (manager context notes; coaching notes, plans and challenges inside development read models, spec 10.4, 22.2); a plain performance.view grant never reveals it",
   },
   {
     key: "location.coordinate_fields",

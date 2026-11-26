@@ -22,7 +22,7 @@ export const MATERIAL_SPECS: MaterialSpec[] = [
 
 export interface ApprovalPolicySpec {
   code: string;
-  subjectType: "MATERIAL_COST_CHANGE" | "ADJUSTMENT" | "REFUND" | "CHARGEBACK_WRITE_OFF" | "HIGH_VALUE_DISCOUNT";
+  subjectType: "MATERIAL_COST_CHANGE" | "ADJUSTMENT" | "REFUND" | "CHARGEBACK_WRITE_OFF" | "HIGH_VALUE_DISCOUNT" | "PERFORMANCE_METRIC_DEFINITION";
   name: string;
   minAmountMinor: bigint;
   maxAmountMinor: bigint | null;
@@ -105,5 +105,17 @@ export const APPROVAL_POLICY_SPECS: ApprovalPolicySpec[] = [
     requiredApprovals: 1,
     approverPermission: "jobs.approve",
     expiresAfterHours: 72,
+  },
+  // Phase 5: publishing a performance metric definition version (spec 10.2). No amount: one approval by a holder of
+  // `performance.publish` who is not the author (separation of duties, approval engine).
+  {
+    code: "performance_metric_publication",
+    subjectType: "PERFORMANCE_METRIC_DEFINITION",
+    name: "Performance metric publication",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "performance.publish",
+    expiresAfterHours: 336,
   },
 ];

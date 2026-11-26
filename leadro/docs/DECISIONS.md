@@ -1231,3 +1231,96 @@ Module `src/server/finance-adjustments` (one module: the three record types shar
   for a viewer without the `materials.view` `cost` set (`SUBJECT_MONEY_FIELD_SET` in `approvals/access.ts`); such an approver still decides.
 - **Deferred to the owner / later**: policy configuration is not itself approved (P4-R4); the charges-to-confirm queue filters the outcome
   `financial` set after paging (P4-R6, short pages, nothing leaked); unit managers may record the payout of an approved refund (P4-R7).
+## Phase 5 Task 1: schema, permission catalog, role templates
+
+- **One migration** `20261126100000_phase5_workforce`: 14 tables (TrainingCourse, TrainingAssignment, TrainingRecord,
+  PerformanceMetricDefinition, PerformanceMetricValue, MetricContextNote, CoachingRecord, DevelopmentPlan, DevelopmentGoal,
+  DevelopmentAction, DevelopmentPlanReview, TrainingRecommendation, DataChallenge, CustomerFeedback), RLS DO-block, CHECKs, status machines,
+  frozen columns, no-delete, append-only (metric values, plan reviews), a metric value guard and a definition content guard. Existing tables
+  gain back-relations, `EmployeeQualification @@unique([id, employeeId, tenantId])`, `PermissionAction.PUBLISH` and
+  `ApprovalSubjectType.PERFORMANCE_METRIC_DEFINITION` (`ALTER TYPE ... ADD VALUE`; the migration does not use the new values itself, so
+  it runs inside one transaction). Developed against a private `leadro_p5t1_test` database; the shared `leadro` / `leadro_test`
+  databases were NOT migrated by this task (the next `prisma migrate deploy` / test run applies it).
+- **Review history** (Task 5 "append-only review entries") got its own table, `DevelopmentPlanReview`, because the plan brief lists no
+  table for it; status changes of all other Phase 5 records are audit events (same as Phase 4).
+- **Employee-safe composite FKs**: links between records about a person carry `employeeId` in the FK (metric value <- context note /
+  coaching / challenge; training record / qualification <- challenge; plan + training assignment + coaching record <- plan action;
+  recommendation and fulfilling record <- assignment, also by `courseId`). `DevelopmentAction.employeeId` duplicates the plan's employee
+  only to make this possible. CustomerFeedback references `(jobId, customerId)` so the customer is the job's.
+- **Typed challenge targets** instead of a polymorphic `targetId`: one nullable FK column per target type plus a CHECK that exactly the
+  declared one is set (FinanceReviewFlag pattern). Adding a target type later is a migration (new column), on purpose.
+- **Values carry no kind**: the insert guard looks the definition up for the kind-dependent rules (breakdown, numerator range,
+  `enoughData`). Values of DRAFT definitions may exist (a manager previews a definition before submitting it); who sees which values is a
+  service rule (employees: PUBLISHED only).
+- **Period** = tenant-local `DATE` pair `[periodStart, periodEnd)`, like qualification expiry dates; the computation converts.
+- **TRAINING_PROGRESS** is the only kind without a job type / category breakdown (it is not job-based); every other kind needs exactly one.
+- **CUSTOMER_FEEDBACK_AVERAGE** stores the sum of ratings over the number of ratings (no average column, no float); the guard bounds the
+  sum to 1-5 times the count.
+- **Training record decision columns**: the brief's `verifiedBy` is used for the HR decision either way (verify or reject); a revocation
+  keeps the original verifier, the revoker is in the audit event. The record's completion and evidence description are frozen; only the
+  storage key may be set later (no StorageProvider today).
+- **`expiresAt >= completed date`** is checked as `>= UTC date - 1` because the tenant-local date of a US tenant can be one day behind UTC.
+- **Recommendation decided by the system**: `decidedById` may be null on a decided recommendation, so Task 5 can dismiss an OPEN one whose
+  reason no longer holds (e.g. the certification was renewed) with a reason and the system actor in the audit.
+- **Field set** `performance.coaching_fields` (module `performance`, tag `coaching`): classifies `MetricContextNote.body` (field map
+  `METRIC_CONTEXT_NOTE_FIELD_MAP`) and is what Task 6's development read models must require before embedding coaching notes, plans and
+  challenges. Metric values are all `base` (`PERFORMANCE_METRIC_VALUE_FIELD_MAP`). The coaching, plan and challenge modules' own
+  endpoints are gated by `coaching.*`, `development_plans.*`, `data_challenges.*` (their `view` is a sensitive permission).
+- **New action `PUBLISH`** (the brief's "extend performance with CONFIGURE, PUBLISH"): added to `PERMISSION_ACTIONS`, the Prisma enum
+  and the i18n catalogs (`PERMISSION_ACTION.PUBLISH`). `performance.publish` is the approver permission of the seeded approval policy
+  `performance_metric_publication` (one approval, 336 h expiry; `prisma/seed/finance-specs.ts`, so every seeded tenant has it).
+- **Labels**: every new enum value has an i18n key in en-US, es-US and he-IL (`TRAINING.*`, `PERFORMANCE.*`, `DEVELOPMENT.*`,
+  `DATA_CHALLENGE.*`, `CUSTOMER_FEEDBACK.CHANNEL.*`, `APPROVAL.SUBJECT.PERFORMANCE_METRIC_DEFINITION`, `PERFORMANCE.NOT_ENOUGH_DATA`),
+  pinned by `tests/authz/workforce-catalog.test.ts`.
+
+### Contracts for Phase 5 Tasks 2-6 (no further migration expected)
+
+- **Task 2 (training)**: assignment ASSIGNED -> IN_PROGRESS -> COMPLETED (set `completedAt` + `trainingRecordId`) | CANCELLED (`cancelledAt`
+  + `cancelReason` + `cancelledById`); one open per employee + course (`training_assignment_one_open`, catch the unique violation as a 409).
+  Record PENDING_VERIFICATION -> VERIFIED | REJECTED (`verifiedById`, `verifiedAt`; `decisionReason` for REJECTED) -> REVOKED (reason).
+  On VERIFIED of a course with `certificationId`, create / renew the TRAINING `EmployeeQualification` through the qualifications module
+  and store its id in `qualificationId`; compute `expiresAt` from `validityDays` in the tenant's time zone.
+- **Task 3 (performance)**: kinds, dimensions and the proposed formulas are in ERD.md "Phase 5"; Task 3 decides the exact ones.
+  Publishing: create the version (DRAFT), submit = approval request (subject `PERFORMANCE_METRIC_DEFINITION`, author in
+  `requestedById`) + status PENDING_APPROVAL + `submittedAt` + `approvalRequestId`; a "no policy" answer from the engine must be refused
+  (the CHECK `performance_metric_definition_needs_approval` makes skipping impossible). On approval: retire the PUBLISHED version of the
+  key first, then publish (`publishedAt`). On rejection / cancellation / expiry: back to DRAFT. Values: insert only; set `enoughData`
+  exactly as `sampleSize >= minSample`; one actor (`computedById` XOR `system:<name>`).
+- **Task 4 (coaching, notes, challenges)**: context notes are immutable except sharing / archiving; sharing sets `sharedAt`. Challenge:
+  OPEN -> UNDER_REVIEW (`reviewerId`, `assignedAt`; never the raiser) -> UPHELD (`resolutionKind`, `resolution`, `resolvedById`,
+  `resolvedAt`) | REJECTED (`resolution` = reason); WITHDRAWN (`withdrawnAt`) from OPEN or UNDER_REVIEW. A CORRECTED resolution means the
+  owning module made the change with its own audit; put that audit event id in `resolutionDetails`.
+- **Task 5 (plans, recommendations)**: plan DRAFT -> ACTIVE (`activatedAt`) -> COMPLETED (`completedAt`) | CANCELLED (reason); reviews are
+  inserts into `DevelopmentPlanReview`. Recommendation OPEN -> ACCEPTED (create the assignment with `source = RECOMMENDATION` and
+  `recommendationId` in the same transaction) | DISMISSED (`dismissReason`, `decidedAt`); one OPEN per employee + course.
+- **Task 6 (read models)**: require the `coaching` field set (`canViewFields(subject, "performance.coaching_fields", ref)` or the
+  decision's `fieldSets`) before returning coaching notes, context note text, plans or challenges from a performance read model.
+- **Customer feedback** (Task 6 "recording by Customer Relations"): copy the job's `customerId` and `orgUnitId`; voiding sets
+  `voidedAt`, `voidedById`, `voidReason` together, once.
+
+### Rulings for the improvement round
+
+These are manager-level choices made to keep moving; each is one template line or one CHECK to change.
+
+1. **COO sees metric values without the coaching set** and holds no coaching / plan / challenge permission (spec 4.5 "Performance: View";
+   the global constraint scopes coaching to the management chain + HR). Alternative: give the COO the `coaching` set tenant-wide.
+2. **Who authors and who publishes metric definitions**: HR and the Owner author (`performance.configure`); only the Owner publishes
+   (`performance.publish`). A tenant whose Owner is also the only author cannot publish until it grants `performance.publish` to someone
+   else (separation of duties). Alternative: COO or HR as publisher.
+3. **Metric publication always needs an approval request** (CHECK), unlike Phase 4 subjects where "no policy" means "apply directly".
+4. **Challenges are decided by HR (and the Owner)**; managers only route them to a reviewer. Alternative: let the management chain uphold /
+   reject too (the reviewer can never be the raiser either way).
+5. **Managers may run a computation** (`performance.manage`, scoped) but cannot export (`performance.export` stays Owner-only, sensitive).
+6. **Team Leader** coaches (performance view + edit with the coaching set, coaching notes) and reads plans and training, but does not assign
+   training, create plans or see challenges ("read-mostly", derived from City Manager).
+7. **Lead Operations** gets the coaching set and coaching notes / training status for the `lead_team` set, which no service resolves yet,
+   so these grants match nothing until one does (fail closed), like their existing `employees` and `performance` grants.
+8. **Context notes default to not shared** with the employee (`sharedWithEmployee = false`), like coaching notes. Alternative: context on
+   the employee's own metrics is always visible to them.
+9. **Technician holds `training.view` (OWN)** in addition to self-service; coaching, plans and challenges are self-service only.
+10. **Customer feedback** is about one employee or nobody (`employeeId` null = about the job / company, counted for no one); it is never
+    edited, only voided once with a reason. No feedback on jobs of another customer (composite FK).
+11. **Records are never deleted** (archive / cancel / void / retire instead), including coaching notes and DRAFT plans' goals and actions.
+    A legal erasure request would need a dedicated, audited purge path (not built).
+12. **Dimensions WORK_QUALITY and PRODUCTIVITY** exist in the enum (spec 10.2 lists them) but no kind measures them yet: no defined data
+    source, and no invented formula.
