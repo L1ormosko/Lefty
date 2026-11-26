@@ -20,6 +20,8 @@ export {
 } from "./provider";
 export type { ParseResult, PaymentProvider, ProviderEvent, VerifyRequest } from "./provider";
 export { INTAKE_SYSTEM_ACTOR, receiveProviderEvent } from "./intake";
+export { registerIntakeEventHandler } from "./intake-handlers";
+export type { IntakeEventHandler, IntakeEventInput, IntakeVerdict } from "./intake-handlers";
 export type { IntakeRequest, IntakeResult } from "./intake";
 export { listIntakeEvents, listPaymentProviders } from "./intake-read";
 export type { IntakeEventView } from "./intake-read";

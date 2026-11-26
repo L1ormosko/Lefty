@@ -17,6 +17,8 @@ export const ledgerKeys = {
   paymentVoided: (paymentId: string): string => `payment:${paymentId}:void`,
   /** The REVERSAL of any entry (an entry is reversed at most once). */
   reversal: (entryId: string): string => `reversal:${entryId}`,
+  /** The MATERIAL_COST entry of a costed material usage line (once per line: the snapshot is frozen). */
+  materialCost: (usageId: string): string => `MATERIAL_COST:${usageId}`,
 } as const;
 
 /**

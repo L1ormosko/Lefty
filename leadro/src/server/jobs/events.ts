@@ -17,8 +17,8 @@ export async function recordStatusHistory(
   tenantId: string,
   jobId: string,
   change: { from: JobStatusValue | null; to: JobStatusValue; actor: TrailActor; reason?: string | null; occurredAt?: Date },
-): Promise<void> {
-  await tx.jobStatusHistory.create({
+): Promise<string> {
+  const row = await tx.jobStatusHistory.create({
     data: {
       tenantId,
       jobId,
@@ -29,7 +29,9 @@ export async function recordStatusHistory(
       reason: change.reason ?? null,
       ...(change.occurredAt ? { occurredAt: change.occurredAt } : {}),
     },
+    select: { id: true },
   });
+  return row.id;
 }
 
 /**

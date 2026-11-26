@@ -5,6 +5,7 @@ import { enforceInTx, projectFields } from "@/server/authz";
 import { ForbiddenError, NotFoundError, ValidationError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant } from "@/server/db";
 import { jobResourceRef, lockJob, recordJobEvent } from "@/server/jobs";
+import { publishOutcomeCorrected } from "./events";
 import { decisionHoldsFinancial } from "./financial";
 import { OUTCOME_FIELD_MAP, OUTCOME_FINANCIAL_KEYS, outcomeRowSelect } from "./fields";
 import type { CorrectOutcomeInput } from "./schemas";
@@ -75,7 +76,8 @@ export async function correctJobOutcome(actor: Actor, ctx: RequestContext, outco
       newValue: { changedFields: changedKeys, values: newValues },
       reason,
     });
-    await recordJobEvent(tx, tenantId, found.jobId, { type: "job.outcome_corrected", actor, payload: { outcomeId, changedFields: changedKeys } });
+    const jobEventId = await recordJobEvent(tx, tenantId, found.jobId, { type: "job.outcome_corrected", actor, payload: { outcomeId, changedFields: changedKeys } });
+    await publishOutcomeCorrected(tx, { tenantId, jobId: found.jobId, outcomeId, jobEventId, changedFields: changedKeys, actorUserId: actor.userId });
     return projectFields(updated, decision, OUTCOME_FIELD_MAP);
   });
 }

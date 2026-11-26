@@ -4,7 +4,10 @@ import { recordAudit } from "@/server/audit";
 import { enforceInTx, type ResourceRef } from "@/server/authz";
 import { ConflictError, NotFoundError, type Actor, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
+import { FINANCE_REVIEW_SYSTEM_ACTOR, raiseFinanceReviewFlagInTx, reviewFlagKeys } from "@/server/finance-adjustments";
 import { jobResourceRef } from "@/server/jobs";
+import { ledgerKeys, loadFinanceJob, postLedgerEntryInTx } from "@/server/ledger";
+import { REVIEW_FLAG_REASONS } from "@/lib/finance-correction-rules";
 import { enforceCostFieldSet, lockMaterial } from "./access";
 import { materialAuditFields } from "./cost-versions";
 import { costVersionRowSelect, usageCostView, usageRowSelect, type UsageRow } from "./fields";
@@ -106,6 +109,7 @@ async function costLineInTx(tx: TenantTx, ctx: RequestContext, tenantId: string,
   });
   if (claim.count !== 1) return { usageId: usage.id, status: "SKIPPED", code: "material.usage_already_costed" };
   const costed = await tx.jobMaterialUsage.findFirstOrThrow({ where: { id: usage.id, tenantId }, select: usageRowSelect });
+  const ledgerEntryId = await postMaterialCostInTx(tx, ctx, tenantId, usage, extended, version.currency);
   await recordAudit(tx, {
     ...materialAuditFields(tenantId, ctx),
     action: "job_material.costed",
@@ -120,9 +124,50 @@ async function costLineInTx(tx: TenantTx, ctx: RequestContext, tenantId: string,
       unitCostMinor: version.unitCostMinor,
       extendedCostMinor: extended,
       currency: version.currency,
+      ledgerEntryId,
     },
   });
   return { usageId: usage.id, status: "COSTED", line: usageCostView(costed) };
+}
+
+/**
+ * Posts the MATERIAL_COST ledger entry of a line just costed (docs/DECISIONS.md Phase 4 Task 5): minus the extended cost,
+ * key `MATERIAL_COST:<usageId>` (once per line: the snapshot is frozen), `materialUsageId` set, at the usage's `occurredAt`.
+ * The ledger keeps material cost in its own bucket (never part of what the customer owes). A zero cost posts nothing (the
+ * ledger has no zero entries). A cost in another currency than the job's cannot be posted (the ledger is per job currency):
+ * the line stays costed and a `material_cost.currency_mismatch` finance review flag asks a person to look at it.
+ * @returns the entry id, or null when nothing was posted.
+ */
+async function postMaterialCostInTx(tx: TenantTx, ctx: RequestContext, tenantId: string, usage: UsageRow, extendedCostMinor: bigint, currency: string): Promise<string | null> {
+  if (extendedCostMinor === 0n) return null;
+  const job = await loadFinanceJob(tx, tenantId, usage.jobId);
+  if (!job) return null;
+  if (job.currency !== currency) {
+    await raiseFinanceReviewFlagInTx(tx, {
+      tenantId,
+      reasonCode: REVIEW_FLAG_REASONS.materialCostCurrencyMismatch,
+      idempotencyKey: reviewFlagKeys.materialCostCurrency(usage.id),
+      refs: { jobId: job.id, customerId: job.customerId },
+      orgUnitId: job.orgUnitId,
+      details: { materialUsageId: usage.id, extendedCostMinor, costCurrency: currency, jobCurrency: job.currency },
+      raisedBy: { system: FINANCE_REVIEW_SYSTEM_ACTOR },
+      ctx,
+    });
+    return null;
+  }
+  const { entry } = await postLedgerEntryInTx(tx, {
+    tenantId,
+    type: "MATERIAL_COST",
+    source: "MATERIAL_USAGE",
+    amountMinor: -extendedCostMinor,
+    currency,
+    job,
+    refs: { materialUsageId: usage.id },
+    idempotencyKey: ledgerKeys.materialCost(usage.id),
+    actor: ctx.actor ? { userId: ctx.actor.userId } : { system: FINANCE_REVIEW_SYSTEM_ACTOR },
+    occurredAt: usage.occurredAt,
+  });
+  return entry.id;
 }
 
 function skipError(code: CostingSkipCode): ConflictError {

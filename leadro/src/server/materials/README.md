@@ -25,5 +25,8 @@ Invariants:
    org unit), so approvers need the policy's permission (default `materials.approve`) at TENANT scope.
 5. **Access.** Catalog read = `materials.view` capability; catalog writes = TENANT-scoped `materials.create/edit/archive`. Every cost (fields,
    history, proposing, job costing) needs the `cost` field set; job costing also `jobs.view` over the job (404 outside scope).
-6. **Audit**: `material.create/update/archive`, `material_cost_version.propose/approved/rejected/cancelled`, `job_material.costed`, all in
+6. **Ledger** (Task 5): costing a line posts its MATERIAL_COST entry (minus the extended cost, key `MATERIAL_COST:<usageId>`,
+   `materialUsageId`, at the usage's `occurredAt`) in the costing transaction; a zero cost posts nothing; a cost in another currency than the
+   job's is not posted and raises a `material_cost.currency_mismatch` finance review flag.
+7. **Audit**: `material.create/update/archive`, `material_cost_version.propose/approved/rejected/cancelled`, `job_material.costed`, all in
    the writing transaction.

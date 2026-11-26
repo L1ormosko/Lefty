@@ -5,6 +5,7 @@ import { recordAudit } from "@/server/audit";
 import { ConflictError, UnauthenticatedError } from "@/server/core";
 import { prisma, withTenant, type TenantTx } from "@/server/db";
 import { loadFinanceJob, paymentKeys } from "@/server/ledger";
+import { intakeEventHandler } from "./intake-handlers";
 import { getPaymentProvider, providerNotConfigured, type PaymentProvider, type ProviderEvent } from "./provider";
 import { createPaymentIdempotently, postPaymentReceivedInTx } from "./store";
 
@@ -67,15 +68,40 @@ function invalidFields(event: ProviderEvent): boolean {
   const text = (value: string, max: number) => value.trim().length > 0 && value.length <= max;
   if (!text(event.externalId, 200) || !text(event.eventType, 100)) return true;
   if (event.occurredAt && Number.isNaN(event.occurredAt.getTime())) return true;
+  const badMoney = (amountMinor: bigint, currency: string) => amountMinor <= 0n || amountMinor > MAX_MONEY_MINOR || !currencyCodeSchema.safeParse(currency).success;
   const payment = event.payment;
-  if (!payment) return false;
-  return (
-    !text(payment.jobId, 64) ||
-    !text(payment.providerRef, 200) ||
-    payment.amountMinor <= 0n ||
-    payment.amountMinor > MAX_MONEY_MINOR ||
-    !currencyCodeSchema.safeParse(payment.currency).success
-  );
+  if (payment && (!text(payment.jobId, 64) || !text(payment.providerRef, 200) || badMoney(payment.amountMinor, payment.currency))) return true;
+  const chargeback = event.chargeback;
+  if (
+    chargeback &&
+    (!text(chargeback.paymentProviderRef, 200) ||
+      !text(chargeback.chargebackRef, 200) ||
+      (chargeback.reasonCode !== undefined && !text(chargeback.reasonCode, 50)) ||
+      badMoney(chargeback.amountMinor, chargeback.currency))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** The normalized fields stored on the event (ids, codes, amounts as decimal strings); never the raw provider payload. */
+function parsedFields(incoming: ProviderEvent): Prisma.InputJsonObject {
+  if (incoming.payment) {
+    const p = incoming.payment;
+    return { eventType: incoming.eventType, jobId: p.jobId, amountMinor: p.amountMinor.toString(), currency: p.currency, providerRef: p.providerRef, method: p.method ?? null };
+  }
+  if (incoming.chargeback) {
+    const c = incoming.chargeback;
+    return {
+      eventType: incoming.eventType,
+      paymentProviderRef: c.paymentProviderRef,
+      chargebackRef: c.chargebackRef,
+      amountMinor: c.amountMinor.toString(),
+      currency: c.currency,
+      reasonCode: c.reasonCode ?? null,
+    };
+  }
+  return { eventType: incoming.eventType };
 }
 
 /** Receives one delivery; see the module comment for the order of checks. */
@@ -138,12 +164,10 @@ export async function receiveProviderEvent(request: IntakeRequest): Promise<Inta
       payloadHash,
       signatureValid: true,
       occurredAt: incoming.occurredAt ?? null,
-      amountMinor: incoming.payment?.amountMinor ?? null,
-      currency: incoming.payment?.currency ?? null,
+      amountMinor: incoming.payment?.amountMinor ?? incoming.chargeback?.amountMinor ?? null,
+      currency: incoming.payment?.currency ?? incoming.chargeback?.currency ?? null,
       // Normalized fields only, amounts as decimal strings; never the raw provider payload (it may carry card data).
-      parsed: incoming.payment
-        ? { eventType: incoming.eventType, jobId: incoming.payment.jobId, amountMinor: incoming.payment.amountMinor.toString(), currency: incoming.payment.currency, providerRef: incoming.payment.providerRef, method: incoming.payment.method ?? null }
-        : { eventType: incoming.eventType },
+      parsed: parsedFields(incoming),
     }),
   );
   if (!inserted && event.payloadHash !== payloadHash) {
@@ -185,8 +209,20 @@ async function processEvent(tx: TenantTx, eventId: string, incoming: ProviderEve
     return toResult(updated, false);
   };
 
+  if (incoming.eventType !== "payment.received") {
+    // Other event types belong to the module that registered them (chargebacks: the adjustments module).
+    const handler = intakeEventHandler(incoming.eventType);
+    if (!handler) return finish("REJECTED", { rejectionCode: "unsupported_event_type" });
+    const verdict = await handler(tx, { event, incoming, providerKey });
+    return finish(verdict.status, {
+      rejectionCode: verdict.rejectionCode ?? null,
+      jobId: verdict.jobId ?? null,
+      paymentId: verdict.paymentId ?? null,
+      duplicateOfId: verdict.duplicateOfId ?? null,
+    });
+  }
   const payment = incoming.payment;
-  if (incoming.eventType !== "payment.received" || !payment) return finish("REJECTED", { rejectionCode: "unsupported_event_type" });
+  if (!payment) return finish("REJECTED", { rejectionCode: "unsupported_event_type" });
   const job = await loadFinanceJob(tx, event.tenantId, payment.jobId);
   if (!job) return finish("UNMATCHED", { rejectionCode: "unknown_job" });
   if (payment.currency !== job.currency) return finish("REJECTED", { rejectionCode: "currency_mismatch", jobId: job.id });

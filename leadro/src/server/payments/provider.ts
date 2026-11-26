@@ -20,7 +20,7 @@ import type { PaymentMethodValue } from "./schemas";
 export interface ProviderEvent {
   /** The provider's unique id of this EVENT (a retry of the same delivery carries the same id). */
   externalId: string;
-  /** Normalized type; the intake acts on `payment.received` and refuses others as unsupported. */
+  /** Normalized type; the intake acts on `payment.received` and on types with a registered handler, and refuses others. */
   eventType: string;
   occurredAt?: Date;
   payment?: {
@@ -31,6 +31,17 @@ export interface ProviderEvent {
     /** The provider's id of the PAYMENT (unique per provider): a second event about it never posts twice. */
     providerRef: string;
     method?: PaymentMethodValue;
+  };
+  /** A dispute the provider opened against one of its payments (`chargeback.opened`, handled by the adjustments module). */
+  chargeback?: {
+    /** The provider's id of the disputed PAYMENT (the `providerRef` of a LEADRO provider payment). */
+    paymentProviderRef: string;
+    /** The provider's id of the chargeback itself (unique per provider): a second event about it never posts twice. */
+    chargebackRef: string;
+    amountMinor: bigint;
+    currency: string;
+    /** The card network's reason code, when the provider gives one. */
+    reasonCode?: string;
   };
 }
 
