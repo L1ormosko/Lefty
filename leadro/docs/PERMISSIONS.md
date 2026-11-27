@@ -79,6 +79,11 @@ administer the module's structure/lifecycle | CONFIGURE change module settings/p
 | `analytics_financial` | view* (financial dashboards, spec 13.3, 5.7) |
 | `analytics_lead` | view (lead dashboards, spec 5.6) |
 | `reports` | view (run reports, own and role-shared saved views), create (save views; edit / archive own), export* (also needs the dataset's own export permission; audited), manage (share views with roles, archive others' views) |
+| `background_jobs` | view (the tenant's jobs and scheduled definitions; system jobs are never visible to a tenant), manage (retry a dead job, enable / disable the tenant's definitions) |
+| `automation` | view (rules, versions, execution log), configure* (author versions, dry run, activate a low-impact version, retire), approve* (approver of a high-impact activation, never its author) |
+| `integrations` | view (integrations, status, error logs, inbound webhook events; no secret exists to show), configure* (configuration, credentials reference, connection test, enable / disable), manage (replay a failed inbound event, reset an open circuit) |
+| `payroll_exports` | view*, create (prepare a time-and-attendance batch), approve* (approver of a batch's release), export* (download / send an approved batch). Time facts only, never wages (spec 11.9) |
+| `accounting_exports` | view*, create (prepare a journal export), export*, approve* (approver of an account mapping's activation), configure* (author / submit mapping versions) |
 
 `PUBLISH` is an 11th action beyond spec 4.3's ten (Phase 5, see section 12): the approval policy for metric publication names
 `performance.publish` as its approver permission, so publishing is a different person's decision than authoring (`performance.configure`).
@@ -566,3 +571,31 @@ Rules:
   revenue and reconciliation counts, but no costs. The full list per KPI is in `docs/KPI_DEFINITIONS.md`.
 - Tests: `tests/authz/analytics-catalog.test.ts` (catalog, templates, labels), `tests/db/phase6-schema.test.ts` (schema),
   `tests/analytics/*` (KPI catalog, engine access and scope, routes).
+
+## 14. Phase 7: integrations and automation (permission catalog + templates)
+
+| Template | `background_jobs` | `automation` | `integrations` | `payroll_exports` | `accounting_exports` |
+|---|---|---|---|---|---|
+| Owner / CEO | view, manage | view, configure, approve | view, configure, manage | view, create, approve, export | view, create, export, approve, configure |
+| Finance Director | - | - | - | - | view, create, export, configure (mapping proposals) |
+| HR Manager | - | - | - | view, create, export | - |
+| Everyone else | - | - | - | - | - |
+
+Rules:
+- **Configuration is the Owner's** ("Owner/Admin configure"; the template set has no separate Admin role): automation, integrations and
+  the tenant's schedules. A tenant gives a custom admin role these permissions; `*.configure` forces MFA like every configure permission.
+- **Separation of duties through the approval engine** (seeded policies in `prisma/seed/finance-specs.ts`, one approval each, the
+  author / preparer excluded): `automation_rule_activation` (subject `AUTOMATION_RULE_VERSION`, approver `automation.approve`, only for
+  high-impact versions), `accounting_mapping_activation` (`ACCOUNTING_MAPPING`, `accounting_exports.approve`, always),
+  `payroll_export_release` (`PAYROLL_EXPORT`, `payroll_exports.approve`, always). By default only the Owner approves, so Finance proposes
+  mappings and HR prepares payroll batches, and a second person releases them.
+- **Payroll boundary (spec 11.9, 28.4)**: `payroll_exports` covers time and attendance facts only (shifts, approved hours, job counts).
+  No Phase 7 permission reads or writes compensation; Finance holds no payroll export permission and HR no accounting one.
+- **Secrets**: no permission reveals a secret. Integrations store only a credentials reference (`env:` / `vault:`), so
+  `integrations.view` shows the reference name, never a value.
+- **Automation actions run with the rule's authority, not a user's**: Task 3 executes actions through the owning modules' public APIs
+  as a system actor and records the rule version in the audit and in the outbox causation chain. The action registry decides which
+  actions exist: none changes compensation, eligibility or employment status, offers discounts automatically or uses performance data
+  to restrict work (spec 9.6, 10.3).
+- **System jobs** (no tenant) are invisible to every tenant (RLS); only the worker path sees them (DECISIONS "Phase 7 Task 1").
+- Tests: `tests/authz/integrations-catalog.test.ts` (catalog, templates, policies, labels), `tests/db/phase7-schema.test.ts` (schema).

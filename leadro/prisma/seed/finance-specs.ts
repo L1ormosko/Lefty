@@ -22,7 +22,16 @@ export const MATERIAL_SPECS: MaterialSpec[] = [
 
 export interface ApprovalPolicySpec {
   code: string;
-  subjectType: "MATERIAL_COST_CHANGE" | "ADJUSTMENT" | "REFUND" | "CHARGEBACK_WRITE_OFF" | "HIGH_VALUE_DISCOUNT" | "PERFORMANCE_METRIC_DEFINITION";
+  subjectType:
+    | "MATERIAL_COST_CHANGE"
+    | "ADJUSTMENT"
+    | "REFUND"
+    | "CHARGEBACK_WRITE_OFF"
+    | "HIGH_VALUE_DISCOUNT"
+    | "PERFORMANCE_METRIC_DEFINITION"
+    | "AUTOMATION_RULE_VERSION"
+    | "ACCOUNTING_MAPPING"
+    | "PAYROLL_EXPORT";
   name: string;
   minAmountMinor: bigint;
   maxAmountMinor: bigint | null;
@@ -117,5 +126,37 @@ export const APPROVAL_POLICY_SPECS: ApprovalPolicySpec[] = [
     requiredApprovals: 1,
     approverPermission: "performance.publish",
     expiresAfterHours: 336,
+  },
+  // Phase 7: activating a high-impact automation rule version (spec 15.2), activating an accounting mapping version (accounting
+  // treatment is reviewed) and releasing a payroll export batch. One approval each, never by the author / preparer (engine).
+  {
+    code: "automation_rule_activation",
+    subjectType: "AUTOMATION_RULE_VERSION",
+    name: "High-impact automation rule activation",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "automation.approve",
+    expiresAfterHours: 336,
+  },
+  {
+    code: "accounting_mapping_activation",
+    subjectType: "ACCOUNTING_MAPPING",
+    name: "Accounting mapping activation",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "accounting_exports.approve",
+    expiresAfterHours: 336,
+  },
+  {
+    code: "payroll_export_release",
+    subjectType: "PAYROLL_EXPORT",
+    name: "Payroll export release",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "payroll_exports.approve",
+    expiresAfterHours: 168,
   },
 ];

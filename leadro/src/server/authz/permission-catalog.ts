@@ -133,6 +133,25 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   // always audited; MANAGE shares views with roles and archives other people's views in scope. Running a view always uses the
   // runner's own permissions, scope and field sets.
   ...mod("reports", "report builder and saved views", ["VIEW", "CREATE", "EXPORT", "MANAGE"], ["EXPORT"]),
+
+  // ── Phase 7: integrations and automation (spec Part 15, Part 18, 11.9) ──
+  // Background jobs of the tenant (system jobs belong to the platform and are not visible to any tenant): VIEW lists jobs and
+  // scheduled definitions, MANAGE retries a dead job and enables / disables the tenant's scheduled definitions.
+  ...mod("background_jobs", "background jobs and schedules", ["VIEW", "MANAGE"]),
+  // Automation rules (spec 15.1-15.2). VIEW reads rules, versions and the execution log; CONFIGURE authors versions, runs dry runs,
+  // activates a low-impact version and retires versions; APPROVE is the approver permission of a high-impact activation (never its
+  // author, approval engine).
+  ...mod("automation", "automation rules", ["VIEW", "CONFIGURE", "APPROVE"], ["CONFIGURE", "APPROVE"]),
+  // Integrations (spec 18.1): VIEW reads integrations, status, error logs and inbound webhook events (never a secret: only the
+  // credentials reference exists); CONFIGURE creates / edits the configuration and credentials reference, runs connection tests,
+  // enables / disables; MANAGE replays a failed inbound event and resets an open circuit.
+  ...mod("integrations", "integrations and webhooks", ["VIEW", "CONFIGURE", "MANAGE"], ["CONFIGURE"]),
+  // Payroll exports (spec 11.9): time and attendance facts only, never wages. CREATE prepares a batch for a period, APPROVE is the
+  // approver permission of its release, EXPORT downloads / sends an approved batch.
+  ...mod("payroll_exports", "payroll exports (time facts)", ["VIEW", "CREATE", "APPROVE", "EXPORT"], ["VIEW", "APPROVE", "EXPORT"]),
+  // Accounting exports: CONFIGURE authors and submits account mapping versions, APPROVE is the approver permission of a mapping's
+  // activation, CREATE prepares a journal export for a period, EXPORT downloads / sends it.
+  ...mod("accounting_exports", "accounting exports and account mappings", ["VIEW", "CREATE", "EXPORT", "APPROVE", "CONFIGURE"], ["VIEW", "EXPORT", "APPROVE", "CONFIGURE"]),
 ];
 
 export const permissionKey = (p: Pick<PermissionDef, "module" | "action">) =>
