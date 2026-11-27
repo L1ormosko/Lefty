@@ -16,6 +16,7 @@
     "db:migrate:test": "DATABASE_URL=postgresql://leadro:leadro@127.0.0.1:5432/leadro_test prisma migrate deploy",
     "seed": "tsx --env-file=.env prisma/seed.ts",
     "i18n:check": "tsx scripts/i18n-check.ts",
+    "kpi:docs": "tsx scripts/kpi-docs.ts",
     "test:e2e": "playwright test --trace off"
   },
   "dependencies": {
