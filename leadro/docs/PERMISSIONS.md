@@ -556,4 +556,9 @@ Rules:
 - **Finance gains no operational dashboards** (spec 26.3); the COO and managers get no financial dashboard family.
 - **Employee-level analytics** stay in the Phase 5 read models (`performance.*`); no dashboard family ranks individuals (spec 10.3-10.4).
 - **MFA**: a custom role holding `analytics_financial.view` or `reports.export` requires MFA (sensitive permissions).
-- Tests: `tests/authz/analytics-catalog.test.ts` (catalog, templates, labels), `tests/db/phase6-schema.test.ts` (schema).
+- **Per-KPI requirement (Task 2)**: a catalog entry's `access` = any one of its `permissions` + its `fieldSet` + its `sets`; the KPI's
+  scope is the union of the qualifying grants' TENANT / ORG_UNIT scopes (OWN, ASSIGNED, LEGAL_ENTITY cover no KPI). Operational KPIs:
+  `analytics_operational.view`; lead and recovery KPIs: `analytics_lead.view` or `analytics_executive.view`; financial KPIs:
+  `financial_reports.view` (Task 3 may tighten the field set). The full list per KPI is in `docs/KPI_DEFINITIONS.md`.
+- Tests: `tests/authz/analytics-catalog.test.ts` (catalog, templates, labels), `tests/db/phase6-schema.test.ts` (schema),
+  `tests/analytics/*` (KPI catalog, engine access and scope, routes).

@@ -1708,3 +1708,48 @@ These are manager-level choices made to keep moving; each is one template line o
 8. **One org unit per saved view** as the scope filter (FK), not a list.
 9. **Unsharing deletes** the share row (audited) instead of a revoked flag; views themselves are never deleted.
 10. **Failed and refused exports are logged too** (who tried to export what is itself audit-worthy, spec 13.5 / 22.2).
+
+## Phase 6 Task 2: KPI catalog + engine (operational and lead KPIs)
+
+- **Catalog** `src/lib/kpi-catalog.ts` holds ALL Part 13 KPIs now (33 keys): 11 operational (13.2), 6 lead / recovery, 2 executive
+  (`job_volume`, `employee_productivity`) and 14 financial (13.1 / 13.3). Task 3 adds the computation of `employee_productivity` and
+  the financial keys (until then the API lists them with `computed: false` and a value request is `404 "defined but not computed
+  yet"`). `compensation_expense` and `commission_expense` are `BLOCKED_ON_SPEC` (spec 28.4): the engine returns that status with no
+  rows. Spec 13.1 "Revenue" maps to `charged_revenue`; "State / Region comparisons" are `groupBy`, not keys.
+- **Units**: COUNT, RATE, DURATION, MONEY plus **RATIO** (records per distinct contributor) for `jobs_per_employee`: a "rate" is a
+  share, and jobs per employee is not one. DURATION values are the MEDIAN in seconds (robust to a few forgotten jobs).
+- **Access per KPI** = `{ permissions (any one), fieldSet, sets }`; the scope is the UNION of the qualifying grants' scopes. Choices:
+  operational KPIs need `analytics_operational.view`; lead KPIs `analytics_lead.view` OR `analytics_executive.view` (so the COO sees
+  conversion and recovery on the executive dashboard, Task 1 ruling 3); `lead_response_time` operational OR lead; `job_volume` /
+  `employee_productivity` executive OR operational; financial keys `financial_reports.view` with field set `base` (no
+  `financial_reports` grant carries a field condition, so naming `financial` would deny everyone; **Task 3 may tighten**).
+  Only TENANT and ORG_UNIT scopes count: an aggregate over OWN / ASSIGNED / LEGAL_ENTITY scopes is fail-closed (no coverage).
+- **`dispatch_kpis`** = `time_to_assignment`, `time_to_arrival`, `unassigned_jobs`, `dispatch_recommendation_acceptance_rate`,
+  `dispatch_decision_latency` (contract from Task 1), passed as `satisfiedSets` when resolving `analytics_operational.view`.
+- **Dispatch efficiency** = two keys: acceptance rate (first LEAD assignment took the recommendation as proposed,
+  `RECOMMENDATION_APPROVED`, over jobs with a first assignment) and decision latency (recommendation `generatedAt` -> `decidedAt`).
+  Time to assignment stays its own key (job created -> first LEAD assignment), so no number is counted twice under two names.
+- **Anchors**: job volume, cancellation, revisit, time to assignment / arrival and both dispatch keys are COHORTS of jobs created in the
+  period (Task 1 index); completions, job duration and jobs per employee by `completedAt`; leads by `createdAt`; recovery by
+  `outcomeAt`; `unassigned_jobs` is a SNAPSHOT (range ignored). Revisit = `currentVisitNumber > 1` (a follow-up job is a new job, not
+  a revisit). Duplicates are excluded from lead KPIs; conversion = current status `CONVERTED`. Time to arrival ignores
+  `MANAGER_REJECTED` arrivals.
+- **Attribution**: org unit snapshotted on the record; grouping rolls it up the CURRENT org tree (a reparented city reports under its
+  new state). `jobs_per_employee` uses the PRIMARY placement effective at completion (spec 3); the job AND that unit must be in the
+  viewer's scope, otherwise the job is left out (no figure is ever attributed to a unit the viewer cannot see). Group rows carry the
+  org unit id only (no names), so a city manager grouping by STATE learns an ancestor id, never another unit's data.
+- **Engine signature** is `computeKpi(actor, key, query, ctx?)` rather than the brief's `(tx, actor, ...)`: access is resolved on the
+  PRIMARY (a revoked grant applies at once even if a replica lags), data is read in a separate READ ONLY transaction from
+  `withReportingTenant` (replica when `REPORTING_DATABASE_URL` is set; same tenant binding, so RLS applies; the replica must use the
+  same NOBYPASSRLS role). One shared transaction cannot span two databases.
+- **Computation in TypeScript** over the selected rows (Prisma `findMany` with `withinScope`, then `src/lib/kpi-aggregation.ts`)
+  instead of SQL `GROUP BY date_trunc(...)`: keeps every query on the scope helpers, time-zone bucketing on the tested `zoned-time`
+  helpers, and the formulas unit-testable. Bounded: at most 366 days and 50,000 source rows per request (a truthful 400 beyond), ids
+  queried in chunks of 5,000. Revisit with SQL aggregation if real volumes need it.
+- **Drill-down**: every row lists up to 50 source record ids (sorted) plus `recordIdsTruncated`; the result carries a descriptor
+  (record type, anchor, range, unit filter) for listing the rest through the owning module's API under the caller's own permissions.
+- **Denials**: no coverage is a 403 audited with `recordAuthzDenial` (reason `NO_PERMISSION`); the catalog listing simply omits KPIs
+  the caller may not see (no audit: nothing was requested).
+- **Docs**: `docs/KPI_DEFINITIONS.md` is generated (`npm run kpi:docs`, new script, no dependency) by `src/lib/kpi-definitions-doc.ts`;
+  `tests/analytics/kpi-definitions-doc.test.ts` fails on drift. Labels `KPI.<KEY>`, `KPI.UNIT.*`, `KPI.STATUS.*`, `KPI.ESTIMATE` in
+  en-US, es-US, he-IL. No migration; developed against a private `leadro_p6t2_test` database (dropped at the end).
