@@ -8,6 +8,9 @@ import type { TenantTx } from "@/server/db";
  * qualifying grant. A grant qualifies when it is one of the KPI's permissions, reveals the KPI's field set, and either has no
  * `set` qualifier or is qualified by one of the KPI's sets (`dispatch_kpis`), passed as satisfied sets like `ResourceRef.sets`.
  *
+ * A KPI with `requiresAlso` (data a source module guards with a sensitive field set) is visible only where EVERY listed grant
+ * reveals its field set too: the scope is the intersection of the coverages (Phase 6 Task 3).
+ *
  * KPIs aggregate records of org units, so only TENANT and ORG_UNIT scopes count. OWN, ASSIGNED and LEGAL_ENTITY scopes cover no
  * KPI (fail closed): an aggregate over "my own records" is the Phase 5 self-service read models' job, not a dashboard's.
  */
@@ -31,18 +34,36 @@ function unitCoverage(scopes: ResolvedScope[]): ResolvedScope {
   };
 }
 
+const covers = (scope: ResolvedScope) => scope.tenantWide || scope.orgUnitIds.length > 0;
+
+/** The org units both coverages reach (ids are already expanded with descendants, so a plain set intersection is exact). */
+function intersectCoverage(a: ResolvedScope, b: ResolvedScope): ResolvedScope {
+  if (a.tenantWide) return b;
+  if (b.tenantWide) return a;
+  const inB = new Set(b.orgUnitIds);
+  const orgUnitIds = a.orgUnitIds.filter((id) => inB.has(id));
+  const parts = orgUnitIds.length > 0 ? [{ type: "ORG_UNIT" as const, orgUnitIds, legalEntityIds: [], employeeId: null, fieldSets: [] }] : [];
+  return { tenantWide: false, orgUnitIds, legalEntityIds: [], ownEmployeeId: null, assignedEmployeeId: null, parts };
+}
+
+async function coverageOf(tx: TenantTx, actor: Actor, permission: string, fieldSet: string, sets: readonly string[], now: Date): Promise<ResolvedScope> {
+  const scope = await resolveScope(tx, actor, permission, now, { satisfiedSets: [...sets] });
+  return unitCoverage([narrowScopeToFieldSet(scope, fieldSet)]);
+}
+
 /** Resolves the viewer's access to `kpi` on the PRIMARY database (`tx` from `withTenant`), as of `now`. */
 export async function resolveKpiAccess(tx: TenantTx, actor: Actor, kpi: KpiDefinition, now: Date): Promise<KpiAccess> {
   const qualifying: Array<{ permission: string; scope: ResolvedScope }> = [];
   for (const permission of kpi.access.permissions) {
-    const scope = await resolveScope(tx, actor, permission, now, { satisfiedSets: [...kpi.access.sets] });
-    const narrowed = unitCoverage([narrowScopeToFieldSet(scope, kpi.access.fieldSet)]);
-    if (narrowed.tenantWide || narrowed.orgUnitIds.length > 0) qualifying.push({ permission, scope: narrowed });
+    const narrowed = await coverageOf(tx, actor, permission, kpi.access.fieldSet, kpi.access.sets, now);
+    if (covers(narrowed)) qualifying.push({ permission, scope: narrowed });
   }
-  const scope = unitCoverage(qualifying.map((entry) => entry.scope));
-  return {
-    allowed: qualifying.length > 0,
-    permission: qualifying[0]?.permission ?? kpi.access.permissions[0],
-    scope,
-  };
+  let scope = unitCoverage(qualifying.map((entry) => entry.scope));
+  let permission = qualifying[0]?.permission ?? kpi.access.permissions[0];
+  for (const requirement of kpi.access.requiresAlso ?? []) {
+    if (!covers(scope)) break;
+    scope = intersectCoverage(scope, await coverageOf(tx, actor, requirement.permission, requirement.fieldSet, [], now));
+    if (!covers(scope)) permission = requirement.permission;
+  }
+  return { allowed: covers(scope), permission, scope };
 }

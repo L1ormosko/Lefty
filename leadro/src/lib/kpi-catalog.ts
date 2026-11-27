@@ -53,6 +53,18 @@ export interface KpiAccess {
   fieldSet: string;
   /** Record sets the KPI belongs to, passed as satisfied sets so set-qualified grants (`dispatch_kpis`) can cover it. */
   sets: readonly string[];
+  /**
+   * Further grants the viewer must ALSO hold, each revealing its field set: the KPI's scope is INTERSECTED with each one's. Used
+   * when a KPI shows data a source module protects with a sensitive field set (outcome money: `job_outcomes` `financial`;
+   * material costs: `materials` `cost`), so a report permission never reveals more than the source module would.
+   */
+  requiresAlso?: readonly KpiGrantRequirement[];
+}
+
+/** One permission that must be held with a field set. */
+export interface KpiGrantRequirement {
+  permission: string;
+  fieldSet: string;
 }
 
 export interface KpiDefinition {
@@ -87,18 +99,46 @@ const OPERATIONAL = { permissions: ["analytics_operational.view"], fieldSet: "ba
 const DISPATCH = { permissions: ["analytics_operational.view"], fieldSet: "base", sets: [DISPATCH_KPI_SET] } as const;
 /** Lead results also appear on the executive dashboard (spec 13.1 "Conversion rate", "Lead source performance", "Recovery outcomes"). */
 const LEAD = { permissions: ["analytics_lead.view", "analytics_executive.view"], fieldSet: "base", sets: [] } as const;
-/** Money KPIs (Task 3): the finance permission over the scope (spec 4.5 "Financial reports"); Task 3 may tighten the field set. */
+/**
+ * Financial KPIs (spec 4.5 "Financial reports", 22.2). `financial_reports.view` is itself a sensitive permission and the module has
+ * no field-set category, so the grant (field set `base`) is the financial gate for ledger aggregates; KPIs built from data another
+ * module guards with a sensitive set require that set as well (Phase 6 Task 3 decision).
+ */
 const FINANCIAL = { permissions: ["financial_reports.view"], fieldSet: "base", sets: [] } as const;
+/** Outcome money (approved amounts): Phase 4's one rule, the outcome `financial` set over the job. */
+const FINANCIAL_OUTCOME_MONEY = { ...FINANCIAL, requiresAlso: [{ permission: "job_outcomes.view", fieldSet: "financial" }] } as const;
+/** Material costs and anything derived from them (direct costs, gross profit): the materials `cost` set (Phase 4 Task 2). */
+const FINANCIAL_COSTS = { ...FINANCIAL, requiresAlso: [{ permission: "materials.view", fieldSet: "cost" }] } as const;
 const EXECUTIVE = { permissions: ["analytics_executive.view", "analytics_operational.view"], fieldSet: "base", sets: [] } as const;
 
 const JOB_ATTRIBUTION = "The org unit snapshotted on the job (Job.orgUnitId).";
 const LEAD_ATTRIBUTION = "The org unit snapshotted on the lead (Lead.orgUnitId); leads without one count only in tenant-wide figures.";
 const CASE_ATTRIBUTION = "The org unit snapshotted on the recovery case (LeadRecoveryCase.orgUnitId).";
 const LEDGER_ATTRIBUTION = "The org unit snapshotted on the ledger entry (LedgerEntry.orgUnitId).";
-const TASK3 = "Computed by Phase 6 Task 3.";
+const EXCEPTION_ATTRIBUTION = "The org unit snapshotted on the exception (ReconciliationException.orgUnitId); exceptions without one count only in tenant-wide figures.";
 
 function kpi(entry: Omit<KpiDefinition, "labelKey" | "status"> & { status?: KpiStatus }): KpiDefinition {
   return { status: "ACTIVE", labelKey: label(entry.key), ...entry };
+}
+
+/**
+ * A ledger-derived money KPI (spec 13.3): signed LedgerEntry amounts of the named types whose occurredAt is in the period. A
+ * REVERSAL counts under the type it reverses, in the period it was posted (a correction lowers the period it is made in).
+ */
+function ledgerKpi(key: string, definition: string, sum: string, access: KpiAccess = FINANCIAL): KpiDefinition {
+  return kpi({
+    key,
+    family: "FINANCIAL",
+    unit: "MONEY",
+    definition,
+    formula: `${sum} per currency over LedgerEntry with occurredAt in the period.`,
+    sourceRecords: ["LedgerEntry"],
+    period: { semantics: "EVENT_IN_PERIOD", anchor: "LedgerEntry.occurredAt" },
+    orgLevels: ALL_LEVELS,
+    attribution: LEDGER_ATTRIBUTION,
+    dataOwnerRole: "FINANCE_DIRECTOR",
+    access,
+  });
 }
 
 export const KPI_CATALOG: readonly KpiDefinition[] = [
@@ -335,56 +375,81 @@ export const KPI_CATALOG: readonly KpiDefinition[] = [
   kpi({
     key: "employee_productivity",
     family: "EXECUTIVE",
-    unit: "RATIO",
-    definition: "Completed jobs per scheduled shift hour. Development use only; never a per-employee ranking. " + TASK3,
-    formula: "count(jobs completed in the period) / sum(scheduled shift hours in the period), per group.",
+    unit: "PER_HOUR",
+    definition:
+      "Completed jobs per RECORDED shift hour (no shift schedule is modelled, so the time base is the shifts employees actually clocked). A group figure for development use only: never listed or ranked per employee.",
+    formula:
+      "count(jobs completed in the period with a LEAD assignee) / sum(endedAt - startedAt of ENDED shifts started in the period, in hours), per group. A shift counts wholly in the bucket it started in.",
     sourceRecords: ["Job", "JobAssignment", "Shift", "OrganizationalAssignment"],
-    period: { semantics: "EVENT_IN_PERIOD", anchor: "Job.completedAt" },
+    period: { semantics: "EVENT_IN_PERIOD", anchor: "Job.completedAt (jobs) and Shift.startedAt (hours)" },
     orgLevels: ALL_LEVELS,
-    attribution: "The unit of the employee's PRIMARY OrganizationalAssignment effective at the event time (spec 3).",
+    attribution:
+      "The unit of the employee's PRIMARY OrganizationalAssignment effective at the event (spec 3): at Job.completedAt for the lead technician's job, at Shift.startedAt for the shift. The job or shift must be in the viewer's scope, and so must the attributed unit; otherwise the record is left out.",
     dataOwnerRole: "COO",
     access: EXECUTIVE,
   }),
 
-  // ── Financial (spec 13.1, 13.3): ledger-derived, computed by Task 3 ──
-  ...(
-    [
-      ["sold_revenue", "Approved (sold) amounts of jobs."],
-      ["charged_revenue", "Amounts charged to customers."],
-      ["collected_revenue", "Payments collected."],
-      ["outstanding_amount", "Charged but not yet collected amounts."],
-      ["material_costs", "Cost of materials used on jobs."],
-      ["direct_costs", "Direct costs of jobs (materials; other direct costs are not modelled yet)."],
-      ["gross_profit", "Charged revenue minus direct costs, per currency."],
-      ["refunds", "Refunded amounts."],
-      ["adjustments", "Approved financial adjustments."],
-      ["chargebacks", "Chargeback amounts."],
-    ] as const
-  ).map(([key, definition]) =>
-    kpi({
-      key,
-      family: "FINANCIAL",
-      unit: "MONEY",
-      definition: `${definition} ${TASK3}`,
-      formula: "Ledger-derived sum of minor units per currency (Task 3 defines the entry types).",
-      sourceRecords: ["LedgerEntry"],
-      period: { semantics: "EVENT_IN_PERIOD", anchor: "LedgerEntry.occurredAt" },
-      orgLevels: ALL_LEVELS,
-      attribution: LEDGER_ATTRIBUTION,
-      dataOwnerRole: "FINANCE_DIRECTOR",
-      access: FINANCIAL,
-    }),
+  // ── Financial (spec 13.1, 13.3). The ledger is the source of truth; sold revenue is the one outcome-based amount. ──
+  kpi({
+    key: "sold_revenue",
+    family: "FINANCIAL",
+    unit: "MONEY",
+    definition:
+      "Amounts customers APPROVED on visits reported as sold (the technician's report, before finance confirms a charge). Not ledger revenue: the ledger is charged revenue.",
+    formula: "sum(JobOutcome.approvedAmountMinor) per currency over outcomes SOLD with an approved amount whose visit (occurredAt) is in the period; a corrected outcome counts with its current amount.",
+    sourceRecords: ["JobOutcome", "Job"],
+    period: { semantics: "EVENT_IN_PERIOD", anchor: "JobOutcome.occurredAt" },
+    orgLevels: ALL_LEVELS,
+    attribution: JOB_ATTRIBUTION,
+    dataOwnerRole: "FINANCE_DIRECTOR",
+    access: FINANCIAL_OUTCOME_MONEY,
+  }),
+  ledgerKpi("charged_revenue", "Revenue charged to customers (spec 13.1 \"Revenue\"), as finance posted it.", "sum(CHARGE) + sum(REVERSAL of a CHARGE)"),
+  ledgerKpi("collected_revenue", "Payments received (gross collections; refunds and chargebacks are their own KPIs).", "sum(PAYMENT) + sum(REVERSAL of a PAYMENT, i.e. voids)"),
+  kpi({
+    key: "outstanding_amount",
+    family: "FINANCIAL",
+    unit: "MONEY",
+    definition: "What customers still owe right now: billed (charges and adjustments) minus net collected (payments minus refunds and chargebacks). Negative = customers in credit.",
+    formula:
+      "sum over ALL ledger entries at request time of: CHARGE + ADJUSTMENT - PAYMENT - REFUND - CHARGEBACK (signed amounts, reversals under the type they reverse), per currency; MATERIAL_COST excluded.",
+    sourceRecords: ["LedgerEntry"],
+    period: { semantics: "SNAPSHOT", anchor: "request time" },
+    orgLevels: ALL_LEVELS,
+    attribution: LEDGER_ATTRIBUTION,
+    dataOwnerRole: "FINANCE_DIRECTOR",
+    access: FINANCIAL,
+  }),
+  ledgerKpi("material_costs", "Cost of materials used on jobs, as costed into the ledger (a positive amount).", "-(sum(MATERIAL_COST) + sum(REVERSAL of a MATERIAL_COST))", FINANCIAL_COSTS),
+  ledgerKpi(
+    "direct_costs",
+    "Direct costs of jobs. Only material costs are modelled today (labour, subcontractors and other direct costs are not), so it equals material_costs until they are; a separate key because it will not stay equal.",
+    "-(sum(MATERIAL_COST) + sum(REVERSAL of a MATERIAL_COST)); no other direct cost type exists yet",
+    FINANCIAL_COSTS,
+  ),
+  ledgerKpi(
+    "gross_profit",
+    "Charged revenue minus direct costs, per currency (adjustments, refunds and chargebacks are not part of it).",
+    "(sum(CHARGE) + REVERSALs of CHARGEs) + (sum(MATERIAL_COST) + REVERSALs of MATERIAL_COSTs); MATERIAL_COST amounts are negative",
+    FINANCIAL_COSTS,
+  ),
+  ledgerKpi("refunds", "Money paid back to customers (a positive amount).", "-(sum(REFUND) + sum(REVERSAL of a REFUND))"),
+  ledgerKpi("adjustments", "Net posted (approved) adjustments: positive = customers owe more, negative = credits.", "sum(ADJUSTMENT) + sum(REVERSAL of an ADJUSTMENT), signed"),
+  ledgerKpi(
+    "chargebacks",
+    "Money taken back by card networks, net of chargebacks won (a positive amount).",
+    "-(sum(CHARGEBACK) + sum(REVERSAL of a CHARGEBACK, i.e. won disputes))",
   ),
   kpi({
     key: "reconciliation_exceptions_open",
     family: "FINANCIAL",
     unit: "COUNT",
-    definition: "Reconciliation exceptions still open. " + TASK3,
-    formula: "count(ReconciliationException with an open status) at request time.",
+    definition: "Reconciliation exceptions still waiting for a person (open or assigned).",
+    formula: "count(ReconciliationException with status OPEN or ASSIGNED) at request time.",
     sourceRecords: ["ReconciliationException"],
     period: { semantics: "SNAPSHOT", anchor: "request time" },
     orgLevels: ALL_LEVELS,
-    attribution: "The org unit snapshotted on the exception (ReconciliationException.orgUnitId).",
+    attribution: EXCEPTION_ATTRIBUTION,
     dataOwnerRole: "FINANCE_DIRECTOR",
     access: FINANCIAL,
   }),
@@ -392,12 +457,12 @@ export const KPI_CATALOG: readonly KpiDefinition[] = [
     key: "reconciliation_exceptions_resolved",
     family: "FINANCIAL",
     unit: "COUNT",
-    definition: "Reconciliation exceptions resolved in the period. " + TASK3,
-    formula: "count(ReconciliationException resolved in the period).",
+    definition: "Reconciliation exceptions resolved in the period.",
+    formula: "count(ReconciliationException with status RESOLVED and resolvedAt in the period).",
     sourceRecords: ["ReconciliationException"],
-    period: { semantics: "EVENT_IN_PERIOD", anchor: "ReconciliationException resolution time" },
+    period: { semantics: "EVENT_IN_PERIOD", anchor: "ReconciliationException.resolvedAt" },
     orgLevels: ALL_LEVELS,
-    attribution: "The org unit snapshotted on the exception (ReconciliationException.orgUnitId).",
+    attribution: EXCEPTION_ATTRIBUTION,
     dataOwnerRole: "FINANCE_DIRECTOR",
     access: FINANCIAL,
   }),

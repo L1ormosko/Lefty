@@ -18,6 +18,9 @@ function renderEntry(kpi: KpiDefinition): string[] {
     `any of ${kpi.access.permissions.map(code).join(", ")}`,
     `field set ${code(kpi.access.fieldSet)}`,
     ...(kpi.access.sets.length > 0 ? [`sets ${kpi.access.sets.map(code).join(", ")}`] : []),
+    ...(kpi.access.requiresAlso ?? []).map(
+      (requirement) => `AND ${code(requirement.permission)} with field set ${code(requirement.fieldSet)} (scopes intersected)`,
+    ),
   ].join("; ");
   return [
     `### ${code(kpi.key)}`,
@@ -51,7 +54,8 @@ export function renderKpiDefinitions(catalog: readonly KpiDefinition[] = KPI_CAT
     "Conventions: periods are tenant-local dates in the tenant's time zone (weeks start Monday). COHORT_IN_PERIOD KPIs measure the",
     "records created in the period as they are now (a cohort's rate can still change later); EVENT_IN_PERIOD KPIs count the anchor",
     "event in the period; SNAPSHOT KPIs are the state at request time. Grouping rolls a record's attributed unit up the current org",
-    "tree. Money is integer minor units per currency, never summed across currencies. DURATION is the median in seconds.",
+    "tree. Money is integer minor units per currency, never summed across currencies. DURATION is the median in seconds. PER_HOUR",
+    "divides numerator records by the hours of a time base. Ledger KPIs count a REVERSAL under the type it reverses.",
     "",
   ];
   for (const family of KPI_FAMILIES) {

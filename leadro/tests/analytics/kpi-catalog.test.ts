@@ -72,6 +72,7 @@ describe("KPI catalog", () => {
     for (const entry of KPI_CATALOG) {
       expect(entry.access.permissions.length, entry.key).toBeGreaterThan(0);
       for (const permission of entry.access.permissions) expect(PERMISSIONS.has(permission), `${entry.key}: ${permission}`).toBe(true);
+      for (const extra of entry.access.requiresAlso ?? []) expect(PERMISSIONS.has(extra.permission), `${entry.key}: ${extra.permission}`).toBe(true);
       expect(TEMPLATE_KEYS.has(entry.dataOwnerRole), `${entry.key}: ${entry.dataOwnerRole}`).toBe(true);
     }
   });
@@ -86,6 +87,14 @@ describe("KPI catalog", () => {
     const dispatch = KPI_CATALOG.filter((entry) => entry.access.sets.includes(DISPATCH_KPI_SET)).map((entry) => entry.key).sort();
     expect(dispatch).toEqual(["dispatch_decision_latency", "dispatch_recommendation_acceptance_rate", "time_to_arrival", "time_to_assignment", "unassigned_jobs"]);
     for (const key of dispatch) expect(findKpi(key)?.access.permissions).toEqual(["analytics_operational.view"]);
+  });
+
+  it("gates financial KPIs by financial_reports.view plus the source module's sensitive set (Phase 6 Task 3)", () => {
+    const financial = KPI_CATALOG.filter((entry) => entry.family === "FINANCIAL");
+    for (const entry of financial) expect(entry.access.permissions, entry.key).toEqual(["financial_reports.view"]);
+    const extra = Object.fromEntries(financial.filter((entry) => entry.access.requiresAlso).map((entry) => [entry.key, entry.access.requiresAlso]));
+    const cost = [{ permission: "materials.view", fieldSet: "cost" }];
+    expect(extra).toEqual({ sold_revenue: [{ permission: "job_outcomes.view", fieldSet: "financial" }], material_costs: cost, direct_costs: cost, gross_profit: cost });
   });
 
   it("labels the recovery estimate as an estimate and keeps confirmed revenue separate (spec 9.7)", () => {

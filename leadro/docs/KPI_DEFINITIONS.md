@@ -9,7 +9,8 @@ requires. Dashboards reference KPIs by key; the same key never means two things,
 Conventions: periods are tenant-local dates in the tenant's time zone (weeks start Monday). COHORT_IN_PERIOD KPIs measure the
 records created in the period as they are now (a cohort's rate can still change later); EVENT_IN_PERIOD KPIs count the anchor
 event in the period; SNAPSHOT KPIs are the state at request time. Grouping rolls a record's attributed unit up the current org
-tree. Money is integer minor units per currency, never summed across currencies. DURATION is the median in seconds.
+tree. Money is integer minor units per currency, never summed across currencies. DURATION is the median in seconds. PER_HOUR
+divides numerator records by the hours of a time base. Ledger KPIs count a REVERSAL under the type it reverses.
 
 ## Operational (spec 13.2)
 
@@ -244,22 +245,22 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `sold_revenue`
 
 - **Status**: ACTIVE
-- **Definition**: Approved (sold) amounts of jobs. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Amounts customers APPROVED on visits reported as sold (the technician's report, before finance confirms a charge). Not ledger revenue: the ledger is charged revenue.
+- **Formula**: sum(JobOutcome.approvedAmountMinor) per currency over outcomes SOLD with an approved amount whose visit (occurredAt) is in the period; a corrected outcome counts with its current amount.
 - **Unit**: MONEY
-- **Source records**: `LedgerEntry`
-- **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
+- **Source records**: `JobOutcome`, `Job`
+- **Time period**: EVENT_IN_PERIOD, anchored on JobOutcome.occurredAt
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
-- **Attribution**: The org unit snapshotted on the ledger entry (LedgerEntry.orgUnitId).
+- **Attribution**: The org unit snapshotted on the job (Job.orgUnitId).
 - **Data owner**: `FINANCE_DIRECTOR`
-- **Required access**: any of `financial_reports.view`; field set `base`
+- **Required access**: any of `financial_reports.view`; field set `base`; AND `job_outcomes.view` with field set `financial` (scopes intersected)
 - **Label**: `KPI.SOLD_REVENUE`
 
 ### `charged_revenue`
 
 - **Status**: ACTIVE
-- **Definition**: Amounts charged to customers. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Revenue charged to customers (spec 13.1 "Revenue"), as finance posted it.
+- **Formula**: sum(CHARGE) + sum(REVERSAL of a CHARGE) per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
@@ -272,8 +273,8 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `collected_revenue`
 
 - **Status**: ACTIVE
-- **Definition**: Payments collected. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Payments received (gross collections; refunds and chargebacks are their own KPIs).
+- **Formula**: sum(PAYMENT) + sum(REVERSAL of a PAYMENT, i.e. voids) per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
@@ -286,11 +287,11 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `outstanding_amount`
 
 - **Status**: ACTIVE
-- **Definition**: Charged but not yet collected amounts. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: What customers still owe right now: billed (charges and adjustments) minus net collected (payments minus refunds and chargebacks). Negative = customers in credit.
+- **Formula**: sum over ALL ledger entries at request time of: CHARGE + ADJUSTMENT - PAYMENT - REFUND - CHARGEBACK (signed amounts, reversals under the type they reverse), per currency; MATERIAL_COST excluded.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
-- **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
+- **Time period**: SNAPSHOT, anchored on request time
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
 - **Attribution**: The org unit snapshotted on the ledger entry (LedgerEntry.orgUnitId).
 - **Data owner**: `FINANCE_DIRECTOR`
@@ -300,50 +301,50 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `material_costs`
 
 - **Status**: ACTIVE
-- **Definition**: Cost of materials used on jobs. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Cost of materials used on jobs, as costed into the ledger (a positive amount).
+- **Formula**: -(sum(MATERIAL_COST) + sum(REVERSAL of a MATERIAL_COST)) per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
 - **Attribution**: The org unit snapshotted on the ledger entry (LedgerEntry.orgUnitId).
 - **Data owner**: `FINANCE_DIRECTOR`
-- **Required access**: any of `financial_reports.view`; field set `base`
+- **Required access**: any of `financial_reports.view`; field set `base`; AND `materials.view` with field set `cost` (scopes intersected)
 - **Label**: `KPI.MATERIAL_COSTS`
 
 ### `direct_costs`
 
 - **Status**: ACTIVE
-- **Definition**: Direct costs of jobs (materials; other direct costs are not modelled yet). Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Direct costs of jobs. Only material costs are modelled today (labour, subcontractors and other direct costs are not), so it equals material_costs until they are; a separate key because it will not stay equal.
+- **Formula**: -(sum(MATERIAL_COST) + sum(REVERSAL of a MATERIAL_COST)); no other direct cost type exists yet per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
 - **Attribution**: The org unit snapshotted on the ledger entry (LedgerEntry.orgUnitId).
 - **Data owner**: `FINANCE_DIRECTOR`
-- **Required access**: any of `financial_reports.view`; field set `base`
+- **Required access**: any of `financial_reports.view`; field set `base`; AND `materials.view` with field set `cost` (scopes intersected)
 - **Label**: `KPI.DIRECT_COSTS`
 
 ### `gross_profit`
 
 - **Status**: ACTIVE
-- **Definition**: Charged revenue minus direct costs, per currency. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Charged revenue minus direct costs, per currency (adjustments, refunds and chargebacks are not part of it).
+- **Formula**: (sum(CHARGE) + REVERSALs of CHARGEs) + (sum(MATERIAL_COST) + REVERSALs of MATERIAL_COSTs); MATERIAL_COST amounts are negative per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
 - **Attribution**: The org unit snapshotted on the ledger entry (LedgerEntry.orgUnitId).
 - **Data owner**: `FINANCE_DIRECTOR`
-- **Required access**: any of `financial_reports.view`; field set `base`
+- **Required access**: any of `financial_reports.view`; field set `base`; AND `materials.view` with field set `cost` (scopes intersected)
 - **Label**: `KPI.GROSS_PROFIT`
 
 ### `refunds`
 
 - **Status**: ACTIVE
-- **Definition**: Refunded amounts. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Money paid back to customers (a positive amount).
+- **Formula**: -(sum(REFUND) + sum(REVERSAL of a REFUND)) per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
@@ -356,8 +357,8 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `adjustments`
 
 - **Status**: ACTIVE
-- **Definition**: Approved financial adjustments. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Net posted (approved) adjustments: positive = customers owe more, negative = credits.
+- **Formula**: sum(ADJUSTMENT) + sum(REVERSAL of an ADJUSTMENT), signed per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
@@ -370,8 +371,8 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `chargebacks`
 
 - **Status**: ACTIVE
-- **Definition**: Chargeback amounts. Computed by Phase 6 Task 3.
-- **Formula**: Ledger-derived sum of minor units per currency (Task 3 defines the entry types).
+- **Definition**: Money taken back by card networks, net of chargebacks won (a positive amount).
+- **Formula**: -(sum(CHARGEBACK) + sum(REVERSAL of a CHARGEBACK, i.e. won disputes)) per currency over LedgerEntry with occurredAt in the period.
 - **Unit**: MONEY
 - **Source records**: `LedgerEntry`
 - **Time period**: EVENT_IN_PERIOD, anchored on LedgerEntry.occurredAt
@@ -384,13 +385,13 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `reconciliation_exceptions_open`
 
 - **Status**: ACTIVE
-- **Definition**: Reconciliation exceptions still open. Computed by Phase 6 Task 3.
-- **Formula**: count(ReconciliationException with an open status) at request time.
+- **Definition**: Reconciliation exceptions still waiting for a person (open or assigned).
+- **Formula**: count(ReconciliationException with status OPEN or ASSIGNED) at request time.
 - **Unit**: COUNT
 - **Source records**: `ReconciliationException`
 - **Time period**: SNAPSHOT, anchored on request time
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
-- **Attribution**: The org unit snapshotted on the exception (ReconciliationException.orgUnitId).
+- **Attribution**: The org unit snapshotted on the exception (ReconciliationException.orgUnitId); exceptions without one count only in tenant-wide figures.
 - **Data owner**: `FINANCE_DIRECTOR`
 - **Required access**: any of `financial_reports.view`; field set `base`
 - **Label**: `KPI.RECONCILIATION_EXCEPTIONS_OPEN`
@@ -398,13 +399,13 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `reconciliation_exceptions_resolved`
 
 - **Status**: ACTIVE
-- **Definition**: Reconciliation exceptions resolved in the period. Computed by Phase 6 Task 3.
-- **Formula**: count(ReconciliationException resolved in the period).
+- **Definition**: Reconciliation exceptions resolved in the period.
+- **Formula**: count(ReconciliationException with status RESOLVED and resolvedAt in the period).
 - **Unit**: COUNT
 - **Source records**: `ReconciliationException`
-- **Time period**: EVENT_IN_PERIOD, anchored on ReconciliationException resolution time
+- **Time period**: EVENT_IN_PERIOD, anchored on ReconciliationException.resolvedAt
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
-- **Attribution**: The org unit snapshotted on the exception (ReconciliationException.orgUnitId).
+- **Attribution**: The org unit snapshotted on the exception (ReconciliationException.orgUnitId); exceptions without one count only in tenant-wide figures.
 - **Data owner**: `FINANCE_DIRECTOR`
 - **Required access**: any of `financial_reports.view`; field set `base`
 - **Label**: `KPI.RECONCILIATION_EXCEPTIONS_RESOLVED`
@@ -456,13 +457,13 @@ tree. Money is integer minor units per currency, never summed across currencies.
 ### `employee_productivity`
 
 - **Status**: ACTIVE
-- **Definition**: Completed jobs per scheduled shift hour. Development use only; never a per-employee ranking. Computed by Phase 6 Task 3.
-- **Formula**: count(jobs completed in the period) / sum(scheduled shift hours in the period), per group.
-- **Unit**: RATIO
+- **Definition**: Completed jobs per RECORDED shift hour (no shift schedule is modelled, so the time base is the shifts employees actually clocked). A group figure for development use only: never listed or ranked per employee.
+- **Formula**: count(jobs completed in the period with a LEAD assignee) / sum(endedAt - startedAt of ENDED shifts started in the period, in hours), per group. A shift counts wholly in the bucket it started in.
+- **Unit**: PER_HOUR
 - **Source records**: `Job`, `JobAssignment`, `Shift`, `OrganizationalAssignment`
-- **Time period**: EVENT_IN_PERIOD, anchored on Job.completedAt
+- **Time period**: EVENT_IN_PERIOD, anchored on Job.completedAt (jobs) and Shift.startedAt (hours)
 - **Organizational scope**: grouped by TENANT, STATE, REGION, CITY, BRANCH, inside the viewer's scope
-- **Attribution**: The unit of the employee's PRIMARY OrganizationalAssignment effective at the event time (spec 3).
+- **Attribution**: The unit of the employee's PRIMARY OrganizationalAssignment effective at the event (spec 3): at Job.completedAt for the lead technician's job, at Shift.startedAt for the shift. The job or shift must be in the viewer's scope, and so must the attributed unit; otherwise the record is left out.
 - **Data owner**: `COO`
 - **Required access**: any of `analytics_executive.view`, `analytics_operational.view`; field set `base`
 - **Label**: `KPI.EMPLOYEE_PRODUCTIVITY`
