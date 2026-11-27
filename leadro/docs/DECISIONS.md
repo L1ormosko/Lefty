@@ -1844,3 +1844,47 @@ These are manager-level choices made to keep moving; each is one template line o
   finance-adjustments (refund + payout, adjustment, chargeback), materials (cost version + costing a usage) and reconciliation (run +
   resolve); outcomes, material usage lines and shifts are inserted as the field app records them. A CAD job proves currencies stay
   apart. No migration; developed against a private `leadro_p6t3_test` database (dropped at the end).
+
+## Phase 6 Task 4: dashboards
+
+- **Definitions are pure data** in `src/lib/dashboards.ts`: six dashboards (`executive`, `state_regional`, `city_branch`, `finance`,
+  `lead`, `operational`), each = family permission + sections; a section = KPI keys of the one catalog + default `groupBy` + default
+  period granularity. A dashboard never defines a number (spec 13.4: dashboards reference KPIs by key only). Labels `DASHBOARD.<ID>`,
+  `DASHBOARD.SECTION.<KEY>` (a section key means the same thing on every dashboard), `DASHBOARD.KPI_HIDDEN` for a UI, in all three
+  catalogs. `tests/analytics/dashboards-catalog.test.ts` checks keys exist, levels are supported, labels exist.
+- **Family mapping**: executive -> `analytics_executive.view`; state_regional, city_branch, operational -> `analytics_operational.view`;
+  finance -> `analytics_financial.view`; lead -> `analytics_lead.view`. Only the `operational` dashboard lists `dispatch_kpis` as a
+  family set, so the Dispatcher's set-qualified grant opens it (and no other operational dashboard); its non-dispatch KPIs come back
+  hidden through the KPI-level check. Its `dispatch` section is exactly the catalog's `dispatch_kpis` set (test). Only TENANT / ORG_UNIT
+  family grants count, like KPIs.
+- **Hidden, not failed**: all KPI accesses are resolved in ONE primary transaction (once per access profile) before computing; a KPI the
+  viewer lacks is `{ key, labelKey, definitionRef, unit, hidden: true }` (catalog metadata only, no value, no scope, no audit: nothing
+  was requested). A grant revoked between the check and `computeKpi` (whose 403 the engine audits) is also returned hidden. Only the
+  family refusal is a 403 (audited). BLOCKED_ON_SPEC KPIs the viewer may see return their status and `blockedReason` only; the engine is
+  not called for them. A single KPI over the 50,000-record cap returns `error { VALIDATION_FAILED, message }` while the rest renders;
+  range errors are checked once up front and fail the request (400).
+- **Metadata per KPI**: `labelKey`, `definitionRef` = `docs/KPI_DEFINITIONS.md#<key>` (the generated heading anchor), `unit`,
+  `estimate`, `period { semantics, anchor, granularity, from, to }`, `groupBy`, `scope { tenantWide, orgUnitIds }` (the viewer's coverage
+  for THAT KPI, which may be narrower than the family's, e.g. intersected with the materials cost set), `sampleCount` (sum over rows) and
+  the engine's rows / drill-down unchanged.
+- **Comparisons stay in scope** by construction: every row is computed by `computeKpi` from in-scope records only, so a comparison never
+  shows another unit's data (a city manager's city comparison has one row: their city). No extra filter or relabelling is done; a group row
+  may carry an ancestor's id when the viewer groups above their scope (Task 2 decision, unchanged). `orgUnitId` narrowing must lie inside
+  the family coverage; outside and unknown are the same `400` (no existence oracle).
+- **Range**: `from` / `to` both or neither; neither = the dashboard's `defaultRangeDays` ending today in the tenant time zone
+  (executive / finance 90, state_regional / lead 30, city_branch 14, operational 7). `period` overrides every section.
+- **Memo, no cache**: a per-request map `key|groupBy|period -> Promise<KpiResult>` so a KPI shown twice at the same grouping is computed
+  once; nothing persists across requests (always current, no invalidation problem). KPIs are computed sequentially (one reporting
+  connection per dashboard); revisit with bounded parallelism if dashboards get slow.
+- **No per-employee ranking**: dashboards contain only catalog KPIs, all group figures; `jobs_per_employee` / `employee_productivity` stay
+  ratios per org unit (spec 10.3).
+- **Report builder on the read client** (Task 5 noted it could move once the read client was merged): contained, so done.
+  `runReportQuery`: permissions, view resolution and `prepareReport` (incl. the follow-up access gate and org subtree) on the PRIMARY in
+  one transaction, then the page of rows via `withReportingTenant`. `exportReport`: (1) primary: permissions + prepare; (2) read client:
+  `statement_timeout`, count, rows, tenant zone; (3) primary: the log row + audit event in one transaction (REFUSED_TOO_LARGE /
+  COMPLETED); a database error in (2)/(3) logs FAILED in its own primary transaction, as before. Saved views, sharing and the export log
+  stay on the primary (they are the module's own tables and writes). Covered by a test running query + export with
+  `REPORTING_DATABASE_URL` set. Note: rows read from a lagging replica may miss the newest records; the export log records what was
+  actually exported (`rowCount`).
+- No migration, no new dependency, nothing in `prisma/` or the permission catalog changed. Developed against a private `leadro_p6t4_test`
+  database (dropped at the end).
