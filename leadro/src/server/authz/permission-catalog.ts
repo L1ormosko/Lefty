@@ -119,6 +119,20 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   ...mod("data_challenges", "employee data challenges", ["VIEW", "ASSIGN", "APPROVE", "REJECT"], ["VIEW"]),
   // Manually recorded customer feedback (no survey provider). EDIT voids a mis-recorded entry.
   ...mod("customer_feedback", "customer feedback", ["VIEW", "CREATE", "EDIT"]),
+
+  // ── Phase 6: enterprise analytics (spec Part 13, 13.5, 22.2) ──
+  // One VIEW per dashboard family (`analytics_<family>.view`). A family permission opens that family's dashboards only: every KPI
+  // on them still checks its own required permission and field set (financial KPIs: finance permissions + the financial set), so a
+  // family grant never reveals data its holder could not read otherwise. Financial dashboards are sensitive (spec 22.2).
+  ...mod("analytics_executive", "executive dashboards", ["VIEW"]),
+  ...mod("analytics_operational", "operational dashboards", ["VIEW"]),
+  ...mod("analytics_financial", "financial dashboards", ["VIEW"], ["VIEW"]),
+  ...mod("analytics_lead", "lead dashboards", ["VIEW"]),
+  // Report builder (spec 13.5). VIEW runs reports and the caller's own and role-shared saved views; CREATE saves views (and edits /
+  // archives the caller's own); EXPORT exports rows, which also needs the dataset's own export permission (e.g. jobs.export) and is
+  // always audited; MANAGE shares views with roles and archives other people's views in scope. Running a view always uses the
+  // runner's own permissions, scope and field sets.
+  ...mod("reports", "report builder and saved views", ["VIEW", "CREATE", "EXPORT", "MANAGE"], ["EXPORT"]),
 ];
 
 export const permissionKey = (p: Pick<PermissionDef, "module" | "action">) =>

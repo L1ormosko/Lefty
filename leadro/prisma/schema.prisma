@@ -224,6 +224,11 @@ model Tenant {
   trainingRecommendations TrainingRecommendation[]
   dataChallenges          DataChallenge[]
   customerFeedback        CustomerFeedback[]
+
+  // Phase 6
+  savedReportViews      SavedReportView[]
+  savedReportViewShares SavedReportViewShare[]
+  reportExports         ReportExport[]
 }
 
 model LegalEntity {
@@ -306,6 +311,10 @@ model OrgUnit {
   // Phase 5
   metricValues     PerformanceMetricValue[] @relation("PerformanceMetricValueOrgUnit")
   customerFeedback CustomerFeedback[]       @relation("CustomerFeedbackOrgUnit")
+
+  // Phase 6
+  savedReportViews SavedReportView[] @relation("SavedReportViewScopeOrgUnit")
+  reportExports    ReportExport[]    @relation("ReportExportScopeOrgUnit")
 
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
@@ -544,6 +553,12 @@ model User {
   customerFeedbackRecorded       CustomerFeedback[]            @relation("CustomerFeedbackRecordedBy")
   customerFeedbackVoided         CustomerFeedback[]            @relation("CustomerFeedbackVoidedBy")
 
+  // Phase 6
+  savedReportViewsOwned    SavedReportView[]      @relation("SavedReportViewOwner")
+  savedReportViewsArchived SavedReportView[]      @relation("SavedReportViewArchivedBy")
+  savedReportViewShares    SavedReportViewShare[] @relation("SavedReportViewSharedBy")
+  reportExports            ReportExport[]         @relation("ReportExportActor")
+
   @@unique([id, tenantId])
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -563,9 +578,11 @@ model Role {
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime @updatedAt @db.Timestamptz(3)
 
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  permissions RolePermission[]
-  assignments RoleAssignment[]
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  permissions           RolePermission[]
+  assignments           RoleAssignment[]
+  // Phase 6: saved report views shared with this role.
+  savedReportViewShares SavedReportViewShare[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -1350,6 +1367,8 @@ model Lead {
   @@index([tenantId, addressNormalizedKey])
   @@index([tenantId, archivedAt, createdAt])
   @@index([contactName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_contactName_trgm_idx")
+  // Phase 6 analytics: lead volume / conversion per org unit and period (DECISIONS "Phase 6 Task 1").
+  @@index([tenantId, orgUnitId, createdAt])
 }
 
 /// Who owns a lead, over time. At most one ACTIVE row per lead (partial unique index in the migration).
@@ -1801,6 +1820,9 @@ model Job {
   @@index([tenantId, priority, status])
   @@index([tenantId, parentJobId])
   @@index([tenantId, archivedAt, createdAt])
+  // Phase 6 analytics: job volume (created) and completed jobs / duration per org unit and period (DECISIONS "Phase 6 Task 1").
+  @@index([tenantId, orgUnitId, createdAt])
+  @@index([tenantId, orgUnitId, completedAt])
 }
 
 /// What THIS job requires (copied from the job type at creation, plus manual additions such as
@@ -2839,6 +2861,8 @@ model LeadRecoveryCase {
   @@index([tenantId, assignedToId, status])
   @@index([tenantId, jobId])
   @@index([tenantId, customerId])
+  // Phase 6 analytics: recovery outcomes per org unit, by the lost visit's time (DECISIONS "Phase 6 Task 1").
+  @@index([tenantId, orgUnitId, outcomeAt])
 }
 
 /// Append-only (trigger). One row per recovery status change (the first row has fromStatus null).
@@ -4300,4 +4324,112 @@ model CustomerFeedback {
   @@index([tenantId, customerId, receivedAt])
   @@index([tenantId, employeeId, receivedAt])
   @@index([tenantId, orgUnitId, receivedAt])
+}
+
+// ═════════════════════════ Phase 6: enterprise analytics (spec Part 13, 13.5, 2, 22.2) ═════════════════════════
+// KPIs and dashboards are computed from the business tables (no analytics copy of the data); these tables only hold what the
+// report builder needs to remember: saved views and the log of every export (spec 13.5 "Exports must respect permissions and be
+// audited"). A saved or shared view never widens access: whoever runs it is checked with their own permissions, scope and field
+// sets every time.
+
+enum ReportExportFormat {
+  CSV
+}
+
+enum ReportExportStatus {
+  COMPLETED
+  /// More rows than the synchronous cap; nothing was produced (no background export worker yet).
+  REFUSED_TOO_LARGE
+  FAILED
+}
+
+/// A saved report-builder view (spec 13.5 "Save views"): one dataset, the chosen columns in order, filters and an optional org-unit
+/// filter. Owned by one user; shared with roles through `SavedReportViewShare`. Archived, never deleted. The dataset never changes
+/// (another dataset is another view); name, columns and filters may.
+model SavedReportView {
+  id             String    @id @default(cuid())
+  tenantId       String
+  ownerId        String
+  name           String
+  /// Key of a dataset of the code-defined report catalog (Phase 6 Task 5), e.g. "jobs".
+  datasetKey     String
+  /// Selected columns in display order. Checked against the dataset and the runner's field sets on every run.
+  columns        String[]
+  /// Filters other than the org unit (date range, statuses ...): a JSON object validated by the dataset's schema.
+  filters        Json      @default("{}")
+  /// Optional org-unit filter (the unit and its descendants), always intersected with the runner's own scope. Null = the runner's scope.
+  scopeOrgUnitId String?
+  archivedAt     DateTime? @db.Timestamptz(3)
+  archivedById   String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  owner      User                   @relation("SavedReportViewOwner", fields: [ownerId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  scopeUnit  OrgUnit?               @relation("SavedReportViewScopeOrgUnit", fields: [scopeOrgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  archivedBy User?                  @relation("SavedReportViewArchivedBy", fields: [archivedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  shares     SavedReportViewShare[]
+  exports    ReportExport[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, ownerId, archivedAt])
+  @@index([tenantId, datasetKey])
+}
+
+/// A saved view shared with a role (spec 13.5): holders of the role can run it (with their own permissions). Unsharing deletes the
+/// row (audited by the service); a share is never edited.
+model SavedReportViewShare {
+  id         String   @id @default(cuid())
+  tenantId   String
+  viewId     String
+  roleId     String
+  sharedById String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  view     SavedReportView @relation(fields: [viewId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  role     Role            @relation(fields: [roleId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  sharedBy User            @relation("SavedReportViewSharedBy", fields: [sharedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, viewId, roleId])
+  @@index([tenantId, roleId])
+}
+
+/// One export attempt (spec 13.5, 22.2): who, which dataset, the filters (JSON + SHA-256 of their canonical form), the columns, the
+/// format, the outcome and the row count. Written for refused and failed attempts too. Append-only, like the audit log; the
+/// service also writes an audit event in the same transaction.
+model ReportExport {
+  id             String             @id @default(cuid())
+  tenantId       String
+  actorId        String
+  datasetKey     String
+  /// The saved view the export was started from, if any.
+  savedViewId    String?
+  /// Filters as applied (validated by the dataset's schema), and the SHA-256 (hex) of their canonical JSON.
+  filters        Json
+  filtersHash    String
+  /// Org-unit filter as applied (null = the actor's whole scope).
+  scopeOrgUnitId String?
+  /// Columns as exported, after field-set gating.
+  columns        String[]
+  format         ReportExportFormat @default(CSV)
+  status         ReportExportStatus
+  /// Rows matched: written (COMPLETED) or found over the cap (REFUSED_TOO_LARGE); null when the attempt FAILED before counting.
+  rowCount       Int?
+  /// The synchronous row cap in force for this export.
+  rowLimit       Int
+  /// Stable failure code for FAILED (never an internal message).
+  failureCode    String?
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  actor     User             @relation("ReportExportActor", fields: [actorId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  savedView SavedReportView? @relation(fields: [savedViewId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  scopeUnit OrgUnit?         @relation("ReportExportScopeOrgUnit", fields: [scopeOrgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, actorId, createdAt])
+  @@index([tenantId, datasetKey, createdAt])
 }
