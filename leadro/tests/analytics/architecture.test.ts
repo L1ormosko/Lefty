@@ -29,9 +29,9 @@ describe("src/server/analytics", () => {
 
   it("is not imported by the modules that run the business (analytics only reads them)", () => {
     const serverRoot = path.resolve(MODULE, "..");
-    for (const module of BUSINESS_MODULES) {
-      for (const file of readdirSync(path.join(serverRoot, module)).filter((name) => name.endsWith(".ts"))) {
-        expect(readFileSync(path.join(serverRoot, module, file), "utf8"), `${module}/${file}`).not.toContain("@/server/analytics");
+    for (const moduleName of BUSINESS_MODULES) {
+      for (const file of readdirSync(path.join(serverRoot, moduleName)).filter((name) => name.endsWith(".ts"))) {
+        expect(readFileSync(path.join(serverRoot, moduleName, file), "utf8"), `${moduleName}/${file}`).not.toContain("@/server/analytics");
       }
     }
   });
