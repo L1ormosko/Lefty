@@ -9,6 +9,8 @@ const id = z.string().trim().min(1).max(64);
 
 export const APPROVAL_SUBJECT_TYPES = [
   "MATERIAL_COST_CHANGE", "ADJUSTMENT", "REFUND", "CHARGEBACK_WRITE_OFF", "HIGH_VALUE_DISCOUNT", "PERFORMANCE_METRIC_DEFINITION",
+  // Phase 7 (registered with the approval engine by Tasks 3 and 5).
+  "AUTOMATION_RULE_VERSION", "ACCOUNTING_MAPPING", "PAYROLL_EXPORT",
 ] as const;
 export const APPROVAL_REQUEST_STATUSES = ["PENDING", "APPROVED", "REJECTED", "CANCELLED", "EXPIRED"] as const;
 

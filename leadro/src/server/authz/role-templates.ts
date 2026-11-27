@@ -255,6 +255,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // operational dashboards (spec 26.3: Finance gains no operational permissions).
       ...view("analytics_financial"),
       ...grantActions("reports", ["VIEW", "CREATE", "EXPORT"]),
+      // Phase 7 (accounting integration): journal exports and account mapping PROPOSALS (configure = author / submit a version).
+      // Activating a mapping is a second person's decision (`accounting_exports.approve`, the Owner by default).
+      ...grantActions("accounting_exports", ["VIEW", "CREATE", "EXPORT", "CONFIGURE"]),
     ],
   }),
   defineTemplate({
@@ -409,6 +412,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ...full("data_challenges"),
       // Phase 6 (spec 5.8 "Reports"): the report builder over the datasets HR's own permissions allow; no dashboards, no export.
       ...grantActions("reports", ["VIEW", "CREATE"]),
+      // Phase 7 (spec 11.9 payroll boundary): prepares and exports time-and-attendance batches (hours, shifts, job counts; never
+      // wages). Releasing a batch is a second person's decision (`payroll_exports.approve`, the Owner by default).
+      ...grantActions("payroll_exports", ["VIEW", "CREATE", "EXPORT"]),
     ],
   }),
   defineTemplate({

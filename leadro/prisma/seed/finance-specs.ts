@@ -118,4 +118,36 @@ export const APPROVAL_POLICY_SPECS: ApprovalPolicySpec[] = [
     approverPermission: "performance.publish",
     expiresAfterHours: 336,
   },
+  // Phase 7: activating a high-impact automation rule version (spec 15.2), activating an accounting mapping version (accounting
+  // treatment is reviewed) and releasing a payroll export batch. One approval each, never by the author / preparer (engine).
+  {
+    code: "automation_rule_activation",
+    subjectType: "AUTOMATION_RULE_VERSION",
+    name: "High-impact automation rule activation",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "automation.approve",
+    expiresAfterHours: 336,
+  },
+  {
+    code: "accounting_mapping_activation",
+    subjectType: "ACCOUNTING_MAPPING",
+    name: "Accounting mapping activation",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "accounting_exports.approve",
+    expiresAfterHours: 336,
+  },
+  {
+    code: "payroll_export_release",
+    subjectType: "PAYROLL_EXPORT",
+    name: "Payroll export release",
+    minAmountMinor: 0n,
+    maxAmountMinor: null,
+    requiredApprovals: 1,
+    approverPermission: "payroll_exports.approve",
+    expiresAfterHours: 168,
+  },
 ];
