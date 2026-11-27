@@ -33,6 +33,11 @@ export interface KpiFact {
   amountMinor?: bigint;
   /** RATIO: who contributed the record (the denominator counts distinct contributors). */
   contributorId?: string;
+  /**
+   * PER_HOUR: hours this record adds to the denominator (e.g. one recorded shift). A fact WITH hours is a time-base record and is
+   * not counted in the numerator; a fact without hours is one numerator record (e.g. one completed job).
+   */
+  hours?: number;
 }
 
 export interface KpiValueRow {
@@ -42,11 +47,14 @@ export interface KpiValueRow {
   orgUnitId: string | null;
   breakdownId?: string | null;
   currency?: string;
-  /** COUNT: count; RATE / RATIO: numerator / denominator; DURATION: median seconds; MONEY: sum in minor units. */
+  /**
+   * COUNT: count; RATE / RATIO / PER_HOUR: numerator / denominator; DURATION: median seconds; MONEY: sum in minor units.
+   * PER_HOUR's denominator is hours rounded to 2 decimals (the value is computed from the exact hours).
+   */
   value: number | bigint | null;
   numerator?: number;
   denominator?: number;
-  /** Records behind the value (for DURATION: records with a measured duration). */
+  /** Records behind the value (for DURATION: records with a measured duration; for PER_HOUR: numerator records). */
   sampleCount: number;
   /** Up to `MAX_DRILL_DOWN_IDS` source record ids, in a stable order. */
   recordIds: string[];
@@ -146,6 +154,11 @@ function reduceGroup(unit: KpiUnit, facts: readonly KpiFact[]): Pick<KpiValueRow
       const middle = median(durations);
       return { value: middle === null ? null : Math.round(middle / 1000), sampleCount: durations.length };
     }
+    case "PER_HOUR": {
+      const numerator = facts.filter((fact) => fact.hours === undefined).length;
+      const hours = facts.reduce((sum, fact) => sum + (fact.hours ?? 0), 0);
+      return { value: hours > 0 ? numerator / hours : null, numerator, denominator: Math.round(hours * 100) / 100, sampleCount: numerator };
+    }
     case "MONEY": {
       let total = 0n;
       for (const fact of facts) total += fact.amountMinor ?? 0n;
@@ -192,7 +205,8 @@ export function aggregateFacts(facts: readonly KpiFact[], unit: KpiUnit, options
   }
 
   const rows = [...groups.values()].map(({ row, facts: groupFacts }) => {
-    const ids = groupFacts.map((fact) => fact.recordId).sort();
+    // PER_HOUR lists the numerator records only: the drill-down names ONE record type.
+    const ids = groupFacts.filter((fact) => unit !== "PER_HOUR" || fact.hours === undefined).map((fact) => fact.recordId).sort();
     return {
       ...row,
       ...reduceGroup(unit, groupFacts),

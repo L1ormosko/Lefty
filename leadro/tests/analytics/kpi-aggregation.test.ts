@@ -94,6 +94,14 @@ describe("aggregateFacts", () => {
     expect(aggregateFacts(facts, "RATIO", flat)[0]).toMatchObject({ value: 1.5, numerator: 3, denominator: 2 });
   });
 
+  it("divides numerator records by the hours of the time base, listing only the numerator records", () => {
+    const facts = [fact("job1"), fact("job2"), fact("job3"), fact("shift1", { hours: 4 }), fact("shift2", { hours: 2.004 })];
+    expect(aggregateFacts(facts, "PER_HOUR", flat)[0]).toMatchObject({ numerator: 3, denominator: 6, sampleCount: 3, recordIds: ["job1", "job2", "job3"] });
+    expect(aggregateFacts(facts, "PER_HOUR", flat)[0].value).toBeCloseTo(3 / 6.004);
+    expect(aggregateFacts([fact("job1")], "PER_HOUR", flat)[0]).toMatchObject({ value: null, numerator: 1, denominator: 0 });
+    expect(aggregateFacts([fact("shift1", { hours: 8 })], "PER_HOUR", flat)[0]).toMatchObject({ value: 0, numerator: 0, recordIds: [] });
+  });
+
   it("never sums money across currencies", () => {
     const facts = [fact("a", { currency: "USD", amountMinor: 1000n }), fact("b", { currency: "EUR", amountMinor: 50n }), fact("c", { currency: "USD", amountMinor: 1n })];
     const rows = aggregateFacts(facts, "MONEY", flat);

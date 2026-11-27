@@ -17,8 +17,10 @@ export type KpiFamily = (typeof KPI_FAMILIES)[number];
  * - DURATION: median elapsed time in seconds over the sample.
  * - MONEY: sum of integer minor units, one figure PER CURRENCY (never summed across currencies).
  * - RATIO: records per distinct contributor (e.g. completed jobs per employee); numerator and denominator are returned.
+ * - PER_HOUR: records per hour of a measured time base (e.g. completed jobs per recorded shift hour); numerator (records) and
+ *   denominator (hours) are returned.
  */
-export const KPI_UNITS = ["COUNT", "RATE", "DURATION", "MONEY", "RATIO"] as const;
+export const KPI_UNITS = ["COUNT", "RATE", "DURATION", "MONEY", "RATIO", "PER_HOUR"] as const;
 export type KpiUnit = (typeof KPI_UNITS)[number];
 
 /** BLOCKED_ON_SPEC: the spec does not define the inputs yet (spec 28.4); the engine returns that status, never a value. */
