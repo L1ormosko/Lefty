@@ -31,7 +31,7 @@ import type { OpenDuplicate } from "./duplicate-detection";
 export type CustomerRecordSet = "job_related" | "lead_related";
 export const CUSTOMER_RECORD_SETS: readonly CustomerRecordSet[] = ["job_related", "lead_related"];
 
-const customerScopeColumns: ScopeColumns<Prisma.CustomerWhereInput> = {
+export const customerScopeColumns: ScopeColumns<Prisma.CustomerWhereInput> = {
   orgUnit: (orgUnitIds) => ({ orgUnitId: { in: orgUnitIds } }),
   legalEntity: (legalEntityIds) => ({ orgUnit: { legalEntityId: { in: legalEntityIds } } }),
   assigned: customerAssignedToWhere,

@@ -36,7 +36,7 @@ export {
   assignedEmployeeIdsByCustomer,
   teamMembers,
 } from "./assignment-access";
-export { customerResourceRef, resolveCustomerListAccess, visibleCustomerIds, revealableDuplicates, assertCustomerActive } from "./customer-access";
+export { customerResourceRef, customerScopeColumns, resolveCustomerListAccess, visibleCustomerIds, revealableDuplicates, assertCustomerActive } from "./customer-access";
 export type { CustomerListAccess } from "./customer-access";
 
 export {

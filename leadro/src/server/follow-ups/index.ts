@@ -12,7 +12,7 @@ export { sweepFollowUps, sweepAllFollowUps, DEFAULT_DUE_SOON_MINUTES } from "./s
 export type { FollowUpSweepResult } from "./sweep";
 
 // Access helpers (route resolvers, notifications, other modules' tests)
-export { followUpResourceRef, followUpResourceRefById } from "./access";
+export { followUpResourceRef, followUpResourceRefById, resolveFollowUpListAccess } from "./access";
 export { registerFollowUpTargetAccess } from "./targets";
 export type { FollowUpTargetAccess, FollowUpTargetFacts } from "./targets";
 export { registerFollowUpNotificationTarget } from "./notify";

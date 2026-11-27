@@ -3633,3 +3633,94 @@ Data is read through the reporting read client (a replica when `REPORTING_DATABA
   `recordIdsTruncated`. `drillDown { recordType, anchor, from, to, orgUnitId }` says which records the ids are and how to list them with
   the owning module's API (under the caller's own permissions). `estimate: true` marks an estimate (recovery estimated value, spec 9.7).
   A `BLOCKED_ON_SPEC` KPI returns `rows: []`, `drillDown: null` and `blockedReason`, never a value (spec 28.4).
+## Reports (`/api/v1/reports/**`) - Phase 6
+
+Code: `src/server/reports` (README there); decisions: DECISIONS.md "Phase 6 Task 5". **Permissions**: `reports.view` (run, list
+datasets / views), `reports.create` (save, edit / archive own views), `reports.manage` (share / unshare, read and archive others' views:
+a view with `scopeOrgUnitId` is attributed to that unit, one without is tenant-level), `reports.export` (sensitive) **plus** the dataset's
+own permissions. **Datasets** (`datasetKey` -> view / export permission, date column, export cap): `jobs` (`jobs.view` / `jobs.export`,
+`createdAt`, 10 000), `job_outcomes` (`job_outcomes.view` / `jobs.export`, `occurredAt`, 10 000), `leads` (`leads.view` / `leads.export`,
+`createdAt`, 10 000), `customers` (`customers.view` / `customers.export`, `createdAt`, 5 000), `recovery_cases` (`recovery.view` /
+`leads.export`, `outcomeAt`, 10 000), `follow_up_tasks` (`follow_ups.view` / `leads.export`, `dueAt`, 10 000; the target must also be
+viewable), `training_records` (`training.view` / `employees.export`, `completedAt`, 10 000), `payments` (`finance_payments.view` /
+`financial_reports.export`, `createdAt`, 10 000), `ledger_entries` (`finance_ledger.view` / `finance_ledger.export`, `occurredAt`, 50 000).
+**Scope**: only TENANT / ORG_UNIT / LEGAL_ENTITY grants of the dataset's view permission open rows (no OWN / ASSIGNED, no set-qualified
+grants), attributed as the owning module does (job unit, outcome's job, case / lead / customer / task unit, payment's job, ledger snapshot,
+training record's employee placement). **Columns** are gated by the owner's field sets: a requested column no grant reveals is dropped and
+named in `meta.hiddenColumns` (none visible = `403`); rows come only from grants revealing every field set a filter or the date range
+reads; a cell outside the row's own grants is `null`; a sort column the caller cannot read on every row falls back to `id`.
+
+**Definition** (strict): `datasetKey`, `columns` (1-200 distinct dataset column keys), `filters` (object, validated per dataset:
+`dateFrom?` / `dateTo?` ISO instants with offset, half-open on the date column; per filterable column an array of 1-100 values (enum
+values, ids, ISO currency codes) or a boolean), `scopeOrgUnitId?` (one org unit, its whole subtree included, intersected with the scope;
+unknown = `400`). Unknown dataset / column / filter = `400` (`field` = `datasetKey`, `columns`, `filters.<key>`).
+
+### GET /api/v1/reports/datasets
+
+- **Permission**: `reports.view`. **Response**: `200 { data: [{ key, viewPermission, exportPermission, dateColumn, defaultSort, maxExportRows,
+  columns: [{ key, type, fieldSet, filter, sortable, enumValues, currencyColumn }], exportable }] }`: only datasets whose view permission the
+  caller holds, only the columns they may see. Labels: `REPORT.DATASET.<KEY>`, `REPORT.COLUMN.<UPPER_SNAKE key>`.
+
+### POST /api/v1/reports/query
+
+- **Permission**: `reports.view` + the dataset's view permission (a read sent as POST: the definition is a body). **Body** (strict): a
+  definition, or `viewId` (a view the caller may read; not both), plus `sort?` `{ column (sortable), direction: asc|desc }`, `cursor?`,
+  `limit` (1-200, default 50). **Response**: `200 { data: [row], page, meta: { datasetKey, viewId, columns, hiddenColumns, sort } }`; rows
+  hold the visible columns only, money as minor-unit strings, instants ISO UTC, dates `YYYY-MM-DD`. Not audited.
+
+### GET /api/v1/reports/views
+
+- **Permission**: `reports.view`. **Query** (strict): `cursor`, `limit`, `datasetKey?`, `includeArchived` (`true|false`, default false).
+  **Response**: `200 { data, page }` newest first: own views, active views shared with a role the caller holds now, views the caller
+  manages. Fields: `id, name, datasetKey, columns, filters, scopeOrgUnitId, ownerId, archivedAt, archivedById, createdAt, updatedAt`, plus
+  `shares: [{ roleId, sharedById, createdAt }]` for the owner and managers only.
+
+### POST /api/v1/reports/views
+
+- **Permission**: `reports.create` + the dataset's view permission. **Body** (strict): a definition + `name` (1-120). Every column must be
+  visible to the creator (`403` naming the hidden ones). **Errors**: `409` for an active view of the same owner with the same name
+  (case- and edge-space-insensitive). **Response**: `201 { data }`. **Audit**: `report_view.create`.
+
+### GET /api/v1/reports/views/{id}
+
+- **Permission**: `reports.view`; own, shared with a held role (active views), or managed; anything else `404`.
+
+### PATCH /api/v1/reports/views/{id}
+
+- **Permission**: `reports.create`, owner only (`403` for a reader who is not the owner). **Body** (strict, at least one): `name?`,
+  `columns?`, `filters?`, `scopeOrgUnitId?` (null clears). Dataset and owner never change. Archived = `409`. **Audit**: `report_view.update`
+  (changed fields).
+
+### POST /api/v1/reports/views/{id}/archive
+
+- **Permission**: the owner with `reports.create`, or `reports.manage` over the view. Already archived = `409`. Views are never deleted.
+  **Audit**: `report_view.archive`.
+
+### POST /api/v1/reports/views/{id}/shares
+
+- **Permission**: `reports.manage` over the view (Owner template only, by default). **Body** (strict): `{ roleId }`: an active role that
+  holds the dataset's view permission (else `400` on `roleId`). Already shared = `409`; archived view = `409`. **Response**: `201 { data }`
+  (the view with its shares). **Audit**: `report_view.share`. Sharing hands over the definition only.
+
+### DELETE /api/v1/reports/views/{id}/shares/{roleId}
+
+- **Permission**: `reports.manage` over the view. Removes the share row (`404` when there is none). **Response**: `204`.
+  **Audit**: `report_view.unshare`.
+
+### POST /api/v1/reports/exports
+
+- **Permission**: `reports.export` + the dataset's export permission (capability; a refusal is `403` and audited as `authz.denied`); rows
+  must be inside the scopes of both the view permission and the export permission. **Body**: as `/reports/query` (`cursor` / `limit`
+  ignored). Synchronous: counts first; over the dataset's cap nothing is produced, a `REFUSED_TOO_LARGE` log row is written and the answer
+  is `400` on `filters` with the row count and the cap. A database failure (30 s statement budget) logs `FAILED` (`query_timeout` /
+  `query_failed`) and answers `500`. **Response**: `201 { data: { export (log row), fileName, contentType: "text/csv; charset=utf-8",
+  content } }`: UTF-8 with BOM, CRLF, header = column keys; text cells starting with `= + - @ tab CR` are prefixed with `'`; money is a
+  decimal string in major units of the row's currency (`1250.00`, never summed); instants are ISO local time in the tenant's zone with offset
+  (`2026-03-10T11:00:00-04:00`); dates `YYYY-MM-DD`. **Audit**: `report.export` (dataset, view, filters + hash, org unit, exported columns,
+  row count, cap, status; outcome `FAILED` for refused / failed attempts) in the same transaction as the `ReportExport` row.
+
+### GET /api/v1/reports/exports
+
+- **Permission**: `audit.view` (tenant-level) sees every export; otherwise `reports.view` and only the caller's own. **Query** (strict):
+  `cursor`, `limit`, `datasetKey?`, `actorId?`, `status?`. **Response**: `200 { data, page }` newest first: `id, actorId, datasetKey,
+  savedViewId, filters, filtersHash, scopeOrgUnitId, columns, format, status, rowCount, rowLimit, failureCode, createdAt`.
