@@ -9,7 +9,8 @@ export { handleOutcomeRecorded, registerRecoveryEngine } from "./engine";
 export { getCase, listCases, assignCase, changeCaseStatus, updateCase, recordAttempt, recoverCase, refreshPresence, recoverySummary } from "./cases";
 
 // Access helpers (route resolvers, other modules)
-export { caseResourceRef, caseResourceRefById, ruleResourceRefById } from "./access";
+export { caseResourceRef, caseResourceRefById, caseScopeColumns, ruleResourceRefById } from "./access";
+export { CASE_FIELD_MAP } from "./fields";
 export { registerRecoveryNotificationTarget } from "./notify";
 export { registerRecoveryFollowUpTarget } from "./targets";
 

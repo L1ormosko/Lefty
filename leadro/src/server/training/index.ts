@@ -30,6 +30,8 @@ export { listOwnAssignments, listOwnRecords, ownAssignmentsQuerySchema, ownRecor
 export type { OwnAssignmentsQuery, OwnRecordsQuery, OwnAssignmentView, OwnRecordView } from "./self-service";
 
 export type { AssignmentView, CourseView, RecordView } from "./views";
+// The data scope of a training record (the employee's), for read models in other modules (reports).
+export { recordScopeColumns as trainingRecordScopeColumns } from "./views";
 export {
   idParams as trainingIdParams,
   createCourseSchema,
