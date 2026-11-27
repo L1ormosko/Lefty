@@ -229,6 +229,19 @@ model Tenant {
   savedReportViews      SavedReportView[]
   savedReportViewShares SavedReportViewShare[]
   reportExports         ReportExport[]
+
+  // Phase 7
+  backgroundJobs          BackgroundJob[]
+  scheduledJobDefinitions ScheduledJobDefinition[]
+  domainEvents            DomainEventOutbox[]
+  automationRules         AutomationRule[]
+  automationRuleVersions  AutomationRuleVersion[]
+  automationExecutions    AutomationExecution[]
+  integrations            Integration[]
+  integrationLogs         IntegrationLog[]
+  webhookEvents           WebhookEvent[]
+  accountingMappings      AccountingMapping[]
+  exportBatches           ExportBatch[]
 }
 
 model LegalEntity {
@@ -247,6 +260,10 @@ model LegalEntity {
 
   ledgerEntries      LedgerEntry[]
   reconciliationRuns ReconciliationRun[]
+
+  // Phase 7
+  accountingMappings AccountingMapping[] @relation("AccountingMappingLegalEntity")
+  exportBatches      ExportBatch[]       @relation("ExportBatchLegalEntity")
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -315,6 +332,9 @@ model OrgUnit {
   // Phase 6
   savedReportViews SavedReportView[] @relation("SavedReportViewScopeOrgUnit")
   reportExports    ReportExport[]    @relation("ReportExportScopeOrgUnit")
+
+  // Phase 7
+  automationRuleVersions AutomationRuleVersion[] @relation("AutomationRuleVersionScopeOrgUnit")
 
   @@unique([id, tenantId])
   @@index([tenantId, parentId])
@@ -558,6 +578,16 @@ model User {
   savedReportViewsArchived SavedReportView[]      @relation("SavedReportViewArchivedBy")
   savedReportViewShares    SavedReportViewShare[] @relation("SavedReportViewSharedBy")
   reportExports            ReportExport[]         @relation("ReportExportActor")
+
+  // Phase 7
+  automationRulesCreated        AutomationRule[]        @relation("AutomationRuleCreatedBy")
+  automationRulesArchived       AutomationRule[]        @relation("AutomationRuleArchivedBy")
+  automationRuleVersionsCreated AutomationRuleVersion[] @relation("AutomationRuleVersionCreatedBy")
+  integrationsCreated           Integration[]           @relation("IntegrationCreatedBy")
+  integrationsUpdated           Integration[]           @relation("IntegrationUpdatedBy")
+  accountingMappingsCreated     AccountingMapping[]     @relation("AccountingMappingCreatedBy")
+  exportBatchesPrepared         ExportBatch[]           @relation("ExportBatchPreparedBy")
+  exportBatchesExported         ExportBatch[]           @relation("ExportBatchExportedBy")
 
   @@unique([id, tenantId])
   @@unique([tenantId, email])
@@ -3079,6 +3109,12 @@ enum ApprovalSubjectType {
   HIGH_VALUE_DISCOUNT
   /// Phase 5: publishing a performance metric definition version (spec 10.2).
   PERFORMANCE_METRIC_DEFINITION
+  /// Phase 7: activating a high-impact automation rule version (spec 15.2).
+  AUTOMATION_RULE_VERSION
+  /// Phase 7: activating an accounting mapping version (spec 11.x "configurable and reviewed").
+  ACCOUNTING_MAPPING
+  /// Phase 7: releasing a payroll export batch (time facts) before it is exported.
+  PAYROLL_EXPORT
 }
 
 enum ApprovalRequestStatus {
@@ -3513,6 +3549,11 @@ model ApprovalRequest {
   // Phase 5
   metricDefinitions PerformanceMetricDefinition[] @relation("PerformanceMetricDefinitionApproval")
 
+  // Phase 7
+  automationRuleVersions AutomationRuleVersion[] @relation("AutomationRuleVersionApproval")
+  accountingMappings     AccountingMapping[]     @relation("AccountingMappingApproval")
+  exportBatches          ExportBatch[]           @relation("ExportBatchApproval")
+
   @@unique([id, tenantId])
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, status, requestedAt])
@@ -3643,12 +3684,16 @@ model PaymentIntakeEvent {
   occurredAt     DateTime?           @db.Timestamptz(3)
   receivedAt     DateTime            @default(now()) @db.Timestamptz(3)
   processedAt    DateTime?           @db.Timestamptz(3)
+  /// Phase 7: the generic inbound event this intake row was handled from (null = received through the Phase 4 intake route).
+  /// One intake row per webhook event; frozen.
+  webhookEventId String?             @unique
 
-  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  job         Job?                      @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  payments    Payment[]                 @relation("PaymentIntake")
-  chargebacks Chargeback[]              @relation("ChargebackIntake")
-  exceptions  ReconciliationException[] @relation("ReconciliationIntake")
+  tenant       Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  job          Job?                      @relation(fields: [jobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  webhookEvent WebhookEvent?             @relation(fields: [webhookEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payments     Payment[]                 @relation("PaymentIntake")
+  chargebacks  Chargeback[]              @relation("ChargebackIntake")
+  exceptions   ReconciliationException[] @relation("ReconciliationIntake")
 
   @@unique([id, tenantId])
   @@unique([tenantId, provider, externalId])
@@ -4432,4 +4477,512 @@ model ReportExport {
   @@index([tenantId, createdAt])
   @@index([tenantId, actorId, createdAt])
   @@index([tenantId, datasetKey, createdAt])
+}
+
+// ═════════════════════════ Phase 7: integrations and automation (spec Part 15, Part 18, 2, 11.9, 14) ═════════════════════════
+// Migration 20261128100000_phase7_integrations_automation. One DB-backed job queue, a transactional outbox of domain events, a
+// versioned automation engine, the integration registry (non-secret configuration + a credentials REFERENCE only), the generic
+// inbound-event log, and the payroll / accounting export runs. Rules Prisma cannot express (RLS for system rows, partial and
+// NULLS NOT DISTINCT unique indexes, CHECKs, status machines, frozen content, append-only logs) are in the migration's
+// hand-written part and in docs/ERD.md "Phase 7".
+
+enum BackgroundJobStatus {
+  /// Waiting for `runAt`.
+  QUEUED
+  /// Claimed by a worker (`lockedBy`, `lockedAt`, `heartbeatAt`).
+  RUNNING
+  SUCCEEDED
+  /// The last attempt failed; retried at `runAt` (backoff) while attempts remain.
+  FAILED
+  /// Dead letter: out of attempts or a permanent error. Only an admin retry puts it back in the queue.
+  DEAD
+}
+
+enum AutomationRuleStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  RETIRED
+}
+
+enum AutomationExecutionResult {
+  /// Conditions matched and every action succeeded.
+  EXECUTED
+  /// Some actions succeeded, others failed (each one's outcome is in `actionsTaken`).
+  PARTIAL
+  FAILED
+  /// The triggering event did not meet the conditions or the scope.
+  NOT_MATCHED
+  /// Loop prevention: the causation chain is at the depth limit.
+  SUPPRESSED_DEPTH
+  /// Loop prevention: the same rule already acted on the same entity inside this causation chain.
+  SUPPRESSED_REPEAT
+}
+
+enum IntegrationCategory {
+  MAPS
+  NAVIGATION
+  SMS
+  EMAIL
+  PUSH
+  TELEPHONY
+  PAYMENT
+  PAYROLL
+  ACCOUNTING
+  MARKETING_LEAD_SOURCE
+  EXTERNAL_CRM
+}
+
+enum IntegrationStatus {
+  /// No provider implementation or no credentials: nothing is sent, charged or synced (spec 28.3).
+  NOT_CONFIGURED
+  /// The last connection test succeeded (`lastCheckedAt`).
+  CONNECTED
+  /// The last test or call failed (`statusCode` says why), e.g. auth expired or circuit open.
+  ERROR
+  DISABLED
+}
+
+enum IntegrationLogKind {
+  CALL
+  CONNECTION_TEST
+  WEBHOOK
+  STATUS_CHANGE
+}
+
+enum IntegrationLogOutcome {
+  SUCCESS
+  FAILURE
+}
+
+enum WebhookSignatureResult {
+  VALID
+  INVALID
+}
+
+enum WebhookValidationResult {
+  VALID
+  INVALID
+  /// Not validated because the signature did not verify.
+  SKIPPED
+}
+
+enum WebhookHandlingStatus {
+  /// Authenticated and validated; waiting for (or being processed by) its handler job.
+  RECEIVED
+  /// The owning module's handler ran (`handlingCode` = its verdict, e.g. "payment_accepted", "unknown_job").
+  HANDLED
+  /// Signature or validation failed: never handled, never changes a core record.
+  REJECTED
+  /// The handler job died (dead letter); an admin may replay it (back to RECEIVED).
+  FAILED
+}
+
+enum AccountingMappingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  RETIRED
+}
+
+enum ExportBatchKind {
+  /// Time and attendance facts only (shifts, approved hours, job counts); never wages, taxes or deductions (spec 11.9).
+  PAYROLL
+  /// Ledger entries through an approved account mapping ("requires review by qualified finance professionals").
+  ACCOUNTING
+}
+
+enum ExportBatchStatus {
+  PREPARED
+  PENDING_APPROVAL
+  APPROVED
+  EXPORTED
+  FAILED
+  CANCELLED
+}
+
+enum ExportFormat {
+  CSV
+}
+
+/// One unit of background work (spec 2 "background job queues"). Tenant jobs carry `tenantId` and run inside `withTenant`;
+/// system jobs (e.g. a sweep that fans out to every tenant) have no tenant. The payload holds ids only, never copies of
+/// sensitive data. RLS: a tenant context sees only its own jobs and never a system job; only the queue-worker path
+/// (`app.queue_worker = 'on'`) sees every row (docs/DECISIONS.md "Phase 7 Task 1").
+model BackgroundJob {
+  id             String              @id @default(cuid())
+  /// Null = a system job.
+  tenantId       String?
+  /// Handler key registered by the owning module, e.g. "follow_ups.due_sweep".
+  type           String
+  /// Ids and small scalars only (a JSON object, at most 4 KB).
+  payload        Json                @default("{}")
+  status         BackgroundJobStatus @default(QUEUED)
+  /// Lower number = claimed first.
+  priority       Int                 @default(100)
+  runAt          DateTime            @default(now()) @db.Timestamptz(3)
+  attempts       Int                 @default(0)
+  maxAttempts    Int                 @default(5)
+  lockedBy       String?
+  lockedAt       DateTime?           @db.Timestamptz(3)
+  heartbeatAt    DateTime?           @db.Timestamptz(3)
+  /// Stable code of the last failure (never a message, stack trace or provider response).
+  lastErrorCode  String?
+  lastErrorAt    DateTime?           @db.Timestamptz(3)
+  completedAt    DateTime?           @db.Timestamptz(3)
+  /// Unique per tenant, system jobs sharing one namespace (partial index `background_job_idempotency`): enqueuing the same
+  /// work twice is a no-op.
+  idempotencyKey String?
+  /// The scheduled definition that enqueued it, and the window it covers (e.g. "2026-11-28T09:00Z").
+  scheduleKey    String?
+  scheduleWindow String?
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  integrationLogs IntegrationLog[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, status, createdAt])
+  @@index([type, status])
+}
+
+/// A periodic job (Task 2 scheduler). `tenantId` null = a system definition; a tenant row is that tenant's own definition or
+/// override of a key. One row per (tenant, key), system rows sharing one namespace (partial index). The scheduler enqueues one
+/// BackgroundJob per definition and window (idempotency key).
+model ScheduledJobDefinition {
+  id         String    @id @default(cuid())
+  tenantId   String?
+  key        String
+  jobType    String
+  /// Five-field cron expression, evaluated in `timeZone`.
+  cron       String
+  timeZone   String    @default("UTC")
+  enabled    Boolean   @default(true)
+  lastRunAt  DateTime? @db.Timestamptz(3)
+  lastWindow String?
+  nextRunAt  DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([enabled, nextRunAt])
+}
+
+/// Transactional outbox (Task 2): a domain event written in the same transaction as the business change, delivered to
+/// subscribers (automation, integrations) by the worker. Ids only. `causationChain` lists the outbox event ids that led to this
+/// one, root first (automation loop prevention, spec 15.2).
+model DomainEventOutbox {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  /// Catalog key, e.g. "job_outcome.reported".
+  eventType             String
+  aggregateType         String
+  aggregateId           String
+  /// Ids and small scalars only (a JSON object, at most 8 KB).
+  payload               Json      @default("{}")
+  causationChain        String[]  @default([])
+  /// The automation rule version whose action emitted this event (null = a person or a system process).
+  causedByRuleVersionId String?
+  correlationId         String?
+  /// A person, or a machine actor such as "system:scheduler"; at most one is set.
+  actorUserId           String?
+  systemActor           String?
+  occurredAt            DateTime  @default(now()) @db.Timestamptz(3)
+  /// Set once, when the dispatcher has handed the event to every subscriber.
+  dispatchedAt          DateTime? @db.Timestamptz(3)
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  executions AutomationExecution[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, eventType, occurredAt])
+  @@index([tenantId, aggregateType, aggregateId])
+}
+
+/// An automation rule (spec 15.1): a stable identity; the content lives in its versions.
+model AutomationRule {
+  id           String    @id @default(cuid())
+  tenantId     String
+  /// Stable lower-case key, unique per tenant.
+  key          String
+  name         String
+  description  String?   @db.Text
+  createdById  String
+  archivedAt   DateTime? @db.Timestamptz(3)
+  archivedById String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant     Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy  User                    @relation("AutomationRuleCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  archivedBy User?                   @relation("AutomationRuleArchivedBy", fields: [archivedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  versions   AutomationRuleVersion[]
+  executions AutomationExecution[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, key])
+}
+
+/// One version of a rule (spec 15.1-15.2): trigger, declarative conditions, actions, scope, priority. Editable only as DRAFT; once
+/// submitted or activated it is frozen (a change is a new version). At most one ACTIVE version per rule. A high-impact version
+/// becomes ACTIVE only through an approval request (subject AUTOMATION_RULE_VERSION; never decided by its author).
+model AutomationRuleVersion {
+  id                String               @id @default(cuid())
+  tenantId          String
+  ruleId            String
+  version           Int
+  /// Domain event type from the trigger catalog, e.g. "job_outcome.reported".
+  trigger           String
+  /// Declarative conditions over event fields (a JSON array of at most 50 objects; no code).
+  conditions        Json                 @default("[]")
+  /// Ordered actions from the action registry (a JSON array of 1-20 objects, each with a "type").
+  actions           Json
+  /// The org unit (and below) the rule applies to; null = the whole tenant.
+  scopeOrgUnitId    String?
+  /// Lower number = evaluated first.
+  priority          Int                  @default(100)
+  status            AutomationRuleStatus @default(DRAFT)
+  highImpact        Boolean              @default(false)
+  approvalRequestId String?
+  createdById       String
+  submittedAt       DateTime?            @db.Timestamptz(3)
+  activatedAt       DateTime?            @db.Timestamptz(3)
+  retiredAt         DateTime?            @db.Timestamptz(3)
+  createdAt         DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  rule            AutomationRule        @relation(fields: [ruleId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  scopeUnit       OrgUnit?              @relation("AutomationRuleVersionScopeOrgUnit", fields: [scopeOrgUnitId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest?      @relation("AutomationRuleVersionApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy       User                  @relation("AutomationRuleVersionCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  executions      AutomationExecution[]
+
+  @@unique([id, tenantId])
+  @@unique([id, ruleId, tenantId])
+  @@unique([tenantId, ruleId, version])
+  @@index([tenantId, status, trigger, priority])
+}
+
+/// One evaluation of a rule version against one triggering event (append-only). Unique per (version, event): a redelivered event
+/// never runs a rule twice. `actionsTaken` lists each action's outcome with the ids of the records the owning module created.
+model AutomationExecution {
+  id             String                    @id @default(cuid())
+  tenantId       String
+  ruleId         String
+  ruleVersionId  String
+  triggerEventId String
+  /// The entity the event is about (for same-rule-same-entity suppression), e.g. "Job" + its id.
+  entityType     String
+  entityId       String
+  result         AutomationExecutionResult
+  /// JSON array of { "type", "status", "recordType"?, "recordId"?, "errorCode"? } (ids only).
+  actionsTaken   Json                      @default("[]")
+  /// Length of the triggering event's causation chain.
+  causationDepth Int
+  errorCode      String?
+  executedAt     DateTime                  @default(now()) @db.Timestamptz(3)
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  rule         AutomationRule        @relation(fields: [ruleId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  ruleVersion  AutomationRuleVersion @relation(fields: [ruleVersionId, ruleId, tenantId], references: [id, ruleId, tenantId], onDelete: Restrict)
+  triggerEvent DomainEventOutbox     @relation(fields: [triggerEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, ruleVersionId, triggerEventId])
+  @@index([tenantId, ruleId, entityType, entityId, executedAt])
+  @@index([tenantId, executedAt])
+}
+
+/// A tenant's integration with one provider (spec 18.1): category, provider key, non-secret configuration, a credentials
+/// REFERENCE (resolved by the SecretStore; the secret itself is never stored here), connection status, webhook settings and
+/// retry policy. Nothing pretends to work: without a provider implementation and credentials it stays NOT_CONFIGURED.
+model Integration {
+  id                    String              @id @default(cuid())
+  tenantId              String
+  /// Stable lower-case key, unique per tenant.
+  key                   String
+  category              IntegrationCategory
+  /// Provider implementation key, e.g. "twilio".
+  providerKey           String
+  name                  String
+  /// Non-secret provider settings (a JSON object; keys that look like secrets are refused at any depth).
+  config                Json                @default("{}")
+  /// Reference resolved by the SecretStore, e.g. "env:LEADRO_ACME_SMS_TOKEN" or "vault:leadro/acme/sms". Never the secret.
+  credentialsRef        String?
+  status                IntegrationStatus   @default(NOT_CONFIGURED)
+  /// Stable code for ERROR / DISABLED, e.g. "auth_expired", "rate_limited", "circuit_open".
+  statusCode            String?
+  lastCheckedAt         DateTime?           @db.Timestamptz(3)
+  /// While set and in the future, calls are not attempted (circuit open after repeated outages).
+  circuitOpenUntil      DateTime?           @db.Timestamptz(3)
+  webhookEnabled        Boolean             @default(false)
+  /// Non-secret webhook settings, e.g. accepted event types (a JSON object). The signing secret is behind `credentialsRef`.
+  webhookSettings       Json                @default("{}")
+  retryMaxAttempts      Int                 @default(5)
+  retryBaseDelaySeconds Int                 @default(30)
+  retryMaxDelaySeconds  Int                 @default(3600)
+  createdById           String
+  updatedById           String?
+  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @db.Timestamptz(3)
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy     User             @relation("IntegrationCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  updatedBy     User?            @relation("IntegrationUpdatedBy", fields: [updatedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  logs          IntegrationLog[]
+  webhookEvents WebhookEvent[]
+  exportBatches ExportBatch[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, key])
+  @@index([tenantId, category, status])
+}
+
+/// Append-only log of integration calls, connection tests, webhook handling attempts and status changes (spec 18.1 "Error
+/// logs"). No secrets, no raw provider payloads: stable codes, HTTP status, duration and a small JSON object of ids.
+model IntegrationLog {
+  id              String                @id @default(cuid())
+  tenantId        String
+  integrationId   String?
+  webhookEventId  String?
+  backgroundJobId String?
+  kind            IntegrationLogKind
+  outcome         IntegrationLogOutcome
+  /// Stable operation code, e.g. "sms.send", "connection.test", "webhook.handle".
+  operation       String
+  httpStatus      Int?
+  errorCode       String?
+  attempt         Int                   @default(1)
+  durationMs      Int?
+  /// Ids and small scalars only (a JSON object, at most 4 KB, no secret-looking keys).
+  details         Json                  @default("{}")
+  occurredAt      DateTime              @default(now()) @db.Timestamptz(3)
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  integration   Integration?   @relation(fields: [integrationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  webhookEvent  WebhookEvent?  @relation(fields: [webhookEventId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  backgroundJob BackgroundJob? @relation(fields: [backgroundJobId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, integrationId, occurredAt])
+  @@index([tenantId, webhookEventId])
+  @@index([tenantId, outcome, occurredAt])
+}
+
+/// A generic inbound event (spec 18.3), recorded BEFORE any core record changes: who sent it, its SHA-256, the signature and
+/// schema verdicts, and the handling outcome. Unique per (tenant, provider, externalId): a duplicate delivery is a no-op. A forged
+/// event is stored under "unverified:<sha256>" so it can never pre-claim a genuine id. Handling attempts are IntegrationLog rows.
+/// Phase 4 PaymentIntakeEvent stays the payments module's own record and links back through `webhookEventId` (Task 4).
+model WebhookEvent {
+  id               String                  @id @default(cuid())
+  tenantId         String
+  integrationId    String?
+  /// Provider key (as in Integration.providerKey).
+  provider         String
+  externalId       String
+  eventType        String
+  payloadHash      String                  @db.Char(64)
+  signatureResult  WebhookSignatureResult
+  validationResult WebhookValidationResult
+  /// Stable code when signature or validation failed, e.g. "bad_signature", "schema_invalid".
+  rejectionCode    String?
+  /// The validated, normalized fields (ids and scalars); never the raw payload.
+  parsed           Json?
+  handlingStatus   WebhookHandlingStatus
+  /// The owning module's verdict once HANDLED, or the failure code once FAILED.
+  handlingCode     String?
+  handlerJobId     String?
+  receivedAt       DateTime                @default(now()) @db.Timestamptz(3)
+  handledAt        DateTime?               @db.Timestamptz(3)
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  integration         Integration?         @relation(fields: [integrationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  logs                IntegrationLog[]
+  paymentIntakeEvents PaymentIntakeEvent[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, provider, externalId])
+  @@index([tenantId, handlingStatus, receivedAt])
+  @@index([tenantId, integrationId, receivedAt])
+}
+
+/// A versioned chart-of-accounts mapping for the accounting export (spec 11.x "exact accounting treatment must be configurable and
+/// reviewed"). One series per legal entity (null = the tenant default). Always activated through an approval request (subject
+/// ACCOUNTING_MAPPING); frozen once submitted. At most one ACTIVE version per legal entity.
+model AccountingMapping {
+  id                String                  @id @default(cuid())
+  tenantId          String
+  legalEntityId     String?
+  version           Int
+  status            AccountingMappingStatus @default(DRAFT)
+  /// JSON array of 1-500 objects like { "ledgerEntryType", "source"?, "debitAccount", "creditAccount" } (Task 5 validates them).
+  mappings          Json
+  approvalRequestId String?
+  createdById       String
+  submittedAt       DateTime?               @db.Timestamptz(3)
+  activatedAt       DateTime?               @db.Timestamptz(3)
+  retiredAt         DateTime?               @db.Timestamptz(3)
+  createdAt         DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  legalEntity     LegalEntity?     @relation("AccountingMappingLegalEntity", fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest ApprovalRequest? @relation("AccountingMappingApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdBy       User             @relation("AccountingMappingCreatedBy", fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  exportBatches   ExportBatch[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, legalEntityId, status])
+}
+
+/// One payroll or accounting export run for a period (tenant-local dates `[periodStart, periodEnd)`). The content is fixed when
+/// prepared (`contentHash`, `rowCount`): approving and exporting refer to exactly that content, and re-exporting the same batch
+/// reproduces the same file. Payroll batches carry no money; accounting batches name the approved mapping version they used.
+model ExportBatch {
+  id                  String            @id @default(cuid())
+  tenantId            String
+  kind                ExportBatchKind
+  legalEntityId       String?
+  periodStart         DateTime          @db.Date
+  periodEnd           DateTime          @db.Date
+  status              ExportBatchStatus @default(PREPARED)
+  format              ExportFormat      @default(CSV)
+  accountingMappingId String?
+  approvalRequestId   String?
+  integrationId       String?
+  /// SHA-256 (hex) of the produced file.
+  contentHash         String            @db.Char(64)
+  rowCount            Int
+  /// Accounting only: per-currency debit / credit totals in minor units as strings (a JSON object). Null for payroll.
+  totals              Json?
+  /// Unique per tenant: preparing the same export twice returns the existing batch.
+  idempotencyKey      String
+  /// A corrected re-run of an earlier batch of the same kind and period.
+  supersedesBatchId   String?
+  /// Stable code for FAILED (never an internal message).
+  failureCode         String?
+  preparedById        String
+  exportedById        String?
+  exportedAt          DateTime?         @db.Timestamptz(3)
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(3)
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  legalEntity       LegalEntity?       @relation("ExportBatchLegalEntity", fields: [legalEntityId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  accountingMapping AccountingMapping? @relation(fields: [accountingMappingId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  approvalRequest   ApprovalRequest?   @relation("ExportBatchApproval", fields: [approvalRequestId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  integration       Integration?       @relation(fields: [integrationId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  supersedes        ExportBatch?       @relation("ExportBatchSupersedes", fields: [supersedesBatchId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  supersededBy      ExportBatch[]      @relation("ExportBatchSupersedes")
+  preparedBy        User               @relation("ExportBatchPreparedBy", fields: [preparedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  exportedBy        User?              @relation("ExportBatchExportedBy", fields: [exportedById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, kind, periodStart])
+  @@index([tenantId, status])
 }
