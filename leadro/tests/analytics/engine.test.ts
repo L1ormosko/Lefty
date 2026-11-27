@@ -169,6 +169,47 @@ describe("attribution", () => {
   });
 });
 
+describe("employee productivity (completed jobs per recorded shift hour)", () => {
+  beforeAll(async () => {
+    const { techA1, techA1Other, techB } = w;
+    const shift = (employeeId: string, orgUnitId: string, startedAt: string, hours: number | null) => {
+      const start = at(startedAt);
+      const end = hours === null ? null : new Date(start.getTime() + hours * 3_600_000);
+      return { tenantId: w.tenantId, employeeId, orgUnitId, startedAt: start, status: end ? ("ENDED" as const) : ("ACTIVE" as const), endedAt: end, endRecordedAt: end };
+    };
+    await withTenant(w.tenantId, (tx) =>
+      tx.shift.createMany({
+        data: [
+          shift(techA1.employeeId as string, w.units.teamA1, "2026-03-10T12:00:00Z", 8),
+          shift(techA1Other.employeeId as string, w.units.teamA1, "2026-03-12T12:00:00Z", 4),
+          // Tech B was placed in City A until April: March hours count for City A, April hours are outside the range.
+          shift(techB.employeeId as string, w.units.cityA, "2026-03-15T12:00:00Z", 4),
+          shift(techB.employeeId as string, w.units.cityB, "2026-04-02T12:00:00Z", 6),
+          // Still running: no hours yet.
+          shift(techA1.employeeId as string, w.units.teamA1, "2026-03-20T12:00:00Z", null),
+        ],
+      }),
+    );
+  });
+
+  it("divides led completions by recorded shift hours, attributed to the placement at the event (spec 3)", async () => {
+    const result = await run(w.ceo.actor, "employee_productivity", { groupBy: "CITY" });
+    expect(result.unit).toBe("PER_HOUR");
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({ orgUnitId: w.units.cityA, numerator: 4, denominator: 16, value: 0.25, sampleCount: 4 });
+    // Job ids only: no employee or shift identity ever leaves the engine (never a per-employee list).
+    const text = JSON.stringify(result, (_key, value) => (typeof value === "bigint" ? value.toString() : value));
+    for (const person of [w.techA1, w.techA1Other, w.techB]) expect(text).not.toContain(person.employeeId as string);
+    expect(result.rows[0].recordIds).toEqual([ids.j1, ids.j2, ids.j4, ids.j5].sort());
+  });
+
+  it("keeps a city manager's figure inside their scope, and the COO reaches it through the executive family", async () => {
+    expect((await run(w.cityManagerA.actor, "employee_productivity")).rows[0]).toMatchObject({ numerator: 3, denominator: 16 });
+    expect((await run(w.coo.actor, "employee_productivity")).rows[0]).toMatchObject({ numerator: 4, denominator: 16 });
+    await expect(run(w.techA1.actor, "employee_productivity")).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
 describe("access", () => {
   it("limits a city manager to their unit, and a requested unit outside it yields nothing", async () => {
     expect(totalOf(await run(w.cityManagerA.actor, "completed_jobs"))).toBe(4);
