@@ -1708,3 +1708,49 @@ These are manager-level choices made to keep moving; each is one template line o
 8. **One org unit per saved view** as the scope filter (FK), not a list.
 9. **Unsharing deletes** the share row (audited) instead of a revoked flag; views themselves are never deleted.
 10. **Failed and refused exports are logged too** (who tried to export what is itself audit-worthy, spec 13.5 / 22.2).
+
+## Phase 6 Task 5: report builder + exports
+
+- **Module** `src/server/reports` (README there), routes `/api/v1/reports/*` (API_REFERENCE "Reports"). No migration, no new dependency.
+  It reads business tables inside `withTenant` on the primary and writes only its own three tables plus the audit log. The analytics
+  read client (`REPORTING_DATABASE_URL` replica seam) belongs to the parallel KPI-engine task; reports can move onto it once merged.
+- **Datasets** (9): jobs, job_outcomes, leads, customers, recovery_cases, follow_up_tasks, training_records, payments, ledger_entries.
+  Columns are model scalars (no joins), so a dataset is one table; ids stand in for names (a UI resolves labels through the owning
+  module's endpoints, which apply their own access rules). Free-text bodies (notes, descriptions, requested work) are left out: titles,
+  references and memos are the only free text.
+- **Sensitivity is copied, not decided**: each column's field set comes from its owner's field map (`JOB_FIELD_MAP`,
+  `CUSTOMER_FIELD_MAP`, `LEAD_FIELD_MAP`, `JOB_OUTCOME_FIELD_MAP`, recovery `CASE_FIELD_MAP`) and `fieldSetIn` throws at load for an
+  unclassified column. Payments, ledger, follow-ups and training have no field map: the permission guards the whole record (`base`).
+  Owner modules gained exports only (`customerScopeColumns`, `caseScopeColumns` + `CASE_FIELD_MAP`, `trainingRecordScopeColumns`,
+  `resolveFollowUpListAccess`); no rule moved.
+- **Scope**: only TENANT / ORG_UNIT / LEGAL_ENTITY grants open a dataset, on the owners' unit columns (job unit, the outcome's job,
+  payment's job, ledger snapshot, the training record's employee placement). OWN / ASSIGNED (a technician's own work) and set-qualified
+  grants (`recovery_related`, `job_related`, ...) contribute nothing: report builders are management tools and dropping these parts only
+  ever narrows. Follow-ups additionally AND the follow-up module's own gate (the target must be viewable).
+- **Field-set gating, three rules** (`prepare.ts`): (1) a column is visible when some usable grant reveals its set; hidden requested
+  columns are dropped and named in `meta.hiddenColumns` (all hidden = 403); (2) rows come only from grants that reveal every set a
+  filter or the date range reads (the "no oracle" rule of `listJobOutcomes`, done in the query with `narrow`-style part filtering so
+  counts stay exact for the export cap) and at least one visible column's set; (3) cells are projected per row with `fieldSetsForRow`.
+  A sort column not readable through every row-granting part falls back to `id` (an order is an oracle too). The view's org unit filter
+  is attribution, not a column, so it does not count as reading a set (Finance may still narrow financial job columns to a unit).
+- **Saved views**: saving re-runs the same preparation; a definition with a column the creator cannot see is 403 (no saving what you
+  cannot read). `reports.manage` "in scope": a view with `scopeOrgUnitId` is attributed to that unit, a view without is tenant-level.
+  Readers: owner, holders of a role the view is shared with (active views only) and managers; anything else is 404. A share requires
+  the role to hold the dataset's view permission (any conditions: the runner's field sets apply at run time anyway).
+- **Exports**: synchronous, JSON envelope `{ export, fileName, contentType, content }` rather than a raw `text/csv` body, because
+  `defineRoute` only emits JSON (core is shared with the parallel tasks; a raw-body result type is a small later change). The export
+  permission's scope is intersected with the view permission's scope. Caps: 10 000 rows, customers 5 000 (private contact data),
+  ledger entries 50 000 (narrow rows). Over the cap: REFUSED_TOO_LARGE row + audit committed, then `400 VALIDATION_FAILED` on `filters`
+  with the true count and cap. A database error: the work transaction rolls back, a second transaction logs FAILED (`query_timeout` for
+  Postgres 57014 under the 30 s `statement_timeout`, otherwise `query_failed`) and the caller gets `500`. A 403 (no dataset export
+  permission, no visible column) writes no log row (nothing was selected; the CHECK needs >= 1 column) but an `authz.denied` audit event.
+  Audit outcome for refused / failed rows is `FAILED` (`AuditOutcome` has no "refused").
+- **Dataset export permissions** where the owner has none: job_outcomes -> `jobs.export`; recovery_cases and follow_up_tasks ->
+  `leads.export` (Lead Operations' work, ruling 4); training_records -> `employees.export` (people data, HR); payments ->
+  `financial_reports.export` (spec 22.2: financial reports). Alternative: add `*.export` actions to those modules (catalog change, Task 1).
+- **CSV format**: UTF-8 with BOM (spreadsheets read es-US / he-IL text), CRLF, header = column keys (language-neutral like the API;
+  labels are `REPORT.COLUMN.<UPPER_SNAKE>` for a UI). Text, ids, enums and currency codes starting with `= + - @ tab CR` get a leading
+  `'`; server-formatted numbers, money and dates are not escaped (a negative amount stays a number). Money = exact decimal in major units
+  of the row's currency (`Intl` minor digits: USD 2, JPY 0); the JSON query keeps the API convention (minor-unit strings). Instants =
+  tenant `defaultTimeZone` ISO local time with offset, second precision; date-only columns `YYYY-MM-DD`.
+- **Export log read**: `audit.view` tenant-level (like `listAuditEventsAsActor`) sees all; otherwise `reports.view` and own rows only.
