@@ -3600,3 +3600,36 @@ the employee).
 - **Permission**: `customer_feedback.edit` over the entry's org unit (`404` outside). **Body** (strict): `{ reason }` (1-1000). Once: a
   second void is `409`; voiding feedback about oneself is `403` (review P5-R5). The entry stays readable (`includeVoided=true`); what the customer said is never edited (DB trigger).
 - **Audit**: `customer_feedback.void` (`voidReasonSha256`).
+
+## Analytics KPIs (`/api/v1/analytics/kpis/**`) - Phase 6
+
+Code: `src/server/analytics` (README there); catalog `src/lib/kpi-catalog.ts`, generated definitions `docs/KPI_DEFINITIONS.md`.
+Read-only. **Two layers** (docs/PERMISSIONS.md 13): every KPI requires its OWN permission (any one of `access.permissions`) with the
+field set `access.fieldSet` over the caller's scope; a KPI in the `dispatch_kpis` set is also covered by the Dispatcher's
+`analytics_operational.view { set: "dispatch_kpis" }` grant. Only TENANT and ORG_UNIT scopes count (aggregates are per org unit).
+Data is read through the reporting read client (a replica when `REPORTING_DATABASE_URL` is set; tenant RLS applies either way).
+
+### GET /api/v1/analytics/kpis
+
+- **Auth**: a session; no single permission. **Response**: `200 { data: [entry] }`, the catalog entries the caller qualifies for (others
+  are left out; `[]` for a role without analytics). An entry is the catalog's: `key, family, status (ACTIVE | BLOCKED_ON_SPEC), unit
+  (COUNT | RATE | DURATION | MONEY | RATIO), labelKey, definition, formula, sourceRecords, period { semantics, anchor }, orgLevels,
+  attribution, dataOwnerRole, access { permissions, fieldSet, sets }, breakdown?, estimate?, blockedReason?` plus `computed` (false for a
+  BLOCKED_ON_SPEC KPI and for a financial KPI whose computation Phase 6 Task 3 adds).
+
+### GET /api/v1/analytics/kpis/{key}
+
+- **Permission**: the KPI's own (above); `403` otherwise (audited `authz.denied`). `404` for an unknown key or a KPI not computed yet.
+- **Query** (strict): `from`, `to` (`YYYY-MM-DD`, tenant-local dates, both included, at most 366 days; required unless the KPI's period
+  semantics is `SNAPSHOT`, which ignores them), `period` (`DAY | WEEK | MONTH | TOTAL`, default `TOTAL`; weeks start Monday),
+  `groupBy` (`TENANT | STATE | REGION | CITY | BRANCH`, default `TENANT`; rolls each record's unit up the current org tree),
+  `orgUnitId?` (that unit and its descendants, always inside the caller's scope; unknown unit `400`). More than 50,000 source records is
+  `400` (narrow the range or scope).
+- **Response**: `200 { data: { key, status, unit, estimate, timeZone, from, to, period, groupBy, rows, drillDown, blockedReason? } }`.
+  A row: `periodStart` (local date the bucket starts; null for SNAPSHOT), `orgUnitId` (the group unit; null at TENANT level, or when no
+  unit on the path has the level), `breakdownId?` (lead source id, LEAD_SOURCE KPIs), `currency?` (MONEY: one row per currency, never
+  summed across currencies), `value` (COUNT count; RATE / RATIO numerator / denominator; DURATION median seconds; MONEY minor units as a
+  decimal string; null when undefined), `numerator?`, `denominator?`, `sampleCount`, `recordIds` (up to 50 source record ids),
+  `recordIdsTruncated`. `drillDown { recordType, anchor, from, to, orgUnitId }` says which records the ids are and how to list them with
+  the owning module's API (under the caller's own permissions). `estimate: true` marks an estimate (recovery estimated value, spec 9.7).
+  A `BLOCKED_ON_SPEC` KPI returns `rows: []`, `drillDown: null` and `blockedReason`, never a value (spec 28.4).
