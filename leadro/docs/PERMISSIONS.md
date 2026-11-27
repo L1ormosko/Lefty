@@ -559,6 +559,10 @@ Rules:
 - **Per-KPI requirement (Task 2)**: a catalog entry's `access` = any one of its `permissions` + its `fieldSet` + its `sets`; the KPI's
   scope is the union of the qualifying grants' TENANT / ORG_UNIT scopes (OWN, ASSIGNED, LEGAL_ENTITY cover no KPI). Operational KPIs:
   `analytics_operational.view`; lead and recovery KPIs: `analytics_lead.view` or `analytics_executive.view`; financial KPIs:
-  `financial_reports.view` (Task 3 may tighten the field set). The full list per KPI is in `docs/KPI_DEFINITIONS.md`.
+  `financial_reports.view` (field set `base`), and where the KPI shows data a source module guards with a sensitive set, that grant
+  too, scopes intersected (`requiresAlso`, Task 3): `sold_revenue` also needs `job_outcomes.view` with `financial`; `material_costs`,
+  `direct_costs` and `gross_profit` also need `materials.view` with `cost`. So by default the Owner and the Finance Director see every
+  financial KPI; the COO and unit managers (scoped) see revenue, collections, outstanding, refunds, adjustments, chargebacks, sold
+  revenue and reconciliation counts, but no costs. The full list per KPI is in `docs/KPI_DEFINITIONS.md`.
 - Tests: `tests/authz/analytics-catalog.test.ts` (catalog, templates, labels), `tests/db/phase6-schema.test.ts` (schema),
   `tests/analytics/*` (KPI catalog, engine access and scope, routes).

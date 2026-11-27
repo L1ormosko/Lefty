@@ -15,13 +15,15 @@ import { ForbiddenError, NotFoundError, ValidationError, type Actor, type Reques
 import { withTenant, type TenantTx } from "@/server/db";
 import { resolveKpiAccess } from "./access";
 import { buildComputeContext, type KpiFactLoader } from "./compute-context";
+import { FINANCIAL_LOADERS } from "./financial-facts";
 import { LEAD_LOADERS } from "./lead-facts";
 import { OPERATIONAL_LOADERS } from "./operational-facts";
+import { PRODUCTIVITY_LOADERS } from "./productivity-facts";
 import { withReportingTenant } from "./read-client";
 import type { KpiQuery } from "./schemas";
 
-/** Fact loaders per KPI key. A catalog entry without one is defined but not computed yet (Task 3 adds the financial ones). */
-const LOADERS: Readonly<Record<string, KpiFactLoader>> = { ...OPERATIONAL_LOADERS, ...LEAD_LOADERS };
+/** Fact loaders per KPI key. Every ACTIVE catalog entry has one (`tests/analytics/kpi-catalog.test.ts`); BLOCKED_ON_SPEC ones never do. */
+const LOADERS: Readonly<Record<string, KpiFactLoader>> = { ...OPERATIONAL_LOADERS, ...LEAD_LOADERS, ...FINANCIAL_LOADERS, ...PRODUCTIVITY_LOADERS };
 
 /** Whether the engine can compute `key` today. */
 export function isKpiComputed(key: string): boolean {

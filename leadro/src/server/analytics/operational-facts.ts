@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { KpiFact } from "@/lib/kpi-aggregation";
 import { attributeVisit } from "@/lib/performance-formulas";
-import { placementAt } from "@/lib/kpi-aggregation";
+import { placementAt, type PlacementWindow } from "@/lib/kpi-aggregation";
 import { MAX_SOURCE_ROWS, assertWithinRowCap, inChunks, rangeOf, type KpiComputeContext, type KpiFactLoader } from "./compute-context";
 
 /**
@@ -160,13 +160,26 @@ const unassignedJobs: KpiFactLoader = async (context) =>
     }),
   ).map((job) => ({ recordId: job.id, at: context.now, orgUnitId: job.orgUnitId }));
 
+/** Every PRIMARY placement of the given employees (spec 3: attribution uses the one effective at the event). */
+export async function primaryPlacements(context: KpiComputeContext, employeeIds: string[]): Promise<Map<string, PlacementWindow[]>> {
+  const placements = await inChunks(employeeIds, (chunk) =>
+    context.tx.organizationalAssignment.findMany({
+      where: { tenantId: context.tenantId, employeeId: { in: chunk }, kind: "PRIMARY" },
+      select: { employeeId: true, orgUnitId: true, effectiveFrom: true, effectiveTo: true },
+    }),
+  );
+  const byEmployee = new Map<string, PlacementWindow[]>();
+  for (const placement of placements) byEmployee.set(placement.employeeId, [...(byEmployee.get(placement.employeeId) ?? []), placement]);
+  return byEmployee;
+}
+
 /**
- * Completed jobs per lead technician, grouped by the technician's PRIMARY placement effective at completion (spec 3). The job
- * must be in the viewer's scope, and so must the unit the technician belonged to then: otherwise the job is left out, so no
- * figure is ever attributed to a unit the viewer cannot see. Facts carry the employee only as the ratio's contributor; the
- * engine never returns them per employee.
+ * Jobs completed in the range that have a lead technician, each attributed to that technician's PRIMARY placement effective at
+ * completion (spec 3), with the technician as the fact's contributor. The job must be in the viewer's scope, and so must the
+ * unit the technician belonged to then: otherwise the job is left out, so no figure is ever attributed to a unit the viewer
+ * cannot see. The engine never returns facts per employee.
  */
-const jobsPerEmployee: KpiFactLoader = async (context) => {
+export async function ledJobFacts(context: KpiComputeContext): Promise<KpiFact[]> {
   const jobs = await jobsCompletedInRange(context, { id: true, completedAt: true });
   const ids = jobs.map((job) => job.id);
   const assignments = await inChunks(ids, (chunk) =>
@@ -185,15 +198,7 @@ const jobsPerEmployee: KpiFactLoader = async (context) => {
     const employeeId = attributeVisit({ completedAt: job.completedAt as Date, leadAssignments: byJob.get(job.id) ?? [] });
     return employeeId ? [{ jobId: job.id, completedAt: job.completedAt as Date, employeeId }] : [];
   });
-  const employeeIds = [...new Set(led.map((entry) => entry.employeeId))];
-  const placements = await inChunks(employeeIds, (chunk) =>
-    context.tx.organizationalAssignment.findMany({
-      where: { tenantId: context.tenantId, employeeId: { in: chunk }, kind: "PRIMARY" },
-      select: { employeeId: true, orgUnitId: true, effectiveFrom: true, effectiveTo: true },
-    }),
-  );
-  const placementsOf = new Map<string, typeof placements>();
-  for (const placement of placements) placementsOf.set(placement.employeeId, [...(placementsOf.get(placement.employeeId) ?? []), placement]);
+  const placementsOf = await primaryPlacements(context, [...new Set(led.map((entry) => entry.employeeId))]);
 
   const facts: KpiFact[] = [];
   for (const entry of led) {
@@ -202,7 +207,10 @@ const jobsPerEmployee: KpiFactLoader = async (context) => {
     facts.push({ recordId: entry.jobId, at: entry.completedAt, orgUnitId, contributorId: entry.employeeId });
   }
   return facts;
-};
+}
+
+/** Completed jobs per lead technician, grouped by the technician's placement at completion (`ledJobFacts`). */
+const jobsPerEmployee: KpiFactLoader = (context) => ledJobFacts(context);
 
 export const OPERATIONAL_LOADERS: Record<string, KpiFactLoader> = {
   job_volume: jobVolume,
