@@ -929,3 +929,99 @@ erDiagram
 - Running or exporting a saved / shared view uses the runner's permissions, scope and field sets, never the owner's.
 - A share points at a non-archived view and a role of the tenant; archiving a view leaves its shares, which then match nothing.
 - An export writes its `ReportExport` row and an audit event in the same transaction, also when it is refused or fails.
+
+# Phase 7: integrations and automation
+
+Migration `20261128100000_phase7_integrations_automation` (schema only; queue, automation engine, integration framework and exports
+arrive in Phase 7 Tasks 2-5, none of which add a migration). 11 new tables with `tenantId` (106 in total), `(id, tenantId)` unique keys,
+composite `(ref, tenantId)` FKs and FORCE RLS (the DO-block runs again). **`BackgroundJob.tenantId` and `ScheduledJobDefinition.tenantId`
+are nullable** (system rows, see below). New enums for every status, three new `ApprovalSubjectType` values (`AUTOMATION_RULE_VERSION`,
+`ACCOUNTING_MAPPING`, `PAYROLL_EXPORT`) and one new column on Phase 4's `PaymentIntakeEvent` (`webhookEventId`). Names are asserted in
+`tests/db/phase7-schema.test.ts`.
+
+```mermaid
+erDiagram
+  Tenant |o--o{ BackgroundJob : "tenant job (null = system)"
+  Tenant |o--o{ ScheduledJobDefinition : "tenant definition (null = system)"
+  BackgroundJob |o--o{ IntegrationLog : "ran"
+  DomainEventOutbox ||--o{ AutomationExecution : triggered
+  AutomationRule ||--o{ AutomationRuleVersion : versions
+  AutomationRuleVersion ||--o{ AutomationExecution : ran
+  OrgUnit |o--o{ AutomationRuleVersion : "scope"
+  ApprovalRequest |o--o{ AutomationRuleVersion : "activation approval"
+  Integration ||--o{ IntegrationLog : logs
+  Integration |o--o{ WebhookEvent : received
+  WebhookEvent ||--o{ IntegrationLog : "handling attempts"
+  WebhookEvent |o--o| PaymentIntakeEvent : "Phase 4 handler record"
+  LegalEntity |o--o{ AccountingMapping : "series"
+  ApprovalRequest |o--o{ AccountingMapping : "activation approval"
+  AccountingMapping |o--o{ ExportBatch : "used by"
+  ApprovalRequest |o--o{ ExportBatch : "payroll release"
+  ExportBatch |o--o{ ExportBatch : supersedes
+```
+
+## Model guide
+
+| Table | Purpose |
+|---|---|
+| `BackgroundJob` | One unit of background work: handler `type` (dotted key), `payload` (ids only, object <= 4 KB), status QUEUED / RUNNING / SUCCEEDED / FAILED (retry at `runAt`) / DEAD (dead letter), priority (lower first), attempts / maxAttempts (<= 25), lock (`lockedBy`, `lockedAt`, `heartbeatAt`), `lastErrorCode` (stable code), `idempotencyKey` (unique per tenant; system jobs share one namespace), `scheduleKey` + `scheduleWindow`. `tenantId` null = a system job. |
+| `ScheduledJobDefinition` | A periodic job: key, job type, five-field cron, time zone, enabled, last run / window, next run. Null tenant = system definition; a tenant row is that tenant's own definition or override (one per tenant and key). Disabled, never deleted. |
+| `DomainEventOutbox` | A domain event written in the business transaction (ids only, payload <= 8 KB): event type, aggregate, `causationChain` (earlier event ids, root first, <= 16), `causedByRuleVersionId` for automation-emitted events, actor (person or `system:*`), `dispatchedAt` (set once). |
+| `AutomationRule` | A rule's identity: key (unique per tenant), name, description, author, archive. |
+| `AutomationRuleVersion` | Rule content per version: trigger (event type), conditions (JSON array <= 50 objects), actions (1-20 objects with a `type`), scope org unit, priority, status DRAFT / PENDING_APPROVAL / ACTIVE / RETIRED, `highImpact`, approval request, timestamps. Frozen once out of DRAFT; one ACTIVE per rule. |
+| `AutomationExecution` | Append-only: one evaluation of a version against one event (unique per version + event), entity (for repeat suppression), result EXECUTED / PARTIAL / FAILED / NOT_MATCHED / SUPPRESSED_DEPTH / SUPPRESSED_REPEAT, `actionsTaken` (ids only), causation depth, error code. |
+| `Integration` | A tenant's provider connection: key, category (11 spec 18.2 categories incl. PUSH), provider key, non-secret `config` / `webhookSettings`, `credentialsRef` (`env:NAME` / `vault:path`, never a secret), status NOT_CONFIGURED / CONNECTED / ERROR / DISABLED + `statusCode`, `lastCheckedAt`, `circuitOpenUntil`, webhook switch, retry policy (attempts, base / max delay). Never deleted. |
+| `IntegrationLog` | Append-only call / connection-test / webhook / status-change log: outcome, operation code, HTTP status, error code, attempt, duration, `details` (ids, <= 4 KB, no secret-looking keys), optional job and webhook event. |
+| `WebhookEvent` | Generic inbound event recorded before any core change: provider, external id (unique per tenant + provider; forged ones as `unverified:<sha256>`), event type, payload SHA-256, signature result, validation result, rejection code, `parsed` (normalized fields), handling status RECEIVED / HANDLED / REJECTED / FAILED + code, handler job id. |
+| `AccountingMapping` | Versioned chart-of-accounts mapping per legal entity (null = tenant default): `mappings` (1-500 objects), status DRAFT / PENDING_APPROVAL / ACTIVE / RETIRED, approval request (always required). Frozen once out of DRAFT; one ACTIVE per series. |
+| `ExportBatch` | One payroll (time facts) or accounting (journal) export run for `[periodStart, periodEnd)` (local dates, <= 366 days): status PREPARED / PENDING_APPROVAL / APPROVED / EXPORTED / FAILED / CANCELLED, format CSV, `contentHash` + `rowCount` fixed at preparation, accounting `totals` + mapping, approval request, `idempotencyKey` (unique per tenant), `supersedesBatchId`. |
+
+## Database-level rules (Phase 7)
+
+- **RLS and system rows**: the standard `tenant_isolation` policy on all 11 tables; a NULL `tenantId` never matches, so a tenant context
+  never sees (or writes) a system job / definition and no context sees nothing. A second permissive policy `queue_worker`
+  (`current_setting('app.queue_worker') = 'on'`) on `BackgroundJob`, `ScheduledJobDefinition` and `DomainEventOutbox` only lets the
+  worker path read and write every row of those three tables.
+- **Append-only**: `AutomationExecution`, `IntegrationLog` (UPDATE, DELETE, TRUNCATE rejected).
+- **Never deleted**: `ScheduledJobDefinition`, `DomainEventOutbox`, `AutomationRule`, `AutomationRuleVersion`, `Integration`,
+  `WebhookEvent`, `AccountingMapping`, `ExportBatch`. `BackgroundJob` rows may be deleted only when SUCCEEDED (retention).
+- **Frozen**: a job's identity and payload; an outbox event except `dispatchedAt` (set once, `leadro_set_once_columns`); a rule's key and
+  author; a version's content once out of DRAFT (`leadro_automation_rule_version_content_guard`); an integration's key, category and
+  provider; everything a webhook event recorded on arrival (only the handling outcome changes); a mapping's content once out of DRAFT;
+  a batch's period, kind, mapping, content hash, row count and totals. `PaymentIntakeEvent.webhookEventId` joins the Phase 4 frozen list.
+- **Status machines** (`leadro_status_transitions`; `leadro_webhook_event_handling_transitions` for `handlingStatus`): job QUEUED>RUNNING,
+  RUNNING>SUCCEEDED|FAILED|DEAD|QUEUED, FAILED>RUNNING|DEAD, DEAD>QUEUED; rule version DRAFT>PENDING_APPROVAL|ACTIVE|RETIRED,
+  PENDING_APPROVAL>DRAFT|ACTIVE, ACTIVE>RETIRED; webhook RECEIVED>HANDLED|FAILED, FAILED>RECEIVED; mapping as rule versions but no
+  DRAFT>ACTIVE; batch PREPARED>PENDING_APPROVAL|APPROVED|CANCELLED, PENDING_APPROVAL>APPROVED|CANCELLED, APPROVED>EXPORTED|FAILED|CANCELLED,
+  FAILED>APPROVED.
+- **No secrets** (`leadro_json_has_secret_key`): integration config / webhook settings, log details, webhook `parsed`, rule conditions /
+  actions, execution actions and mappings refuse any key matching secret / passw / token / api_key / private_key / credential / bearer /
+  signature at any depth; `credentialsRef` must be `env:[A-Z][A-Z0-9_]*` or `vault:<path>`; webhooks need a credentials reference.
+- **Truthful facts**: CONNECTED needs `lastCheckedAt`; ERROR, FAILED, DEAD and REJECTED carry stable snake_case codes (`leadro_is_code`);
+  an invalid signature is SKIPPED-validation, REJECTED, stored as `unverified:<payloadHash>`; nothing invalid is ever HANDLED; a
+  high-impact or pending version, a pending / active mapping and a released payroll batch carry an approval request; payroll batches have
+  no mapping or money totals; an accounting batch is inserted only against the ACTIVE mapping of its series
+  (`leadro_export_batch_mapping_guard`).
+- **Unique / partial indexes**: `background_job_idempotency` (tenant, key) NULLS NOT DISTINCT; `background_job_claimable` (priority,
+  runAt) for QUEUED / FAILED; `background_job_running` (heartbeatAt); `scheduled_job_definition_key` (tenant, key) NULLS NOT DISTINCT;
+  `domain_event_undispatched`; `automation_rule_version_one_active`; `AutomationExecution (tenantId, ruleVersionId, triggerEventId)`;
+  `WebhookEvent (tenantId, provider, externalId)`; `accounting_mapping_version_unique` and `accounting_mapping_one_active` NULLS NOT
+  DISTINCT; `ExportBatch (tenantId, idempotencyKey)`; `PaymentIntakeEvent.webhookEventId` unique.
+
+## Contracts for JSON and references (Phase 7)
+
+- `BackgroundJob.payload`, `DomainEventOutbox.payload`, `IntegrationLog.details`: ids and small scalars only; a handler re-reads the
+  records inside `withTenant`. Never a name, address, amount or provider body.
+- `AutomationRuleVersion.conditions`: `[{ "field", "op", "value" }]` over event payload fields (Task 3 defines the operators);
+  `actions`: `[{ "type": "<registry key>", ...params }]`. `AutomationExecution.actionsTaken`: `[{ "type", "status", "recordType"?,
+  "recordId"?, "errorCode"? }]`.
+- `AccountingMapping.mappings`: `[{ "ledgerEntryType", "source"?, "debitAccount", "creditAccount" }]` (Task 5 validates against the
+  ledger enums). `ExportBatch.totals`: `{ "<currency>": { "debit": "<minor>", "credit": "<minor>" } }` (strings, BigInt-safe).
+- `WebhookEvent.handlerJobId`, `DomainEventOutbox.causationChain` / `causedByRuleVersionId` / `actorUserId`: references by id without FK
+  (the outbox and the queue are transports; a FK would order inserts across modules).
+
+## Documented rules not expressible in the database
+
+- The queue-worker setting is only ever set by the worker entry point (Task 2 helper); request handlers use `withTenant` only.
+- A version's approval request is for that version (subject id = version id) and decided by someone other than its author (engine).
+- Same-rule-same-entity suppression and the depth limit are evaluated by the engine before actions run (Task 3).

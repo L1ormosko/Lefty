@@ -1798,3 +1798,100 @@ These are manager-level choices made to keep moving; each is one template line o
   of the row's currency (`Intl` minor digits: USD 2, JPY 0); the JSON query keeps the API convention (minor-unit strings). Instants =
   tenant `defaultTimeZone` ISO local time with offset, second precision; date-only columns `YYYY-MM-DD`.
 - **Export log read**: `audit.view` tenant-level (like `listAuditEventsAsActor`) sees all; otherwise `reports.view` and own rows only.
+
+## Phase 7 Task 1: schema, permission catalog, role templates
+
+- **One migration** `20261128100000_phase7_integrations_automation`: 11 tables (BackgroundJob, ScheduledJobDefinition, DomainEventOutbox,
+  AutomationRule, AutomationRuleVersion, AutomationExecution, Integration, IntegrationLog, WebhookEvent, AccountingMapping, ExportBatch),
+  14 enums, 3 `ApprovalSubjectType` values (added with `ALTER TYPE ... ADD VALUE`, unused inside the migration, so one transaction),
+  `PaymentIntakeEvent.webhookEventId`, the RLS DO-block, a `queue_worker` policy, CHECKs, status machines, frozen content, append-only
+  logs and small shared SQL helpers (`leadro_is_code`, `leadro_is_dotted_key`, `leadro_is_small_json_object`,
+  `leadro_is_json_object_array`, `leadro_json_has_secret_key`, `leadro_set_once_columns`). `prisma migrate diff` against the migrated
+  database is empty (two NULLS NOT DISTINCT unique indexes carry an always-true predicate so Prisma leaves them alone). Developed against
+  a private `leadro_p7t1_test` database (dropped at the end); the shared `leadro` / `leadro_test` databases were NOT migrated by this task.
+- **System jobs and RLS (the brief's open question).** Chosen: a nullable `tenantId` on `BackgroundJob` and `ScheduledJobDefinition`
+  (not a separate non-tenant table, which would break the "only Tenant and Permission lack tenantId" invariant and need its own
+  isolation story). The DO-block gives them the same `tenant_isolation` policy as every table; `NULL = setting` is never true, so FORCE
+  RLS stays fail-closed: a tenant context sees and writes only its own rows, never a system row, and a session without any setting
+  sees nothing. A second permissive policy `queue_worker` (`(SELECT current_setting('app.queue_worker', true)) = 'on'`) exists on
+  `BackgroundJob`, `ScheduledJobDefinition` and `DomainEventOutbox` only: the worker, scheduler and outbox dispatcher (Task 2) run their
+  claim / scan transactions with `set_config('app.queue_worker', 'on', true)` (transaction-local, like `app.tenant_id`) and see every
+  row of those three tables, then run each handler inside `withTenant(job.tenantId)`. This is acceptable because those tables hold ids
+  only (payload caps 4 / 8 KB, CHECKed). Limitation: the setting is an application convention, not a separate database role (the app
+  role cannot create roles); Phase 8 hardening can move the worker to its own role with a `TO leadro_worker` policy. Request handlers
+  must never set it (Task 2 exports one helper, used only by the worker entry point).
+- **Idempotency**: jobs unique per (tenant, `idempotencyKey`) with system jobs in one shared namespace (`NULLS NOT DISTINCT`, partial on
+  key present); scheduled definitions unique per (tenant, key) the same way; executions unique per (version, triggering event); webhook
+  events per (tenant, provider, externalId); export batches per (tenant, `idempotencyKey`); one intake row per webhook event.
+- **WebhookEvent vs Phase 4 PaymentIntakeEvent.** `WebhookEvent` is the generic envelope every inbound event gets first (who, hash,
+  signature and validation verdicts, handling outcome); `PaymentIntakeEvent` stays the payments module's own domain record (money
+  fields, job match, DUPLICATE / UNMATCHED verdicts, referenced by Payment, Chargeback, ReconciliationException) and gains a nullable,
+  unique, frozen `webhookEventId`. Nothing in Phase 4 changes: the existing route keeps writing intake rows with `webhookEventId` null.
+  **Migration path for Task 4**: register the payments intake as the handler for payment providers; the generic endpoint writes the
+  `WebhookEvent` (forged = `unverified:<sha256>`, REJECTED), enqueues the handler job, and the handler calls the payments module's
+  public intake function with the webhook event id, which writes the `PaymentIntakeEvent` (same tenant, same provider / externalId) with
+  `webhookEventId` set and keeps every Phase 4 verdict. The Phase 4 route `/api/v1/finance/intake/{tenantSlug}/{provider}` then becomes
+  a thin alias of the generic path (or is retired once no provider is configured against it, which is the case today). No backfill is
+  needed (no real provider exists, spec 28.3).
+- **WebhookEvent "result history"**: the event row's arrival facts are frozen and only the handling outcome changes (RECEIVED >
+  HANDLED | FAILED, FAILED > RECEIVED for a replay); every handling attempt is an append-only `IntegrationLog` row with
+  `webhookEventId`. So the history is append-only without a third table.
+- **Credentials are references only**: no column can hold a secret (a test scans column names); `credentialsRef` must be `env:NAME`
+  or `vault:path`; every JSON document that could be pasted into (config, webhook settings, log details, parsed payload, rule conditions /
+  actions, mappings) refuses secret-looking keys at any depth (`leadro_json_has_secret_key`); turning webhooks on requires a credentials
+  reference (the signature secret). A harmless key containing one of the words (e.g. `tokenizedField`) is refused too: rename it.
+- **Automation**: content lives in `AutomationRuleVersion`, frozen once out of DRAFT (trigger, conditions, actions, scope, priority,
+  `highImpact`); one ACTIVE per rule; ACTIVE + `highImpact` needs an approval request; low-impact versions may go DRAFT > ACTIVE directly
+  (holder of `automation.configure`). Rejection / cancellation / expiry returns PENDING_APPROVAL > DRAFT (Phase 5 pattern); resubmitting
+  opens a new request. `AutomationExecution` is append-only and records suppressed and not-matched evaluations too (with no actions).
+  The outbox `causationChain` (<= 16 ids, DB hard stop) carries the loop-prevention chain; Task 3 sets the real depth limit lower.
+- **Exports**: content is fixed at preparation (`contentHash`, `rowCount`, `totals` frozen), so approval and re-export refer to exactly
+  that file; a correction is a new batch with `supersedesBatchId`. Payroll batches carry no money and need an approval request before
+  APPROVED / EXPORTED; accounting batches need the ACTIVE mapping of their series at insert (trigger) and no batch approval (the mapping
+  was approved). Mappings always need an approval request (no "no policy = apply directly").
+- **Permission keys** (`module.action`): `background_jobs.{view,manage}`, `automation.{view,configure,approve}`,
+  `integrations.{view,configure,manage}`, `payroll_exports.{view,create,approve,export}`,
+  `accounting_exports.{view,create,export,approve,configure}`; sensitive: every configure / approve / export and the two exports' view.
+  Seeded approval policies (`prisma/seed/finance-specs.ts`): `automation_rule_activation`, `accounting_mapping_activation`,
+  `payroll_export_release`. Labels: `BACKGROUND_JOB.STATUS.*`, `AUTOMATION.RULE_STATUS.*`, `AUTOMATION.EXECUTION_RESULT.*`,
+  `AUTOMATION.HIGH_IMPACT`, `INTEGRATION.CATEGORY.*`, `INTEGRATION.STATUS.*`, `WEBHOOK.HANDLING_STATUS.*`, `ACCOUNTING_MAPPING.STATUS.*`,
+  `EXPORT_BATCH.KIND.*`, `EXPORT_BATCH.STATUS.*`, `EXPORT_BATCH.PAYROLL_NOTICE`, `EXPORT_BATCH.ACCOUNTING_NOTICE`,
+  `APPROVAL.SUBJECT.*` (3) in en-US, es-US, he-IL, pinned by `tests/authz/integrations-catalog.test.ts`.
+
+### Contracts for Phase 7 Tasks 2-5 (no further migration expected)
+
+- **Task 2 (queue)**: claim = `SELECT ... WHERE status IN ('QUEUED','FAILED') AND "runAt" <= now() ORDER BY priority, "runAt" FOR UPDATE
+  SKIP LOCKED` in a queue-worker transaction, then set RUNNING + `lockedBy` / `lockedAt` / `heartbeatAt` + `attempts + 1`. Release the lock
+  (null `lockedBy` / `lockedAt`) on every exit from RUNNING; FAILED / DEAD need `lastErrorCode` + `lastErrorAt`; SUCCEEDED needs
+  `completedAt`. Enqueue with `INSERT ... ON CONFLICT ("tenantId", "idempotencyKey") WHERE "idempotencyKey" IS NOT NULL DO NOTHING`
+  (or catch `background_job_idempotency`). Scheduler: idempotency key `schedule:<key>:<window>` with `scheduleKey` / `scheduleWindow`.
+  Outbox: insert in the business `withTenant` transaction; the dispatcher sets `dispatchedAt` once.
+- **Task 3 (automation)**: approval subject `AUTOMATION_RULE_VERSION`, subject id = version id, requested by the author; on approval
+  retire the current ACTIVE version first, then activate. Insert one `AutomationExecution` per (version, event) in the same transaction
+  as the actions; catch the unique violation as "already ran". Events emitted by actions carry `causationChain = parent chain + parent
+  id` and `causedByRuleVersionId`.
+- **Task 4 (integrations)**: write `WebhookEvent` before anything else (see the migration path above); log every call / test / attempt in
+  `IntegrationLog`; CONNECTED only after a real connection test; ERROR with a code (`auth_expired`, `rate_limited`, `circuit_open`, ...).
+- **Task 5 (exports)**: subjects `ACCOUNTING_MAPPING` (mapping activation) and `PAYROLL_EXPORT` (batch release); `idempotencyKey` e.g.
+  `<kind>:<legalEntity|tenant>:<start>:<end>:<mappingVersion|v1>`; re-export regenerates the file and must reproduce `contentHash`.
+
+### Rulings for the improvement round
+
+These are manager-level choices made to keep moving; each is one template line, one CHECK or one policy to change.
+
+1. **"Owner/Admin" = the Owner template**: there is no Admin template; automation, integrations and background jobs are Owner-only by
+   default. Alternative: a new "System administrator" template with configure but no approve.
+2. **Approvals are Owner-only**: `automation.approve`, `accounting_exports.approve`, `payroll_exports.approve`. Finance proposes mappings,
+   HR prepares payroll batches, the Owner releases. Alternative: Finance approves payroll releases, COO approves high-impact automation.
+3. **Accounting batches need no batch approval** (the mapping was approved; the export is a deterministic projection of the ledger).
+   Payroll batches always do. Alternative: a policy for accounting batches too.
+4. **Low-impact automation may be activated without approval** by `automation.configure`; only `highImpact` versions need one (spec 15.2
+   wording). Which actions are high-impact is Task 3's action registry.
+5. **Worker visibility by setting, not by role** (see above); a dedicated DB role is Phase 8 hardening.
+6. **Secret-looking JSON keys are refused** by the database even when harmless (false positives over leaked secrets).
+7. **One integration row per tenant key**, so a tenant may connect two accounts of the same provider (two keys). Alternative: unique
+   (tenant, category, provider).
+8. **Outbox and webhook events are never deleted** (retention / archiving is Phase 8); only SUCCEEDED jobs may be deleted.
+9. **`PUSH` added** to the spec 18.2 categories (the Phase 7 global constraints list push notifications as a provider category).
+10. **Mapping series per legal entity** with a tenant-default series (null legal entity); an entity-specific mapping cannot be used for
+    another entity, the default one can be used for any.
