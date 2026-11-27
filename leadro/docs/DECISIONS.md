@@ -1753,3 +1753,49 @@ These are manager-level choices made to keep moving; each is one template line o
 - **Docs**: `docs/KPI_DEFINITIONS.md` is generated (`npm run kpi:docs`, new script, no dependency) by `src/lib/kpi-definitions-doc.ts`;
   `tests/analytics/kpi-definitions-doc.test.ts` fails on drift. Labels `KPI.<KEY>`, `KPI.UNIT.*`, `KPI.STATUS.*`, `KPI.ESTIMATE` in
   en-US, es-US, he-IL. No migration; developed against a private `leadro_p6t2_test` database (dropped at the end).
+
+## Phase 6 Task 3: financial and executive KPIs
+
+- **Access rule for financial KPIs (decision 3 of Task 2).** `financial_reports` has no sensitive field-set category (the five categories
+  are employees / customers / jobs / job_outcomes / materials), and `financial_reports.view` is itself a sensitive permission (MFA for
+  custom roles). So the module grant with field set `base` IS the financial gate for ledger aggregates; naming a `financial` set on
+  `financial_reports.view` would deny everyone, the Owner included. Where a KPI shows data a SOURCE module protects with a sensitive set,
+  that grant is required as well, scopes INTERSECTED (new `access.requiresAlso`): `sold_revenue` also needs `job_outcomes.view` with
+  `financial` (Phase 4's one rule for outcome money), and `material_costs`, `direct_costs`, `gross_profit` also need `materials.view`
+  with `cost` (Phase 4 Task 2: reading any cost needs the cost set; gross profit reveals the cost as charged minus profit). Result with
+  the templates: Owner and Finance Director see all; COO and unit managers (scoped) see revenue, collections, outstanding, refunds,
+  adjustments, chargebacks, sold revenue and reconciliation counts, but no costs (both lack the `cost` set by design). Reconciliation
+  counts need only `financial_reports.view` (counts, no money). Alternative: also require `finance_ledger.view` for ledger KPIs (every
+  template with `financial_reports.view` holds it today; one `requiresAlso` line per KPI).
+- **Ledger KPIs** (`financial-facts.ts`): one fact per `LedgerEntry`, signed amounts, a REVERSAL counted under the type it reverses
+  (the `ledger-balances` rule), in the period of the reversal's own `occurredAt` (a correction lowers the period it is made in, never
+  rewrites a closed one). Charged = CHARGE; collected = PAYMENT (gross; voids reverse it); refunds = -REFUND; chargebacks = -CHARGEBACK
+  (won disputes reverse it); adjustments = signed ADJUSTMENT (posted = approved, Phase 4 Task 5); material costs = -MATERIAL_COST.
+  Refunds, chargebacks and costs are reported as positive amounts. Attribution = the entry's posting snapshot (`LedgerEntry.orgUnitId`).
+- **Direct costs = material costs** today: no other direct cost (labour, subcontractors) is modelled. It is its own key because the
+  meaning differs and will diverge once more cost types exist; the catalog says so.
+- **Gross profit = charged - direct costs** per currency (the brief's formula): adjustments, refunds and chargebacks are not part of it.
+  Cost if finance wants "billed - direct costs": add `ADJUSTMENT: asIs` to its contribution map and change the catalog text.
+- **Outstanding is a SNAPSHOT** over all entries at request time (billed - net collected, the `ledger-balances` definition, per
+  currency, by posting snapshot), not a period flow: "outstanding in March" has no meaning without an as-of date. Known limit: the
+  50,000-row cap applies to ALL entries in the viewer's scope, so a large tenant must narrow by org unit until the engine aggregates in
+  SQL (already recorded as the Task 2 revisit point).
+- **Sold revenue** = `JobOutcome.approvedAmountMinor` of SOLD outcomes, by visit time (`occurredAt`), attributed to the job's unit,
+  current (corrected) amounts. It is the technician's report, not ledger revenue: finance-confirmed revenue is `charged_revenue`
+  (Phase 4 ruling). Outcomes without an approved amount are left out, never estimated.
+- **Reconciliation**: open = OPEN or ASSIGNED now (SNAPSHOT); resolved = RESOLVED with `resolvedAt` in the period. By the exception's
+  unit snapshot; exceptions without one count only tenant-wide. No new index (counts over a small table, as Task 1 expected).
+- **Employee productivity = completed jobs per RECORDED shift hour**: LEADRO models no shift schedule (only `Availability` windows and
+  clocked `Shift`s), so "scheduled shift hour" cannot be computed; the label became "per recorded shift hour" in all locales. Numerator =
+  led completions attributed like `jobs_per_employee` (lead's PRIMARY placement at completion); denominator = hours of ENDED shifts
+  started in the period, attributed to the employee's PRIMARY placement at the shift start (spec 3), the shift and the unit both in the
+  viewer's scope. A shift counts wholly in the bucket it started in. New unit `PER_HOUR` (numerator records / denominator hours,
+  rounded to 2 decimals in the row; value from exact hours). Only job ids are listed for drill-down; no employee or shift id leaves the
+  engine, and no per-employee list exists (development use only, spec 10.3). Access stays executive OR operational.
+- **Recovery confirmed vs estimated** were already computed by Task 2 (two keys); unchanged. **Compensation and commission** stay
+  `BLOCKED_ON_SPEC` (rows `[]`, `blockedReason`), tested through the route.
+- Every ACTIVE catalog key now has a loader (test); the "defined but not computed" 404 no longer occurs (API reference updated).
+- Tests: `tests/analytics/financial-kpis.test.ts` posts through payments (confirm charge / collection), ledger (reverse a charge),
+  finance-adjustments (refund + payout, adjustment, chargeback), materials (cost version + costing a usage) and reconciliation (run +
+  resolve); outcomes, material usage lines and shifts are inserted as the field app records them. A CAD job proves currencies stay
+  apart. No migration; developed against a private `leadro_p6t3_test` database (dropped at the end).
