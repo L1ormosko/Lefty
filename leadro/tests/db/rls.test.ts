@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, withTenant } from "@/server/db";
 import { createTenant } from "../helpers";
 
-/** Every table with a "tenantId" column, by phase (Phase 1 (17), Phase 2 operational core (28 + 2 fix-round tables), Phase 3-6 below). */
+/** Every table with a "tenantId" column, by phase (Phase 1 (17), Phase 2 operational core (28 + 2 fix-round tables), Phase 3-7 below). */
 const TENANT_OWNED_TABLES = [
   // Phase 1
   "LegalEntity", "OrgUnit", "Employee", "OrgUnitManager", "OrganizationalAssignment", "User", "Role", "RolePermission",
@@ -29,6 +29,11 @@ const TENANT_OWNED_TABLES = [
   "TrainingRecommendation", "DataChallenge", "CustomerFeedback",
   // Phase 6 enterprise analytics (3), migration 20261127100000_phase6_analytics
   "SavedReportView", "SavedReportViewShare", "ReportExport",
+  // Phase 7 integrations and automation (11), migration 20261128100000_phase7_integrations_automation. BackgroundJob and
+  // ScheduledJobDefinition have a NULLABLE tenantId (system rows): tenant_isolation never matches NULL, so only the queue-worker
+  // policy reaches them (tests/db/phase7-schema.test.ts).
+  "BackgroundJob", "ScheduledJobDefinition", "DomainEventOutbox", "AutomationRule", "AutomationRuleVersion", "AutomationExecution",
+  "Integration", "IntegrationLog", "WebhookEvent", "AccountingMapping", "ExportBatch",
 ];
 
 let A: { id: string };

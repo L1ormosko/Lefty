@@ -686,7 +686,8 @@ ALTER TABLE "ScheduledJobDefinition" ADD CONSTRAINT scheduled_job_definition_tim
 ALTER TABLE "ScheduledJobDefinition" ADD CONSTRAINT scheduled_job_definition_last_run
   CHECK (("lastRunAt" IS NULL) = ("lastWindow" IS NULL));
 -- One definition per (tenant, key); system definitions (NULL tenant) share one namespace.
-CREATE UNIQUE INDEX scheduled_job_definition_key ON "ScheduledJobDefinition" ("tenantId", "key") NULLS NOT DISTINCT;
+-- (Written as a partial index so that `prisma migrate diff` leaves it alone; the predicate is always true.)
+CREATE UNIQUE INDEX scheduled_job_definition_key ON "ScheduledJobDefinition" ("tenantId", "key") NULLS NOT DISTINCT WHERE "key" IS NOT NULL;
 CREATE TRIGGER scheduled_job_definition_immutable
   BEFORE UPDATE ON "ScheduledJobDefinition"
   FOR EACH ROW EXECUTE FUNCTION leadro_immutable_columns('id', 'tenantId', 'key', 'createdAt');
@@ -922,9 +923,10 @@ ALTER TABLE "AccountingMapping" ADD CONSTRAINT accounting_mapping_status_times
   CHECK (("status" <> 'PENDING_APPROVAL' OR "submittedAt" IS NOT NULL)
     AND ("status" <> 'ACTIVE' OR "activatedAt" IS NOT NULL)
     AND ("status" <> 'RETIRED' OR "retiredAt" IS NOT NULL));
--- Versions per legal entity (NULL = the tenant default series), and at most one ACTIVE per series.
+-- Versions per legal entity (NULL = the tenant default series), and at most one ACTIVE per series. (The first index is partial
+-- with an always-true predicate only so that `prisma migrate diff` leaves it alone.)
 CREATE UNIQUE INDEX accounting_mapping_version_unique
-  ON "AccountingMapping" ("tenantId", "legalEntityId", "version") NULLS NOT DISTINCT;
+  ON "AccountingMapping" ("tenantId", "legalEntityId", "version") NULLS NOT DISTINCT WHERE "version" IS NOT NULL;
 CREATE UNIQUE INDEX accounting_mapping_one_active
   ON "AccountingMapping" ("tenantId", "legalEntityId") NULLS NOT DISTINCT WHERE "status" = 'ACTIVE';
 CREATE TRIGGER accounting_mapping_status
