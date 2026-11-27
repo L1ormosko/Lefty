@@ -9,7 +9,7 @@ import { DELETE as unshareView } from "@/app/api/v1/reports/views/[id]/shares/[r
 import { GET as listExports, POST as exportReport } from "@/app/api/v1/reports/exports/route";
 import { nextNumber } from "@/server/core";
 import { withTenant } from "@/server/db";
-import { buildWorld, disconnect, makeRole } from "../authz/fixtures";
+import { buildWorld, createPerson, disconnect, grantTemplate, makeRole } from "../authz/fixtures";
 import { auditEvents, call, sessionCookie } from "../org/org-helpers";
 import { buildPerformanceWorld, type PerformanceWorld } from "../performance/fixtures";
 
@@ -110,6 +110,21 @@ describe("report query", () => {
     const filtered = await query(finance, { datasetKey: "jobs", columns: ["quotedAmountMinor"], filters: { status: ["SCHEDULED"] } });
     expect(filtered.json.data).toEqual([]);
     expect((await query(finance, { datasetKey: "jobs", columns: ["number"] })).status).toBe(403);
+  });
+
+  it("projects cells per row: a financial grant on one unit never reveals money of another unit's rows", async () => {
+    const person = await createPerson(w.tenantId, "mixed-reader", { withEmployee: false });
+    const financialA = await makeRole(w.tenantId, "Financial A", [{ permission: "jobs.view", conditions: { includeFields: ["financial"] } }, { permission: "reports.view" }]);
+    const plainB = await makeRole(w.tenantId, "Plain B", [{ permission: "jobs.view" }]);
+    await grantTemplate(w.tenantId, person, financialA, [{ type: "ORG_UNIT", orgUnitId: w.units.cityA }]);
+    await grantTemplate(w.tenantId, person, plainB, [{ type: "ORG_UNIT", orgUnitId: w.units.cityB }]);
+    const cookie = await sessionCookie(person, w.tenantId);
+    const result = await query(cookie, { datasetKey: "jobs", columns: ["id", "quotedAmountMinor"], filters: { dateFrom: "2026-03-01T00:00:00Z", dateTo: "2026-04-01T00:00:00Z" } });
+    expect(result.json.meta.hiddenColumns).toEqual([]);
+    expect(result.json.data).toEqual([{ id: jobB, quotedAmountMinor: null }, { id: jobA, quotedAmountMinor: "125000" }]);
+    // Filtering on a financial column only reads rows whose grant reveals it.
+    const byCurrency = await query(cookie, { datasetKey: "jobs", columns: ["id"], filters: { currency: ["USD"], dateFrom: "2026-03-01T00:00:00Z" } });
+    expect(ids(byCurrency)).toEqual([jobA]);
   });
 
   it("pages with a cursor, narrows to one org unit subtree and validates the definition", async () => {
