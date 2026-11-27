@@ -22,7 +22,16 @@ export const MATERIAL_SPECS: MaterialSpec[] = [
 
 export interface ApprovalPolicySpec {
   code: string;
-  subjectType: "MATERIAL_COST_CHANGE" | "ADJUSTMENT" | "REFUND" | "CHARGEBACK_WRITE_OFF" | "HIGH_VALUE_DISCOUNT" | "PERFORMANCE_METRIC_DEFINITION";
+  subjectType:
+    | "MATERIAL_COST_CHANGE"
+    | "ADJUSTMENT"
+    | "REFUND"
+    | "CHARGEBACK_WRITE_OFF"
+    | "HIGH_VALUE_DISCOUNT"
+    | "PERFORMANCE_METRIC_DEFINITION"
+    | "AUTOMATION_RULE_VERSION"
+    | "ACCOUNTING_MAPPING"
+    | "PAYROLL_EXPORT";
   name: string;
   minAmountMinor: bigint;
   maxAmountMinor: bigint | null;
