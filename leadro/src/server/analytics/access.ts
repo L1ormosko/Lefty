@@ -67,3 +67,19 @@ export async function resolveKpiAccess(tx: TenantTx, actor: Actor, kpi: KpiDefin
   }
   return { allowed: covers(scope), permission, scope };
 }
+
+/**
+ * Whether the viewer may open a dashboard of a family (Phase 6 Task 4): a grant of the family permission with a TENANT or
+ * ORG_UNIT scope, where a grant qualified by one of `sets` (the Dispatcher's `dispatch_kpis`) counts too. The returned scope is
+ * the family coverage (an `orgUnitId` filter must lie inside it); each KPI on the dashboard is still checked on its own.
+ */
+export async function resolveFamilyAccess(
+  tx: TenantTx,
+  actor: Actor,
+  permission: string,
+  sets: readonly string[],
+  now: Date,
+): Promise<{ allowed: boolean; scope: ResolvedScope }> {
+  const scope = await coverageOf(tx, actor, permission, "base", sets, now);
+  return { allowed: covers(scope), scope };
+}

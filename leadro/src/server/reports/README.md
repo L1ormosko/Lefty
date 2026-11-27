@@ -23,6 +23,9 @@ Invariants:
   Sharing needs `reports.manage` and a role that holds the dataset's view permission.
 - An export needs `reports.export` + the dataset's export permission (rows inside both scopes), counts first, refuses
   over the cap (REFUSED_TOO_LARGE, nothing produced), and logs every attempt (`ReportExport` + `report.export` audit in
-  one transaction; FAILED in a second one after a database error). Text cells are formula-escaped
+  one primary transaction; FAILED in its own one after a database error).
+- Separability (spec 2): permissions, saved views and the scoped query are decided on the PRIMARY (`withTenant`, so a
+  revoked grant applies at once); the rows of a query or export are then read through the analytics read client
+  (`withReportingTenant` from `@/server/analytics`: a replica when `REPORTING_DATABASE_URL` is set, read-only, RLS bound). Text cells are formula-escaped
   (`src/lib/report-csv.ts`); money is a decimal string per row currency (never summed); instants are tenant-zone ISO.
 - The export log is an audit read: `audit.view` (tenant-level) sees all, others their own.

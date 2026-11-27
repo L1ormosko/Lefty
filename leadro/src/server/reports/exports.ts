@@ -4,6 +4,7 @@ import { localIsoDate } from "@/lib/zoned-time";
 import { auditContextFields, recordAudit } from "@/server/audit";
 import { canInTx, enforceInTx, recordAuthzDenial } from "@/server/authz";
 import { AppError, ForbiddenError, InternalError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
+import { withReportingTenant } from "@/server/analytics";
 import { withTenant, type TenantTx } from "@/server/db";
 import { getDataset } from "./catalog";
 import type { ReportColumn } from "./dataset-types";
@@ -119,18 +120,27 @@ async function logAttempt(
 
 const isStatementTimeout = (error: unknown) => /57014|statement timeout|canceling statement/i.test(String((error as Error)?.message ?? error));
 
-type AttemptOutcome = { kind: "done"; result: ExportResult } | { kind: "refused"; rowCount: number; rowLimit: number; datasetKey: string };
+interface PreparedExport {
+  attempt: ExportAttempt;
+  dataset: ReturnType<typeof getDataset>;
+  prepared: Awaited<ReturnType<typeof prepareReport>>;
+}
+
+type ReadOutcome = { kind: "rows"; rows: Array<Record<string, unknown>>; zone: string } | { kind: "refused"; rowCount: number };
 
 /**
  * `POST /reports/exports`: exports a definition or a saved view as CSV, synchronously and capped.
+ *
+ * Three steps: (1) on the PRIMARY, the permissions and the scoped query (a revoked grant applies at once); (2) through the
+ * analytics read client (a replica when `REPORTING_DATABASE_URL` is set; tenant RLS applies), the count and the rows under the
+ * statement budget; (3) on the PRIMARY, the log row and its audit event in one transaction.
  * @throws ForbiddenError (no `reports.export` / dataset export permission / no visible column), ValidationError (bad
  *   definition, or over the cap: nothing exported), InternalError when the database fails (logged as FAILED).
  */
 export async function exportReport(actor: Actor, ctx: RequestContext, input: RunReportInput): Promise<ExportResult> {
-  let attempt: ExportAttempt | null = null;
-  let outcome: AttemptOutcome;
+  let setup: PreparedExport;
   try {
-    outcome = await withTenant(actor.tenantId, async (tx) => {
+    setup = await withTenant(actor.tenantId, async (tx) => {
       await enforceInTx(tx, actor, "reports.export");
       const { definition, viewId } = await resolveRunDefinition(tx, actor, input);
       const dataset = getDataset(definition.datasetKey);
@@ -138,48 +148,50 @@ export async function exportReport(actor: Actor, ctx: RequestContext, input: Run
         throw new ForbiddenError({ message: `Exporting this dataset needs ${dataset.exportPermission}.` });
       }
       const prepared = await prepareReport(tx, actor, definition, { sort: input.sort, alsoWithinPermission: dataset.exportPermission });
-      attempt = { definition, viewId, columns: prepared.columns.map((column) => column.key), rowLimit: dataset.maxExportRows };
-      await tx.$queryRaw`SELECT set_config('statement_timeout', ${String(EXPORT_STATEMENT_TIMEOUT_MS)}, true)`;
-
-      const rowCount = await dataset.count(tx, prepared.where);
-      if (rowCount > dataset.maxExportRows) {
-        await logAttempt(tx, actor, ctx, attempt, { status: "REFUSED_TOO_LARGE", rowCount });
-        return { kind: "refused", rowCount, rowLimit: dataset.maxExportRows, datasetKey: dataset.key } as const;
-      }
-      const rows = await dataset.findMany(tx, { where: prepared.where, select: prepared.select, orderBy: prepared.orderBy, take: dataset.maxExportRows });
-      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId }, select: { defaultTimeZone: true } });
-      const zone = tenant.defaultTimeZone;
-      const lines = rows.map((row) => {
-        const projected = prepared.project(row);
-        return prepared.columns.map((column) => csvCell(column, projected, zone));
-      });
-      const content = toCsvDocument(prepared.columns.map((column) => column.key), lines);
-      const logged = await logAttempt(tx, actor, ctx, attempt, { status: "COMPLETED", rowCount: rows.length });
-      const stamp = localIsoDate(logged.createdAt.getTime(), zone);
-      return {
-        kind: "done",
-        result: { export: toLogView(logged), fileName: `${dataset.key}-${stamp}.csv`, contentType: CSV_CONTENT_TYPE, content },
-      } as const;
+      const attempt = { definition, viewId, columns: prepared.columns.map((column) => column.key), rowLimit: dataset.maxExportRows };
+      return { attempt, dataset, prepared };
     });
   } catch (error) {
     if (error instanceof ForbiddenError) {
-      // Who tried to export what is audit-worthy even when refused (spec 13.5, 22.2); the transaction above rolled back.
+      // Who tried to export what is audit-worthy even when refused (spec 13.5, 22.2); nothing was written above.
       await recordAuthzDenial(actor, "reports.export", ctx, "EXPORT_REFUSED");
-      throw error;
     }
-    const failed: ExportAttempt | null = attempt;
-    if (error instanceof AppError || failed === null) throw error;
+    throw error;
+  }
+  const { attempt, dataset, prepared } = setup;
+
+  let result: ExportResult;
+  try {
+    const read: ReadOutcome = await withReportingTenant(actor.tenantId, async (tx) => {
+      await tx.$queryRaw`SELECT set_config('statement_timeout', ${String(EXPORT_STATEMENT_TIMEOUT_MS)}, true)`;
+      const rowCount = await dataset.count(tx, prepared.where);
+      if (rowCount > dataset.maxExportRows) return { kind: "refused", rowCount };
+      const rows = await dataset.findMany(tx, { where: prepared.where, select: prepared.select, orderBy: prepared.orderBy, take: dataset.maxExportRows });
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId }, select: { defaultTimeZone: true } });
+      return { kind: "rows", rows: rows as Array<Record<string, unknown>>, zone: tenant.defaultTimeZone };
+    });
+    if (read.kind === "refused") {
+      await withTenant(actor.tenantId, (tx) => logAttempt(tx, actor, ctx, attempt, { status: "REFUSED_TOO_LARGE", rowCount: read.rowCount }));
+      throw new ValidationError({
+        message: `This export has ${read.rowCount} rows; a direct export of ${dataset.key} is limited to ${dataset.maxExportRows} rows. Narrow the filters, the date range or the org unit. Nothing was exported.`,
+        field: "filters",
+      });
+    }
+    const lines = read.rows.map((row) => {
+      const projected = prepared.project(row);
+      return prepared.columns.map((column) => csvCell(column, projected, read.zone));
+    });
+    const content = toCsvDocument(prepared.columns.map((column) => column.key), lines);
+    const logged = await withTenant(actor.tenantId, (tx) => logAttempt(tx, actor, ctx, attempt, { status: "COMPLETED", rowCount: read.rows.length }));
+    const stamp = localIsoDate(logged.createdAt.getTime(), read.zone);
+    result = { export: toLogView(logged), fileName: `${dataset.key}-${stamp}.csv`, contentType: CSV_CONTENT_TYPE, content };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
     const failureCode = isStatementTimeout(error) ? "query_timeout" : "query_failed";
-    await withTenant(actor.tenantId, (tx) => logAttempt(tx, actor, ctx, failed, { status: "FAILED", rowCount: null, failureCode }));
+    await withTenant(actor.tenantId, (tx) => logAttempt(tx, actor, ctx, attempt, { status: "FAILED", rowCount: null, failureCode }));
     throw new InternalError({ message: "The export failed; it has been logged. Try a narrower export.", cause: error, retryable: true });
   }
-  if (outcome.kind === "refused") {
-    throw new ValidationError({
-      message: `This export has ${outcome.rowCount} rows; a direct export of ${outcome.datasetKey} is limited to ${outcome.rowLimit} rows. Narrow the filters, the date range or the org unit. Nothing was exported.`,
-      field: "filters",
-    });
-  }
-  return outcome.result;
+  return result;
 }
 
 /**

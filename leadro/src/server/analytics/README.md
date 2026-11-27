@@ -2,8 +2,9 @@
 
 The KPI engine of enterprise analytics (spec Part 13, 13.2, 13.4; spec 2 "heavy reporting can later be separated"). Every KPI is an
 entry of the ONE catalog `src/lib/kpi-catalog.ts` (definitions generated into `docs/KPI_DEFINITIONS.md`); pure aggregation lives in
-`src/lib/kpi-aggregation.ts`. Routes: `GET /api/v1/analytics/kpis`, `GET /api/v1/analytics/kpis/{key}` (`docs/API_REFERENCE.md`
-"Analytics KPIs"). Decisions: `docs/DECISIONS.md` "Phase 6 Task 2" and "Phase 6 Task 3".
+`src/lib/kpi-aggregation.ts`. Routes: `GET /api/v1/analytics/kpis`, `GET /api/v1/analytics/kpis/{key}`, `GET /api/v1/analytics/dashboards`,
+`GET /api/v1/analytics/dashboards/{id}` (`docs/API_REFERENCE.md` "Analytics KPIs", "Analytics dashboards"). Decisions:
+`docs/DECISIONS.md` "Phase 6 Task 2", "Phase 6 Task 3" and "Phase 6 Task 4".
 
 Public API (`index.ts`):
 - `computeKpi(actor, key, query, ctx?)`: values of one KPI grouped by period (`DAY | WEEK | MONTH | TOTAL`, tenant time zone) and org
@@ -11,6 +12,11 @@ Public API (`index.ts`):
   source record ids per row plus a drill-down descriptor. BLOCKED_ON_SPEC KPIs return that status and no rows.
 - `listVisibleKpis(actor)`: the catalog entries the viewer qualifies for, with `computed`.
 - `resolveKpiAccess(tx, actor, kpi, now)`: the viewer's org-unit coverage for one KPI (for Task 4 dashboards).
+- `listDashboards(actor)` / `getDashboard(actor, id, query, ctx?)` (`dashboards.ts`): the dashboards of `src/lib/dashboards.ts`
+  (pure data: family permission + sections of KPI keys with default grouping / period). The family permission opens a dashboard
+  (`resolveFamilyAccess`); every KPI is then resolved with `resolveKpiAccess` in one primary transaction and computed with
+  `computeKpi` (memoised per request, no cache across requests); KPIs the viewer lacks come back `hidden` with no value,
+  BLOCKED_ON_SPEC ones with their status only.
 - `withReportingTenant(tenantId, fn)`: the read-only, tenant-bound read client.
 - `isKpiComputed(key)`, `kpiQuerySchema`, `kpiKeyParams`, `MAX_SOURCE_ROWS`.
 

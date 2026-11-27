@@ -1,3 +1,4 @@
+import { withReportingTenant } from "@/server/analytics";
 import { canInTx, enforceInTx, resolveScope } from "@/server/authz";
 import { pageArgs, toPage, type Actor } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
@@ -102,25 +103,29 @@ export interface ReportPage {
  * only; nothing is audited (exports are). Rows missing from the caller's scope are simply not there.
  */
 export async function runReportQuery(actor: Actor, input: RunReportInput): Promise<ReportPage> {
-  return withTenant(actor.tenantId, async (tx) => {
+  // Access, the view and the scoped query are decided on the PRIMARY (a revoked grant applies at once); the rows are then
+  // read through the analytics read client (a replica when REPORTING_DATABASE_URL is set; same tenant binding, so RLS applies).
+  const { definition, viewId, prepared } = await withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, "reports.view");
-    const { definition, viewId } = await resolveRunDefinition(tx, actor, input);
-    const prepared = await prepareReport(tx, actor, definition, { sort: input.sort });
-    const rows = (await prepared.dataset.findMany(tx, {
+    const run = await resolveRunDefinition(tx, actor, input);
+    return { ...run, prepared: await prepareReport(tx, actor, run.definition, { sort: input.sort }) };
+  });
+  const rows = (await withReportingTenant(actor.tenantId, (tx) =>
+    prepared.dataset.findMany(tx, {
       where: prepared.where,
       select: prepared.select,
       orderBy: prepared.orderBy,
       ...pageArgs({ cursor: input.cursor, limit: input.limit }),
-    })) as Array<Record<string, unknown> & { id: string }>;
-    const page = toPage(rows, input.limit);
-    const data = page.data.map((row) => {
-      const projected: ProjectedRow = prepared.project(row);
-      return Object.fromEntries(prepared.columns.map((column) => [column.key, jsonCell(column, projected.values[column.key])]));
-    });
-    return {
-      data,
-      page: page.page,
-      meta: { datasetKey: definition.datasetKey, viewId, columns: prepared.columns.map((column) => column.key), hiddenColumns: prepared.hiddenColumns, sort: prepared.sort },
-    };
+    }),
+  )) as Array<Record<string, unknown> & { id: string }>;
+  const page = toPage(rows, input.limit);
+  const data = page.data.map((row) => {
+    const projected: ProjectedRow = prepared.project(row);
+    return Object.fromEntries(prepared.columns.map((column) => [column.key, jsonCell(column, projected.values[column.key])]));
   });
+  return {
+    data,
+    page: page.page,
+    meta: { datasetKey: definition.datasetKey, viewId, columns: prepared.columns.map((column) => column.key), hiddenColumns: prepared.hiddenColumns, sort: prepared.sort },
+  };
 }

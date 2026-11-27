@@ -3634,6 +3634,35 @@ Data is read through the reporting read client (a replica when `REPORTING_DATABA
   `recordIdsTruncated`. `drillDown { recordType, anchor, from, to, orgUnitId }` says which records the ids are and how to list them with
   the owning module's API (under the caller's own permissions). `estimate: true` marks an estimate (recovery estimated value, spec 9.7).
   A `BLOCKED_ON_SPEC` KPI returns `rows: []`, `drillDown: null` and `blockedReason`, never a value (spec 28.4).
+
+## Analytics dashboards (`/api/v1/analytics/dashboards/**`) - Phase 6
+
+Code: `src/server/analytics/dashboards.ts`; definitions (pure data) `src/lib/dashboards.ts`; decisions: DECISIONS.md "Phase 6 Task 4".
+Dashboards: `executive` (`analytics_executive.view`), `state_regional`, `city_branch`, `operational` (`analytics_operational.view`; the
+`operational` dashboard also opens to the Dispatcher's `{ set: "dispatch_kpis" }` grant), `finance` (`analytics_financial.view`),
+`lead` (`analytics_lead.view`). **Two layers**: the family permission (TENANT or ORG_UNIT scope) opens the dashboard; every KPI on it is
+checked against its OWN catalog access (as `/analytics/kpis/{key}`), and a KPI the caller may not see is returned `hidden`, never an error.
+No dashboard lists individuals (no per-employee ranking); comparisons group the caller's in-scope records only.
+
+### GET /api/v1/analytics/dashboards
+
+- **Auth**: a session; no single permission. **Response**: `200 { data: [dashboard] }`, the dashboards whose family the caller holds
+  (`[]` for a role without analytics): `id, labelKey (DASHBOARD.<ID>), family, permission, familySets, defaultRangeDays, sections: [{ key,
+  labelKey (DASHBOARD.SECTION.<KEY>), groupBy (TENANT | STATE | REGION | CITY | BRANCH), period (DAY | WEEK | MONTH | TOTAL), kpiKeys }]`.
+
+### GET /api/v1/analytics/dashboards/{id}
+
+- **Permission**: the dashboard's family permission; `403` otherwise (audited `authz.denied`). `404` for an unknown id.
+- **Query** (strict): `from`, `to` (`YYYY-MM-DD`, tenant-local, both or neither, at most 366 days; neither = the last `defaultRangeDays`
+  days, today included), `period?` (overrides every section's default), `orgUnitId?` (every KPI narrowed to that unit and its
+  descendants; it must lie inside the caller's family scope, otherwise the same `400` as an unknown unit).
+- **Response**: `200 { data: { id, labelKey, family, timeZone, from, to, orgUnitId, sections: [{ key, labelKey, groupBy, period, kpis }] } }`.
+  Every KPI carries `key, labelKey, definitionRef` (`docs/KPI_DEFINITIONS.md#<key>`), `unit`, `hidden`. A hidden KPI has nothing else.
+  A visible one adds `status, estimate, period { semantics, anchor, granularity, from, to }` (granularity / dates null for SNAPSHOT),
+  `groupBy`, `scope { tenantWide, orgUnitIds }` (the caller's coverage for that KPI), and then: BLOCKED_ON_SPEC -> `blockedReason` only (no
+  value, spec 28.4); ACTIVE -> `sampleCount` (records behind all rows), `rows` and `drillDown` exactly as `/analytics/kpis/{key}`, or, when
+  that one KPI would read more than 50,000 records, `error { code: "VALIDATION_FAILED", message }` while the rest of the dashboard renders.
+  Computations are memoised per request only (no cache across requests).
 ## Reports (`/api/v1/reports/**`) - Phase 6
 
 Code: `src/server/reports` (README there); decisions: DECISIONS.md "Phase 6 Task 5". **Permissions**: `reports.view` (run, list

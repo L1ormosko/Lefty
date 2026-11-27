@@ -29,3 +29,21 @@ export const kpiQuerySchema = z
 export type KpiQuery = z.infer<typeof kpiQuerySchema>;
 
 export const kpiKeyParams = z.object({ key: z.string().trim().min(1).max(80) }).strict();
+
+/**
+ * Query of `GET /api/v1/analytics/dashboards/{id}`: `from` / `to` (tenant-local dates, both or neither; neither = the
+ * dashboard's default range), `period` (overrides every section's default granularity), `orgUnitId` (narrows every KPI to that
+ * unit and its descendants; it must lie inside the viewer's family scope).
+ */
+export const dashboardQuerySchema = z
+  .object({
+    from: isoDate.optional(),
+    to: isoDate.optional(),
+    period: z.enum(KPI_GRANULARITIES).optional(),
+    orgUnitId: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+
+export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;
+
+export const dashboardIdParams = z.object({ id: z.string().trim().min(1).max(40) }).strict();
