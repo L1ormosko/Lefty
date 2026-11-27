@@ -220,6 +220,19 @@ describe("report exports", () => {
     expect(event.newValue).toMatchObject({ datasetKey: "jobs", rowCount: 2, status: "COMPLETED", columns: ["id", "title", "quotedAmountMinor", "currency", "createdAt"] });
   });
 
+  it("reads query and export rows through the reporting read client when REPORTING_DATABASE_URL is set", async () => {
+    process.env.REPORTING_DATABASE_URL = process.env.DATABASE_URL;
+    try {
+      const definition = { datasetKey: "jobs", columns: ["id", "title"], scopeOrgUnitId: w.units.state, filters: { dateFrom: "2026-03-01T00:00:00Z" } };
+      expect(ids(await query(cityA, definition))).toEqual([jobA]);
+      const exported = await exportCsv(ceo, definition);
+      expect(exported.status).toBe(201);
+      expect(exported.json.data.export).toMatchObject({ status: "COMPLETED", rowCount: 2 });
+    } finally {
+      delete process.env.REPORTING_DATABASE_URL;
+    }
+  });
+
   it("needs reports.export AND the dataset's export permission; refusals are audited", async () => {
     expect((await exportCsv(cityA, { datasetKey: "jobs", columns: ["id"] })).status).toBe(403);
     const before = (await auditEvents(w.tenantId, "authz.denied")).length;
