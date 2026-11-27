@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CATALOGS, SUPPORTED_LOCALES } from "@/lib/i18n";
 import { DISPATCH_KPI_SET, KPI_CATALOG, findKpi } from "@/lib/kpi-catalog";
+import { isKpiComputed } from "@/server/analytics";
 import { PERMISSION_CATALOG, ROLE_TEMPLATES, permissionKey } from "@/server/authz";
 
 /** The one KPI catalog (spec 13.4) and its contracts with the permission catalog (Phase 6 Task 1). */
@@ -87,6 +88,10 @@ describe("KPI catalog", () => {
     const dispatch = KPI_CATALOG.filter((entry) => entry.access.sets.includes(DISPATCH_KPI_SET)).map((entry) => entry.key).sort();
     expect(dispatch).toEqual(["dispatch_decision_latency", "dispatch_recommendation_acceptance_rate", "time_to_arrival", "time_to_assignment", "unassigned_jobs"]);
     for (const key of dispatch) expect(findKpi(key)?.access.permissions).toEqual(["analytics_operational.view"]);
+  });
+
+  it("computes every ACTIVE KPI and no BLOCKED_ON_SPEC one", () => {
+    for (const entry of KPI_CATALOG) expect(isKpiComputed(entry.key), entry.key).toBe(entry.status === "ACTIVE");
   });
 
   it("gates financial KPIs by financial_reports.view plus the source module's sensitive set (Phase 6 Task 3)", () => {

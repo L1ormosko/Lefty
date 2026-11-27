@@ -194,9 +194,8 @@ describe("access", () => {
     await expect(run(w.finance.actor, "completed_jobs")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("404s an unknown key and a defined but not yet computed one", async () => {
+  it("404s an unknown key", async () => {
     await expect(run(w.ceo.actor, "no_such_kpi")).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(run(w.ceo.actor, "charged_revenue")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
