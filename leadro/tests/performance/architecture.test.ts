@@ -38,6 +38,26 @@ describe("spec 10.3: performance data never feeds work", () => {
     }
   });
 
+  // Review P5-R7: an import ban alone would not stop a deciding module from reading the tables directly (`tx.performanceMetricValue`).
+  // None of them names a Phase 5 performance / development delegate or table. The one allowed exception is the legal TRAINING
+  // certification path in qualifications (`training-grants.ts` reads training records; spec 10.3 puts it in the Qualification Engine).
+  const PHASE5_DELEGATES = [
+    "performanceMetricDefinition", "performanceMetricValue", "metricContextNote", "coachingRecord", "developmentPlan", "developmentGoal",
+    "developmentAction", "developmentPlanReview", "trainingRecommendation", "dataChallenge", "customerFeedback", "developmentThresholds",
+  ];
+  const tableName = (delegate: string) => delegate.charAt(0).toUpperCase() + delegate.slice(1);
+  it.each(DECIDING_MODULES)("src/server/%s never reads performance or development tables directly", (moduleName) => {
+    for (const file of sourceFiles(path.join(SERVER, moduleName))) {
+      const source = readFileSync(file, "utf8");
+      for (const delegate of PHASE5_DELEGATES) {
+        expect(new RegExp(`\\b(${delegate}|${tableName(delegate)})\\b`).test(source), `${path.relative(SERVER, file)} names ${delegate}`).toBe(false);
+      }
+      if (!file.endsWith("training-grants.ts")) {
+        expect(/\btx\.training(Record|Assignment|Course)\b/.test(source), `${path.relative(SERVER, file)} reads training tables`).toBe(false);
+      }
+    }
+  });
+
   it("the performance module imports only platform modules (it writes nothing of dispatch, jobs, employees or finance)", () => {
     for (const file of sourceFiles(path.join(SERVER, "performance"))) {
       for (const specifier of importsOf(file).filter((value) => value.startsWith("@/server/"))) {

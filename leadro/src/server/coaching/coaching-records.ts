@@ -13,7 +13,7 @@ import {
   type RequestContext,
 } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
-import { assertMetricValueOfEmployee, assertNotAboutSelf, lockRow, textDigest, viaEmployee } from "./access";
+import { assertMetricValueOfEmployee, assertNotAboutSelf, isAboutCaller, lockRow, notAboutCaller, textDigest, viaEmployee } from "./access";
 import type { CreateCoachingRecordInput, ListCoachingRecordsQuery, UpdateCoachingRecordInput } from "./schemas";
 
 /**
@@ -64,7 +64,8 @@ async function loadForAction(tx: TenantTx, actor: Actor, recordId: string, permi
   await enforceInTx(tx, actor, permission);
   await lockRow(tx, "CoachingRecord", recordId, actor.tenantId);
   const record = await tx.coachingRecord.findFirst({ where: { id: recordId, tenantId: actor.tenantId } });
-  if (!record) throw new NotFoundError();
+  // A note about the caller does not exist for them here (review P5-R1/R2): not readable, so not changeable either.
+  if (!record || isAboutCaller(actor, record.employeeId)) throw new NotFoundError();
   await enforceInTx(tx, actor, VIEW, { employeeId: record.employeeId });
   await enforceInTx(tx, actor, permission, { employeeId: record.employeeId });
   return record;
@@ -171,7 +172,8 @@ export async function getCoachingRecord(actor: Actor, recordId: string): Promise
   return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, VIEW);
     const record = await tx.coachingRecord.findFirst({ where: { id: recordId, tenantId: actor.tenantId } });
-    if (!record) throw new NotFoundError();
+    // Notes about the caller are read through self-service only (shared ones), never through a management grant (P5-R1).
+    if (!record || isAboutCaller(actor, record.employeeId)) throw new NotFoundError();
     await enforceInTx(tx, actor, VIEW, { employeeId: record.employeeId });
     return toCoachingRecordView(record);
   });
@@ -190,6 +192,8 @@ export async function listCoachingRecords(actor: Actor, query: ListCoachingRecor
       ...(query.metricValueId ? { metricValueId: query.metricValueId } : {}),
       ...(query.shared !== undefined ? { sharedWithEmployee: query.shared } : {}),
       ...(query.includeArchived ? {} : { archivedAt: null }),
+      // Never the caller's own notes (P5-R1): they read the shared ones through `/api/v1/me/coaching-notes`.
+      AND: [notAboutCaller(actor)],
     };
     const rows = await tx.coachingRecord.findMany({
       where: withinScope(buildScopeWhere(scope, coachingScopeColumns, now), callerWhere),

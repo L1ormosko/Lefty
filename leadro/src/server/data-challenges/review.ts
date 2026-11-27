@@ -80,6 +80,11 @@ async function assertEligibleReviewer(tx: TenantTx, challenge: DataChallenge, re
   if (reviewerUserId === challenge.raisedById) throw refuse();
   const reviewer = await tx.user.findFirst({ where: { id: reviewerUserId, tenantId: challenge.tenantId, status: "ACTIVE" }, select: { employee: { select: { id: true } } } });
   if (!reviewer || reviewer.employee?.id === challenge.employeeId) throw refuse();
+  // Review P5-R6: the author of a challenged coaching note does not judge whether their own note was inaccurate.
+  if (challenge.coachingRecordId) {
+    const note = await tx.coachingRecord.findFirst({ where: { id: challenge.coachingRecordId, tenantId: challenge.tenantId }, select: { authorId: true } });
+    if (note?.authorId === reviewerUserId) throw refuse();
+  }
   for (const permission of DECIDE_PERMISSIONS) {
     const decision = await canInTx(tx, { tenantId: challenge.tenantId, userId: reviewerUserId }, permission, { employeeId: challenge.employeeId });
     if (!decision.allowed) throw refuse();

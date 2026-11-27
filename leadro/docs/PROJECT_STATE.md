@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: end of the Phase 4 backend (Milestone 4). Reports: `MILESTONE-1.md`, `MILESTONE-2-3.md`, `MILESTONE-4.md`.
+Last updated: end of the Phase 5 backend (Milestone 5). Reports: `MILESTONE-1.md`, `MILESTONE-2-3.md`, `MILESTONE-4.md`, `MILESTONE-5.md`.
 
 ## Done
 
@@ -29,6 +29,14 @@ Last updated: end of the Phase 4 backend (Milestone 4). Reports: `MILESTONE-1.md
   222 route files; Int money columns are BigInt. Whole-phase review in `reviews/phase4-review.md` (no Critical; Important fixed).
 - **Compensation / commission formulas are BLOCKED** pending an approved compensation specification (spec 28.4).
 - **Deferred**: payment provider (none configured), scheduler / worker, finance / materials / approvals UI, exports.
+
+## Phase 5 backend: workforce intelligence (done, no UI)
+
+- 7 more server modules (training, performance, coaching, data-challenges, development, development-dashboard, customer-feedback)
+  plus self-service read models (`/api/v1/me/**`), 94 models, 13 migrations, 291 route files. Whole-phase review in
+  `reviews/phase5-review.md` (no Critical; Important fixed). Performance data is development use only (spec 10.3, architecture tests).
+- **Deferred**: survey provider, scheduler / worker (recomputation, sweeps, recommendation runs), every Phase 5 screen. Owner
+  decisions in `MILESTONE-5.md` section 9.
 
 ## Not done / next
 

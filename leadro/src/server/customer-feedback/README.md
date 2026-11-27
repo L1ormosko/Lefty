@@ -18,3 +18,4 @@ Invariants:
 4. Feedback is a performance input only through a published `CUSTOMER_FEEDBACK_AVERAGE` definition (non-voided, rated
    entries about the employee). This module imports nothing from performance and nothing in dispatch, eligibility or
    compensation imports it (spec 10.3).
+5. Nobody records or voids feedback that names themselves (403, review P5-R5): it would edit their own metric.

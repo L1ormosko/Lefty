@@ -177,7 +177,11 @@ export async function computeMetricValues(actor: Actor, ctx: RequestContext, def
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
       employeeCount: employeeIds.length,
-      values: written.map(({ evidenceIds, ...value }) => ({ ...value, evidenceCount: evidenceIds.length })),
+      // Review P5-R4: a version that was never published is a preview, and nobody sees their own preview values (the read
+      // endpoints' rule); the caller's row is stored, counted and audited, just not shown to them.
+      values: written
+        .filter((value) => definition.publishedAt !== null || value.employeeId !== actor.employeeId)
+        .map(({ evidenceIds, ...value }) => ({ ...value, evidenceCount: evidenceIds.length })),
     };
   });
 }

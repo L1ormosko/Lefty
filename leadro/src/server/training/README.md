@@ -30,3 +30,5 @@ Invariants:
   remaining verified records (none: revoked).
 - Nothing here reads or writes performance data, and dispatch never reads this module (§10.3); eligibility only sees the
   resulting qualification.
+- Nobody changes, starts or cancels their own assignment (403, review P5-R2); verifying, rejecting or revoking one's own
+  record is refused too (`assertNotOwnRecord`).

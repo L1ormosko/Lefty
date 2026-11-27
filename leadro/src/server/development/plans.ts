@@ -5,7 +5,18 @@ import { buildScopeWhere, enforceInTx, resolveScope, withinScope } from "@/serve
 import { InvalidStateTransitionError, NotFoundError, ValidationError, pageArgs, toPage, type Actor, type Page, type RequestContext } from "@/server/core";
 import { withTenant, type TenantTx } from "@/server/db";
 import { deliverAfterCommit } from "@/server/notifications";
-import { assertEligibleOwner, assertNotAboutSelf, dateColumn, enforceOverEmployee, isoDateOf, lockRow, planScopeColumns, textDigest } from "./access";
+import {
+  assertEligibleOwner,
+  assertNotAboutSelf,
+  dateColumn,
+  enforceOverEmployee,
+  isAboutCaller,
+  isoDateOf,
+  lockRow,
+  notAboutCaller,
+  planScopeColumns,
+  textDigest,
+} from "./access";
 import { notifyPlanActivated } from "./notify";
 import type { CancelPlanInput, CreatePlanInput, ListPlansQuery, UpdatePlanInput } from "./schemas";
 import { toPlanSummaryView, toPlanView, type PlanSummaryView, type PlanView } from "./views";
@@ -60,6 +71,9 @@ export async function loadPlanForChange(tx: TenantTx, actor: Actor, planId: stri
   const plan = await tx.developmentPlan.findFirstOrThrow({ where: { id: planId, tenantId: actor.tenantId } });
   await enforceOverEmployee(tx, actor, VIEW, plan.employeeId);
   await enforceOverEmployee(tx, actor, EDIT, plan.employeeId);
+  // P5-R2: nobody changes, reviews or moves a plan about themselves (creating one is already refused). A 404 like the
+  // read (P5-R1): a DRAFT plan about the caller is not even confirmed to exist.
+  if (isAboutCaller(actor, plan.employeeId)) throw new NotFoundError();
   return plan;
 }
 
@@ -188,7 +202,8 @@ export async function getPlan(actor: Actor, planId: string): Promise<PlanView> {
   return withTenant(actor.tenantId, async (tx) => {
     await enforceInTx(tx, actor, VIEW);
     const plan = await tx.developmentPlan.findFirst({ where: { id: planId, tenantId: actor.tenantId }, select: { employeeId: true } });
-    if (!plan) throw new NotFoundError();
+    // The caller's own plans are read through self-service (without the review notes), never here (P5-R1).
+    if (!plan || isAboutCaller(actor, plan.employeeId)) throw new NotFoundError();
     await enforceOverEmployee(tx, actor, VIEW, plan.employeeId);
     return loadPlanView(tx, actor.tenantId, planId);
   });
@@ -205,6 +220,8 @@ export async function listPlans(actor: Actor, query: ListPlansQuery): Promise<Pa
       ...(query.employeeId ? { employeeId: query.employeeId } : {}),
       ...(query.ownerId ? { ownerId: query.ownerId } : {}),
       ...(query.status ? { status: query.status } : {}),
+      // Never plans about the caller (P5-R1): `/api/v1/me/development-plans` shows them without the manager's notes.
+      AND: [notAboutCaller(actor)],
     };
     const rows = await tx.developmentPlan.findMany({
       where: withinScope(buildScopeWhere(scope, planScopeColumns, now), callerWhere),

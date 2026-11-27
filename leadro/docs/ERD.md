@@ -760,7 +760,10 @@ erDiagram
 
 # Phase 5: workforce intelligence
 
-Migration `20261126100000_phase5_workforce` (schema only; services arrive in Phase 5 Tasks 2-6, none of which add a migration).
+Migration `20261126100000_phase5_workforce` (schema only; services arrive in Phase 5 Tasks 2-6). One later migration,
+`20261126150000_phase5_development_thresholds` (Task 5), adds the nullable `OperationsSettings.developmentThresholds JSONB` column (+ CHECK:
+array or NULL) for the training-recommendation metric rule; no new table. The Phase 5 review (`docs/reviews/phase5-review.md`) added no
+migration: editors of a metric definition version are read from the audit trail, the "not about the caller" rules are service rules.
 14 new tenant-owned tables (92 in total) with `tenantId`, `(id, tenantId)` unique keys, composite `(ref, tenantId)` FKs and FORCE RLS
 (the DO-block runs again over the whole schema). Existing tables gain only back-relations, one unique key
 (`EmployeeQualification (id, employeeId, tenantId)`), the enum value `PermissionAction.PUBLISH` and the approval subject
